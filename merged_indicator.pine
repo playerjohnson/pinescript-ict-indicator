@@ -190,6 +190,12 @@ type OrderBlock
 var array<OrderBlock> ob_bulls = array.new<OrderBlock>()
 var array<OrderBlock> ob_bears = array.new<OrderBlock>()
 
+// OB alert flags (reset each bar)
+bool ob_bullFormed   = false
+bool ob_bearFormed   = false
+bool ob_bullMit      = false
+bool ob_bearMit      = false
+
 ob_border = switch ob_borderStyle
     "Solid"  => line.style_solid
     "Dashed" => line.style_dashed
@@ -218,6 +224,7 @@ if ob_newHour and ENABLE_ORDER_BLOCKS
                               text_size    = size.tiny,
                               text_color   = color.new(ob_bullColor, 30))
             ob_bulls.push(OrderBlock.new(_ob, ob_A_c, false, 0))
+            ob_bullFormed := true
             while ob_bulls.size() > ob_maxBoxes
                 OrderBlock _del = ob_bulls.shift()
                 box.delete(_del.bx)
@@ -238,6 +245,7 @@ if ob_newHour and ENABLE_ORDER_BLOCKS
                               text_size    = size.tiny,
                               text_color   = color.new(ob_bearColor, 30))
             ob_bears.push(OrderBlock.new(_ob, ob_A_c, false, 0))
+            ob_bearFormed := true
             while ob_bears.size() > ob_maxBoxes
                 OrderBlock _del = ob_bears.shift()
                 box.delete(_del.bx)
@@ -271,6 +279,7 @@ if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
             if ob_newHour and close[1] < _ob.ob_close
                 _ob.mitigated := true
                 _ob.mit_bar   := bar_index
+                ob_bullMit    := true
                 if ob_invert
                     box.set_bgcolor(_ob.bx, ob_invBullColor)
                     box.set_border_color(_ob.bx, color.new(ob_invBullColor, 60))
@@ -280,7 +289,6 @@ if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
                     box.set_bgcolor(_ob.bx, ob_mitColor)
                     box.set_border_color(_ob.bx, ob_mitColor)
                     box.set_text_color(_ob.bx, color.new(color.gray, 70))
-                    // Grey out eq lines on mitigation (non-inversion)
             else if ob_extend
                 box.set_right(_ob.bx, bar_index + 1)
         else
@@ -299,6 +307,7 @@ if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
             if ob_newHour and close[1] > _ob.ob_close
                 _ob.mitigated := true
                 _ob.mit_bar   := bar_index
+                ob_bearMit    := true
                 if ob_invert
                     box.set_bgcolor(_ob.bx, ob_invBearColor)
                     box.set_border_color(_ob.bx, color.new(ob_invBearColor, 60))
@@ -323,21 +332,12 @@ if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
 // ════════════════════════════════════════════════════════════════
 
 // ── Volume Imbalance Inputs ──
-bool classicvi = false
-bool advancedvi = false
 vitype = input.string('Classic', 'Type              ', options = ['None', 'Classic', 'Advanced'], group = '④ Volume Imbalance', inline = 'vi0', tooltip = 'Classic = single body gap type. Advanced = all body gap variants.')
 bullimbalance = input.color(color.new(#00e640, 90), '', group = '④ Volume Imbalance', inline = 'vi0')
 bearimbalance = input.color(color.new(#e30000, 90), '', group = '④ Volume Imbalance', inline = 'vi0')
 
-if vitype == 'Classic'
-    classicvi := true
-    advancedvi := false
-else if vitype == 'Advanced'
-    classicvi := false
-    advancedvi := true
-else
-    classicvi := false
-    advancedvi := false
+bool classicvi  = vitype == 'Classic'
+bool advancedvi = vitype == 'Advanced'
 
 viMaxBoxSet = input.int(defval = 8, title = 'Max Boxes         ', minval = 1, maxval = 100, group = '④ Volume Imbalance', inline = 'vi1')
 vimitigationtype = input.string(defval = 'Engulf', title = '', options = ['Engulf', 'Mitigate'], group = '④ Volume Imbalance', inline = 'vi1', tooltip = 'Engulf = body close through VI required.')
@@ -348,21 +348,8 @@ extendallvis = input.bool(false, title = 'Extend All', group = '④ Volume Imbal
 gaptype = input.string('True GAP', 'Type              ', options = ['None', 'True GAP', 'GAP + Inefficiency'], group = '⑤ GAP', inline = 'gp0', tooltip = 'True GAPs = no buyside/sellside delivery. GAP + Inefficiency = includes one-sided price action gaps.')
 gapcolor = input.color(color.new(#4ec1f7, 90), '', group = '⑤ GAP', inline = 'gp0')
 
-bool truegap = false
-bool gapwithimb = false
-
-if gaptype == 'True GAP'
-    truegap := true
-    gapwithimb := false
-    gapwithimb
-else if gaptype == 'GAP + Inefficiency'
-    truegap := false
-    gapwithimb := true
-    gapwithimb
-else if gaptype == 'None'
-    truegap := false
-    gapwithimb := false
-    gapwithimb
+bool truegap    = gaptype == 'True GAP'
+bool gapwithimb = gaptype == 'GAP + Inefficiency'
 
 gapsMaxBoxSet = input.int(defval = 7, title = 'Max Boxes         ', minval = 1, maxval = 100, group = '⑤ GAP', inline = 'gp1')
 gapmitigationtype = input.string(defval = 'Engulf', title = '', options = ['Engulf', 'Rebalance'], group = '⑤ GAP', inline = 'gp1', tooltip = 'Engulf = body close through GAP. Rebalance = delivered ranges erased.')
@@ -371,25 +358,12 @@ cegaplinetype = input.string(line.style_dashed, '', options = [line.style_dashed
 extendgapbox = input.bool(true, title = 'Extend Unmit.', group = '⑤ GAP', inline = 'gp2')
 
 // ── FVG Inputs ──
-bool plotFVG = false
-bool liquidityvoidmode = false
-
 fvgtype = input.string('Normal', 'FVG Type          ', options = ['None', 'Normal', 'Liquidity Void'], group = '⑥ FVG', inline = 'fv0', tooltip = 'Consecutively formed FVGs = Liquidity Void.')
 showifvg = input.bool(false, 'Implied', group = '⑥ FVG', inline = 'fv0')
 Inversefvgmode = input.bool(false, 'Inverse', group = '⑥ FVG', inline = 'fv0', tooltip = 'Mitigation must be ENGULF for Inverse FVG.')
 
-if fvgtype == 'Normal'
-    plotFVG := true
-    liquidityvoidmode := false
-    liquidityvoidmode
-else if fvgtype == 'Liquidity Void'
-    plotFVG := false
-    liquidityvoidmode := true
-    liquidityvoidmode
-else if fvgtype == 'None'
-    plotFVG := false
-    liquidityvoidmode := false
-    liquidityvoidmode
+bool plotFVG           = fvgtype == 'Normal'
+bool liquidityvoidmode = fvgtype == 'Liquidity Void'
 
 fvgBullColor = input.color(defval = color.new(color.green, 90), title = 'FVG Colors        ', inline = 'fv1', group = '⑥ FVG')
 fvgBearColor = input.color(defval = color.new(color.red, 90), title = '', inline = 'fv1', group = '⑥ FVG')
@@ -413,8 +387,8 @@ extendfvgbox = input.bool(true, title = 'Extend Unmit.', group = '⑥ FVG', inli
 BoxBorder = input.string(defval = line.style_solid, title = 'Border            ', options = [line.style_dashed, line.style_dotted, line.style_solid], group = '⑦ Box Style', inline = 'bx1', tooltip = 'Applies to FVG/VI/GAP boxes')
 BorderTransparency = input.int(defval = 85, title = 'Transp.', minval = 0, maxval = 100, group = '⑦ Box Style', inline = 'bx1')
 HighlightBox = input.bool(defval = true, title = 'Highlight         ', group = '⑦ Box Style', inline = 'bx2', tooltip = 'Highlight box when price is inside it')
-Highlightboxtransparancy = input.int(80, 'BG', group = '⑦ Box Style', inline = 'bx2')
-Highlightboxbordertransparancy = input.int(67, 'Border', group = '⑦ Box Style', inline = 'bx2')
+Highlightboxtransparency = input.int(80, 'BG', group = '⑦ Box Style', inline = 'bx2')
+Highlightboxbordertransparency = input.int(67, 'Border', group = '⑦ Box Style', inline = 'bx2')
 plotBoxLabel = input.bool(defval = true, title = 'Label             ', group = '⑦ Box Style', inline = 'bx3')
 BoxLabelSize = input.string(defval = size.tiny, title = '', options = [size.huge, size.large, size.small, size.tiny, size.auto, size.normal], group = '⑦ Box Style', inline = 'bx3')
 BoxLabelColor = input.color(defval = color.rgb(161, 163, 171), title = '', group = '⑦ Box Style', inline = 'bx3')
@@ -468,6 +442,14 @@ var color  sh_nyLColor     = input.color(color.new(#ff9800, 30), "", group = "�
 var string sh_nyStyle      = input.string("----", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3")
 var bool   sh_showLabels   = input.bool(true,  "Show Labels       ", group = "⑲ Session Highs/Lows", inline = "sh4")
 var int    sh_lineWidth    = input.int(1, "Width", 1, 4, group = "⑲ Session Highs/Lows", inline = "sh4")
+var int    sh_asiaStart    = input.int(20, "Asia Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh5", tooltip = "NY time (24h). Independent of Killzone times.")
+var int    sh_asiaEnd      = input.int(0,  "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh5")
+var int    sh_lonStart     = input.int(2,  "London Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh6")
+var int    sh_lonEnd       = input.int(5,  "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh6")
+var int    sh_nyStart      = input.int(9,  "NY Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh7")
+var int    sh_nyStartM     = input.int(30, ":", 0, 59, group = "⑲ Session Highs/Lows", inline = "sh7")
+var int    sh_nyEnd        = input.int(16, "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh7")
+var bool   sh_showCurrent  = input.bool(false, "Show Current Session H/L", group = "⑲ Session Highs/Lows", tooltip = "Display in-progress session highs/lows in addition to previous.")
 
 // ── Liquidity Levels Inputs ──
 var bool   lq_showPDH     = input.bool(true,  "PDH / PDL         ", group = "⑳ Liquidity Levels", inline = "lq1")
@@ -544,10 +526,10 @@ isBeVItype2(index) =>
     open[index] > close[index + 1] and close[index] < open[index] and close[index + 1] < open[index + 1] and low[index] <= high[index + 1]
 
 isBuVItype3(index) =>
-    (open[index] > close[index + 1] or open[index] < close[index + 1]) and close[index] > open[index] and close[index + 1] < open[index + 1] and high[index] >= low[index + 1] and low[index] <= high[index + 1]
+    open[index] != close[index + 1] and close[index] > open[index] and close[index + 1] < open[index + 1] and high[index] >= low[index + 1] and low[index] <= high[index + 1]
 
 isBeVItype3(index) =>
-    (open[index] < close[index + 1] or open[index] > close[index + 1]) and close[index] < open[index] and close[index + 1] > open[index + 1] and low[index] <= high[index + 1] and high[index] >= low[index + 1]
+    open[index] != close[index + 1] and close[index] < open[index] and close[index + 1] > open[index + 1] and low[index] <= high[index + 1] and high[index] >= low[index + 1]
 
 // Bullish Volume Imbalance
 if isBuVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
@@ -597,8 +579,9 @@ if isBeVItype3(0) and advancedvi and ENABLE_IMBALANCES
         box.delete(array.shift(_bearishvi))
     array.push(_bearishvi, _bearboxVI)
 
-_controlBox2(_bullishvi, high, low)
-_controlBox2(_bearishvi, high, low)
+if extendallvis
+    _controlBox2(_bullishvi, high, low)
+    _controlBox2(_bearishvi, high, low)
 
 // ── GAP Detection ──
 if (high[1] < low or low[1] > high) and truegap and ENABLE_IMBALANCES
@@ -660,8 +643,13 @@ if isFvgUp(0) and not liquidityvoidmode and ENABLE_IMBALANCES
     box _bullboxFVG = na
     line _buline = na
     if plotFVG or Inversefvgmode
-        _bullboxFVG := box.new(left = bar_index - 2, top = low[0], right = bar_index, bottom = high[2], bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_style = BoxBorder, border_width = 1, text = plotBoxLabel ? 'FVG+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-        _buline := cefvg ? line.new(bar_index - 2, math.avg(low, high[2]), bar_index, math.avg(low, high[2]), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
+        // In inverse-only mode, create hidden (transparent) — avoids per-bar hiding in unified loops
+        color _fvgBg   = (not plotFVG and Inversefvgmode) ? color.new(fvgBullColor, 100) : fvgBullColor
+        color _fvgBdr  = (not plotFVG and Inversefvgmode) ? color.new(fvgBullColor, 100) : color.new(fvgBullColor, BorderTransparency)
+        color _fvgTxt  = (not plotFVG and Inversefvgmode) ? color.new(BoxLabelColor, 100) : BoxLabelColor
+        color _fvgCe   = (not plotFVG and Inversefvgmode) ? color.new(fvgBullColor, 100) : color.new(fvgBullColor, cetransparency)
+        _bullboxFVG := box.new(left = bar_index - 2, top = low[0], right = bar_index, bottom = high[2], bgcolor = _fvgBg, border_color = _fvgBdr, border_style = BoxBorder, border_width = 1, text = plotBoxLabel ? 'FVG+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = _fvgTxt)
+        _buline := cefvg ? line.new(bar_index - 2, math.avg(low, high[2]), bar_index, math.avg(low, high[2]), style = celinetype, color = _fvgCe) : na
         _buline
     if array.size(_bullBoxesFVG) > fvgMaxBoxSet and array.size(_bufvgce) > fvgMaxBoxSet
         box.delete(array.shift(_bullBoxesFVG))
@@ -674,8 +662,13 @@ if isFvgDown(0) and not liquidityvoidmode and ENABLE_IMBALANCES
     box _bearboxFVG = na
     line _beline = na
     if plotFVG or Inversefvgmode
-        _bearboxFVG := box.new(left = bar_index - 2, top = low[2], right = bar_index, bottom = high[0], bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_style = BoxBorder, border_width = 1, text = plotBoxLabel ? 'FVG-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-        _beline := cefvg ? line.new(bar_index - 2, math.avg(low[2], high), bar_index, math.avg(low[2], high), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
+        // In inverse-only mode, create hidden (transparent) — avoids per-bar hiding in unified loops
+        color _fvgBeBg   = (not plotFVG and Inversefvgmode) ? color.new(fvgBearColor, 100) : fvgBearColor
+        color _fvgBeBdr  = (not plotFVG and Inversefvgmode) ? color.new(fvgBearColor, 100) : color.new(fvgBearColor, BorderTransparency)
+        color _fvgBeTxt  = (not plotFVG and Inversefvgmode) ? color.new(BoxLabelColor, 100) : BoxLabelColor
+        color _fvgBeCe   = (not plotFVG and Inversefvgmode) ? color.new(fvgBearColor, 100) : color.new(fvgBearColor, cetransparency)
+        _bearboxFVG := box.new(left = bar_index - 2, top = low[2], right = bar_index, bottom = high[0], bgcolor = _fvgBeBg, border_color = _fvgBeBdr, border_style = BoxBorder, border_width = 1, text = plotBoxLabel ? 'FVG-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = _fvgBeTxt)
+        _beline := cefvg ? line.new(bar_index - 2, math.avg(low[2], high), bar_index, math.avg(low[2], high), style = celinetype, color = _fvgBeCe) : na
         _beline
     if array.size(_bearBoxesFVG) > fvgMaxBoxSet and array.size(_befvgce) > fvgMaxBoxSet
         box.delete(array.shift(_bearBoxesFVG))
@@ -687,66 +680,63 @@ if isFvgDown(0) and not liquidityvoidmode and ENABLE_IMBALANCES
 bool bulv = false
 bool belv = false
 
-for i = 0 to 10 by 1
-    if isFvgUp(i) and isFvgUp(i + 1) and (liquidityvoidmode or Inversefvgmode) and array.size(_bullBoxesFVG) > 0 and not plotFVG
-        bulv := true
-        box _bullboxFVG = na
-        line _buline = na
-        x = array.size(_bullBoxesFVG) - 1
-        _box = array.get(_bullBoxesFVG, x)
-        tempboxlow = box.get_bottom(_box)
-        tempboxleft = box.get_left(_box)
-        box.delete(array.pop(_bullBoxesFVG))
-        line.delete(array.pop(_bufvgce))
-        _bullboxFVG := box.new(left = tempboxleft, top = low[0], right = bar_index, bottom = tempboxlow, bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-        _buline := cefvg ? line.new(tempboxleft, math.avg(low, tempboxlow), bar_index, math.avg(low, tempboxlow), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
-        if array.size(_bullBoxesFVG) > fvgMaxBoxSet and array.size(_bufvgce) > fvgMaxBoxSet
-            box.delete(array.shift(_bullBoxesFVG))
-            line.delete(array.shift(_bufvgce))
-        array.push(_bullBoxesFVG, _bullboxFVG)
-        array.push(_bufvgce, _buline)
-    if isFvgUp(i) and not isFvgUp(i + 1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
-        box _bullboxFVG = na
-        line _buline = na
-        _bullboxFVG := box.new(left = bar_index - 2, top = low[0], right = bar_index, bottom = high[2], bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-        _buline := cefvg ? line.new(bar_index - 2, math.avg(low, high[2]), bar_index, math.avg(low, high[2]), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
-        if array.size(_bullBoxesFVG) > fvgMaxBoxSet and array.size(_bufvgce) > fvgMaxBoxSet
-            box.delete(array.shift(_bullBoxesFVG))
-            line.delete(array.shift(_bufvgce))
-        array.push(_bullBoxesFVG, _bullboxFVG)
-        array.push(_bufvgce, _buline)
-    break
+// Bullish Liquidity Void  (i=0 only; original loop always broke after first iteration)
+if isFvgUp(0) and isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and array.size(_bullBoxesFVG) > 0 and not plotFVG
+    bulv := true
+    box _bullboxFVG = na
+    line _buline = na
+    x = array.size(_bullBoxesFVG) - 1
+    _box = array.get(_bullBoxesFVG, x)
+    tempboxlow = box.get_bottom(_box)
+    tempboxleft = box.get_left(_box)
+    box.delete(array.pop(_bullBoxesFVG))
+    line.delete(array.pop(_bufvgce))
+    _bullboxFVG := box.new(left = tempboxleft, top = low[0], right = bar_index, bottom = tempboxlow, bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+    _buline := cefvg ? line.new(tempboxleft, math.avg(low, tempboxlow), bar_index, math.avg(low, tempboxlow), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
+    if array.size(_bullBoxesFVG) > fvgMaxBoxSet and array.size(_bufvgce) > fvgMaxBoxSet
+        box.delete(array.shift(_bullBoxesFVG))
+        line.delete(array.shift(_bufvgce))
+    array.push(_bullBoxesFVG, _bullboxFVG)
+    array.push(_bufvgce, _buline)
+else if isFvgUp(0) and not isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
+    box _bullboxFVG = na
+    line _buline = na
+    _bullboxFVG := box.new(left = bar_index - 2, top = low[0], right = bar_index, bottom = high[2], bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+    _buline := cefvg ? line.new(bar_index - 2, math.avg(low, high[2]), bar_index, math.avg(low, high[2]), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
+    if array.size(_bullBoxesFVG) > fvgMaxBoxSet and array.size(_bufvgce) > fvgMaxBoxSet
+        box.delete(array.shift(_bullBoxesFVG))
+        line.delete(array.shift(_bufvgce))
+    array.push(_bullBoxesFVG, _bullboxFVG)
+    array.push(_bufvgce, _buline)
 
-// Bearish Liquidity Void
-for i = 0 to 10 by 1
-    if isFvgDown(i) and isFvgDown(i + 1) and (liquidityvoidmode or Inversefvgmode) and array.size(_bearBoxesFVG) > 0 and not plotFVG
-        belv := true
-        box _bearboxFVG = na
-        line _beline = na
-        x = array.size(_bearBoxesFVG) - 1
-        _box = array.get(_bearBoxesFVG, x)
-        tempboxhigh = box.get_top(_box)
-        tempboxleft = box.get_left(_box)
-        box.delete(array.pop(_bearBoxesFVG))
-        line.delete(array.pop(_befvgce))
-        _bearboxFVG := box.new(left = tempboxleft, top = tempboxhigh, right = bar_index, bottom = high[0], bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-        _beline := cefvg ? line.new(tempboxleft, math.avg(tempboxhigh, high), bar_index, math.avg(tempboxhigh, high), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
-        if array.size(_bearBoxesFVG) > fvgMaxBoxSet and array.size(_befvgce) > fvgMaxBoxSet
-            box.delete(array.shift(_bearBoxesFVG))
-            line.delete(array.shift(_befvgce))
-        array.push(_bearBoxesFVG, _bearboxFVG)
-        array.push(_befvgce, _beline)
-    if isFvgDown(i) and not isFvgDown(i + 1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
-        box _bearboxFVG = na
-        line _beline = na
-        _bearboxFVG := box.new(left = bar_index - 2, top = low[2], right = bar_index, bottom = high[0], bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-        _beline := cefvg ? line.new(bar_index - 2, math.avg(low[2], high), bar_index, math.avg(low[2], high), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
-        if array.size(_bearBoxesFVG) > fvgMaxBoxSet and array.size(_befvgce) > fvgMaxBoxSet
-            box.delete(array.shift(_bearBoxesFVG))
-            line.delete(array.shift(_befvgce))
-        array.push(_bearBoxesFVG, _bearboxFVG)
-        array.push(_befvgce, _beline)
-    break
+// Bearish Liquidity Void  (i=0 only; original loop always broke after first iteration)
+if isFvgDown(0) and isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and array.size(_bearBoxesFVG) > 0 and not plotFVG
+    belv := true
+    box _bearboxFVG = na
+    line _beline = na
+    x = array.size(_bearBoxesFVG) - 1
+    _box = array.get(_bearBoxesFVG, x)
+    tempboxhigh = box.get_top(_box)
+    tempboxleft = box.get_left(_box)
+    box.delete(array.pop(_bearBoxesFVG))
+    line.delete(array.pop(_befvgce))
+    _bearboxFVG := box.new(left = tempboxleft, top = tempboxhigh, right = bar_index, bottom = high[0], bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+    _beline := cefvg ? line.new(tempboxleft, math.avg(tempboxhigh, high), bar_index, math.avg(tempboxhigh, high), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
+    if array.size(_bearBoxesFVG) > fvgMaxBoxSet and array.size(_befvgce) > fvgMaxBoxSet
+        box.delete(array.shift(_bearBoxesFVG))
+        line.delete(array.shift(_befvgce))
+    array.push(_bearBoxesFVG, _bearboxFVG)
+    array.push(_befvgce, _beline)
+else if isFvgDown(0) and not isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
+    box _bearboxFVG = na
+    line _beline = na
+    _bearboxFVG := box.new(left = bar_index - 2, top = low[2], right = bar_index, bottom = high[0], bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+    _beline := cefvg ? line.new(bar_index - 2, math.avg(low[2], high), bar_index, math.avg(low[2], high), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
+    if array.size(_bearBoxesFVG) > fvgMaxBoxSet and array.size(_befvgce) > fvgMaxBoxSet
+        box.delete(array.shift(_bearBoxesFVG))
+        line.delete(array.shift(_befvgce))
+    array.push(_bearBoxesFVG, _bearboxFVG)
+    array.push(_befvgce, _beline)
 
 // ── Implied FVG Detection ──
 isBuIFvg(index) =>
@@ -775,6 +765,18 @@ if isBeIFvg(0) and showifvg and ENABLE_IMBALANCES
 //  and hide logic are combined in a single pass.
 // ══════════════════════════════════════════════════════════════
 
+// ── Shared styling helpers (reduces repeated 3-4 line blocks) ──
+_applyMitStyle(_bx, _ln, bool _hasLine) =>
+    box.set_bgcolor(_bx, mitBOXColor)
+    box.set_border_color(_bx, mitBOXColor)
+    box.set_text_color(_bx, MitBoxLabelColor)
+    if _hasLine
+        line.set_color(_ln, mitBOXColor)
+
+_applyHighlight(_bx, color _baseColor) =>
+    box.set_bgcolor(_bx, color.new(_baseColor, Highlightboxtransparency))
+    box.set_border_color(_bx, color.new(_baseColor, Highlightboxbordertransparency))
+
 // ── Implied FVG – Bullish ──
 if ENABLE_IMBALANCES and array.size(_bullishifvg) > 0 and extendfvgbox
     for i = array.size(_bullishifvg) - 1 to 0 by 1
@@ -788,22 +790,16 @@ if ENABLE_IMBALANCES and array.size(_bullishifvg) > 0 and extendfvgbox
                     if close >= _boxLow and open >= _boxLow
                         box.set_right(_box, bar_index + 1)
                     else if (close < _boxLow or open < _boxLow) and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
+                        _applyMitStyle(_box, line(na), false)
                 else if ifvgmitigationtype == 'Mitigate'
                     if low >= _boxHigh
                         box.set_right(_box, bar_index + 1)
                     else if low < _boxHigh and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
-            // Re-read after extend may have changed right edge
+                        _applyMitStyle(_box, line(na), false)
             _boxRight := box.get_right(_box)
             if bar_index == _boxRight and ifvgmitigationtype == 'Engulf' and HighlightBox
                 if close >= _boxLow and low < _boxHigh
-                    box.set_bgcolor(_box, color.new(ifvgBullColor, Highlightboxtransparancy))
-                    box.set_border_color(_box, color.new(ifvgBullColor, Highlightboxbordertransparancy))
+                    _applyHighlight(_box, ifvgBullColor)
                     buimpfvgtouch := true
                     buimpfvgtouch
 
@@ -820,21 +816,16 @@ if ENABLE_IMBALANCES and array.size(_bearishifvg) > 0 and extendfvgbox
                     if close <= _boxHigh and open <= _boxHigh
                         box.set_right(_box, bar_index + 1)
                     else if (close > _boxHigh or open > _boxHigh) and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
+                        _applyMitStyle(_box, line(na), false)
                 else if ifvgmitigationtype == 'Mitigate'
                     if high <= _boxLow
                         box.set_right(_box, bar_index + 1)
                     else if high > _boxLow and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
+                        _applyMitStyle(_box, line(na), false)
             _boxRight := box.get_right(_box)
             if bar_index == _boxRight and ifvgmitigationtype == 'Engulf' and HighlightBox
                 if close <= _boxHigh and high > _boxLow
-                    box.set_bgcolor(_box, color.new(ifvgBearColor, Highlightboxtransparancy))
-                    box.set_border_color(_box, color.new(ifvgBearColor, Highlightboxbordertransparancy))
+                    _applyHighlight(_box, ifvgBearColor)
                     beimpfvgtouch := true
                     beimpfvgtouch
 
@@ -846,12 +837,7 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
         _boxLow = box.get_bottom(_box)
         _boxHigh = box.get_top(_box)
         _boxRight = box.get_right(_box)
-        // Hide in inverse-only mode (every bar, every element)
-        if not plotFVG and not liquidityvoidmode and Inversefvgmode
-            box.set_bgcolor(_box, color.new(fvgBullColor, 100))
-            box.set_text_color(_box, color.new(BoxLabelColor, 100))
-            box.set_border_color(_box, color.new(fvgBullColor, 100))
-            line.set_color(_line, color.new(fvgBullColor, 100))
+        // NOTE: inverse-only hiding now applied at creation time (see FVG Detection above)
         if bar_index == _boxRight
             // Extend (confirmed bars only)
             if barstate.isconfirmed and extendfvgbox
@@ -869,19 +855,13 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
                         isbeinversefvg := true
                         isbeinversefvg
                     else if close < _boxLow and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
-                        line.set_color(_line, mitBOXColor)
+                        _applyMitStyle(_box, _line, true)
                 else if fvgmitigationtype == 'Mitigate'
                     if low >= _boxHigh
                         box.set_right(_box, bar_index + 1)
                         line.set_x2(_line, bar_index + 1)
                     else if low < _boxHigh and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
-                        line.set_color(_line, mitBOXColor)
+                        _applyMitStyle(_box, _line, true)
                 else if fvgmitigationtype == 'Rebalance'
                     if low >= _boxHigh
                         box.set_right(_box, bar_index + 1)
@@ -893,10 +873,7 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
                         line.set_y2(_line, (low + _boxLow) / 2)
                         line.set_x2(_line, bar_index + 1)
                     else if low <= _boxLow and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
-                        line.set_color(_line, mitBOXColor)
+                        _applyMitStyle(_box, _line, true)
             // Re-read bounds after extend may have modified box
             _boxLow  := box.get_bottom(_box)
             _boxHigh := box.get_top(_box)
@@ -904,18 +881,16 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
             if bar_index == _boxRight and extendfvgbox and HighlightBox
                 if fvgmitigationtype == 'Engulf'
                     if close >= _boxLow and low < _boxHigh
-                        box.set_bgcolor(_box, color.new(fvgBullColor, Highlightboxtransparancy))
-                        box.set_border_color(_box, color.new(fvgBullColor, Highlightboxbordertransparancy))
+                        _applyHighlight(_box, fvgBullColor)
                         bufvgtouch := true
                         bufvgtouch
                 else if fvgmitigationtype == 'Rebalance'
                     if low < _boxHigh and low > _boxLow
-                        box.set_bgcolor(_box, color.new(fvgBullColor, Highlightboxtransparancy))
-                        box.set_border_color(_box, color.new(fvgBullColor, Highlightboxbordertransparancy))
+                        _applyHighlight(_box, fvgBullColor)
                         bufvgtouch := true
                         bufvgtouch
 
-// ── FVG – Bearish  (extend + highlight + inverse-create + hide) ──
+// ── FVG – Bearish  (extend + highlight + inverse-create) ──
 if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) > 0
     for i = array.size(_bearBoxesFVG) - 1 to 0 by 1
         _box = array.get(_bearBoxesFVG, i)
@@ -923,12 +898,7 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
         _boxLow = box.get_bottom(_box)
         _boxHigh = box.get_top(_box)
         _boxRight = box.get_right(_box)
-        // Hide in inverse-only mode
-        if not plotFVG and not liquidityvoidmode and Inversefvgmode
-            box.set_bgcolor(_box, color.new(fvgBearColor, 100))
-            box.set_text_color(_box, color.new(BoxLabelColor, 100))
-            box.set_border_color(_box, color.new(fvgBearColor, 100))
-            line.set_color(_line, color.new(fvgBearColor, 100))
+        // NOTE: inverse-only hiding now applied at creation time (see FVG Detection above)
         if bar_index == _boxRight
             if barstate.isconfirmed and extendfvgbox
                 if fvgmitigationtype == 'Engulf'
@@ -945,19 +915,13 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
                         isbuinversefvg := true
                         isbuinversefvg
                     else if close > _boxHigh and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
-                        line.set_color(_line, mitBOXColor)
+                        _applyMitStyle(_box, _line, true)
                 else if fvgmitigationtype == 'Mitigate'
                     if high <= _boxLow
                         box.set_right(_box, bar_index + 1)
                         line.set_x2(_line, bar_index + 1)
                     else if high > _boxLow and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
-                        line.set_color(_line, mitBOXColor)
+                        _applyMitStyle(_box, _line, true)
                 else if fvgmitigationtype == 'Rebalance'
                     if high <= _boxLow
                         box.set_right(_box, bar_index + 1)
@@ -969,24 +933,19 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
                         line.set_y2(_line, (high + _boxHigh) / 2)
                         line.set_x2(_line, bar_index + 1)
                     else if high >= _boxHigh and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
-                        line.set_color(_line, mitBOXColor)
+                        _applyMitStyle(_box, _line, true)
             _boxLow  := box.get_bottom(_box)
             _boxHigh := box.get_top(_box)
             _boxRight := box.get_right(_box)
             if bar_index == _boxRight and extendfvgbox and HighlightBox
                 if fvgmitigationtype == 'Engulf'
                     if close <= _boxHigh and high > _boxLow
-                        box.set_bgcolor(_box, color.new(fvgBearColor, Highlightboxtransparancy))
-                        box.set_border_color(_box, color.new(fvgBearColor, Highlightboxbordertransparancy))
+                        _applyHighlight(_box, fvgBearColor)
                         befvgtouch := true
                         befvgtouch
                 else if fvgmitigationtype == 'Rebalance'
                     if high > _boxLow and high < _boxHigh
-                        box.set_bgcolor(_box, color.new(fvgBearColor, Highlightboxtransparancy))
-                        box.set_border_color(_box, color.new(fvgBearColor, Highlightboxbordertransparancy))
+                        _applyHighlight(_box, fvgBearColor)
                         befvgtouch := true
                         befvgtouch
 
@@ -1020,8 +979,7 @@ if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'En
         _boxRight := box.get_right(_box)
         if extendfvgbox and HighlightBox and bar_index == _boxRight
             if close >= _boxLow and low < _boxHigh
-                box.set_bgcolor(_box, color.new(buinvfvgcolor, Highlightboxtransparancy))
-                box.set_border_color(_box, color.new(buinvfvgcolor, Highlightboxbordertransparancy))
+                _applyHighlight(_box, buinvfvgcolor)
                 buinvfvgtouch := true
                 buinvfvgtouch
 
@@ -1053,8 +1011,7 @@ if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'En
         _boxRight := box.get_right(_box)
         if extendfvgbox and HighlightBox and bar_index == _boxRight
             if close <= _boxHigh and high > _boxLow
-                box.set_bgcolor(_box, color.new(beinvfvgcolor, Highlightboxtransparancy))
-                box.set_border_color(_box, color.new(beinvfvgcolor, Highlightboxbordertransparancy))
+                _applyHighlight(_box, beinvfvgcolor)
                 beinvfvgtouch := true
                 beinvfvgtouch
 
@@ -1080,23 +1037,18 @@ if ENABLE_IMBALANCES and array.size(_bullishvi) > 0 and extendvibox
                     if close >= _boxLow
                         box.set_right(_box, bar_index + 1)
                     else if close < _boxLow and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
+                        _applyMitStyle(_box, line(na), false)
                 else if vimitigationtype == 'Mitigate'
                     if low > _boxHigh
                         box.set_right(_box, bar_index + 1)
                     else if low <= _boxHigh and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
+                        _applyMitStyle(_box, line(na), false)
                         buvitouch := true
                         buvitouch
             _boxRight := box.get_right(_box)
             if bar_index == _boxRight and vimitigationtype == 'Engulf' and HighlightBox
                 if close >= _boxLow and low < _boxHigh
-                    box.set_bgcolor(_box, color.new(bullimbalance, Highlightboxtransparancy))
-                    box.set_border_color(_box, color.new(bullimbalance, Highlightboxbordertransparancy))
+                    _applyHighlight(_box, bullimbalance)
                     buvitouch := true
                     buvitouch
 
@@ -1113,23 +1065,18 @@ if ENABLE_IMBALANCES and array.size(_bearishvi) > 0 and extendvibox
                     if close <= _boxHigh
                         box.set_right(_box, bar_index + 1)
                     else if close > _boxHigh and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
+                        _applyMitStyle(_box, line(na), false)
                 else if vimitigationtype == 'Mitigate'
                     if high < _boxHigh
                         box.set_right(_box, bar_index + 1)
                     else if high >= _boxHigh and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
+                        _applyMitStyle(_box, line(na), false)
                         bevitouch := true
                         bevitouch
             _boxRight := box.get_right(_box)
             if bar_index == _boxRight and vimitigationtype == 'Engulf' and HighlightBox
                 if close <= _boxHigh and high > _boxLow
-                    box.set_bgcolor(_box, color.new(bearimbalance, Highlightboxtransparancy))
-                    box.set_border_color(_box, color.new(bearimbalance, Highlightboxbordertransparancy))
+                    _applyHighlight(_box, bearimbalance)
                     bevitouch := true
                     bevitouch
 
@@ -1148,10 +1095,7 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbu) > 0 and array.size(bugapce) > 
                         box.set_right(_box, bar_index + 1)
                         line.set_x2(_line, bar_index + 1)
                     else if (close < _boxLow or open < _boxLow) and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
-                        line.set_color(_line, mitBOXColor)
+                        _applyMitStyle(_box, _line, true)
                 else if gapmitigationtype == 'Rebalance'
                     if low >= _boxHigh
                         box.set_right(_box, bar_index + 1)
@@ -1163,24 +1107,19 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbu) > 0 and array.size(bugapce) > 
                         line.set_y1(_line, (low + _boxLow) / 2)
                         line.set_y2(_line, (low + _boxLow) / 2)
                     else if low <= _boxLow and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
-                        line.set_color(_line, mitBOXColor)
+                        _applyMitStyle(_box, _line, true)
             _boxLow  := box.get_bottom(_box)
             _boxHigh := box.get_top(_box)
             _boxRight := box.get_right(_box)
             if bar_index == _boxRight and HighlightBox
                 if gapmitigationtype == 'Engulf'
                     if close >= _boxLow and open >= _boxLow and low < _boxHigh
-                        box.set_bgcolor(_box, color.new(gapcolor, Highlightboxtransparancy))
-                        box.set_border_color(_box, color.new(gapcolor, Highlightboxbordertransparancy))
+                        _applyHighlight(_box, gapcolor)
                         bugaptouch := true
                         bugaptouch
                 else if gapmitigationtype == 'Rebalance'
                     if low > _boxLow and low < _boxHigh
-                        box.set_bgcolor(_box, color.new(gapcolor, Highlightboxtransparancy))
-                        box.set_border_color(_box, color.new(gapcolor, Highlightboxbordertransparancy))
+                        _applyHighlight(_box, gapcolor)
                         bugaptouch := true
                         bugaptouch
 
@@ -1199,10 +1138,7 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbe) > 0 and array.size(begapce) > 
                         box.set_right(_box, bar_index + 1)
                         line.set_x2(_line, bar_index + 1)
                     else if (close > _boxHigh or open > _boxHigh) and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
-                        line.set_color(_line, mitBOXColor)
+                        _applyMitStyle(_box, _line, true)
                 else if gapmitigationtype == 'Rebalance'
                     if high <= _boxLow
                         box.set_right(_box, bar_index + 1)
@@ -1214,26 +1150,27 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbe) > 0 and array.size(begapce) > 
                         line.set_y2(_line, (high + _boxHigh) / 2)
                         line.set_x2(_line, bar_index + 1)
                     else if high >= _boxHigh and filterMitBOX
-                        box.set_bgcolor(_box, mitBOXColor)
-                        box.set_border_color(_box, mitBOXColor)
-                        box.set_text_color(_box, MitBoxLabelColor)
-                        line.set_color(_line, mitBOXColor)
+                        _applyMitStyle(_box, _line, true)
             _boxLow  := box.get_bottom(_box)
             _boxHigh := box.get_top(_box)
             _boxRight := box.get_right(_box)
             if bar_index == _boxRight and HighlightBox
                 if gapmitigationtype == 'Engulf'
                     if close <= _boxHigh and open <= _boxHigh and high > _boxLow
-                        box.set_bgcolor(_box, color.new(gapcolor, Highlightboxtransparancy))
-                        box.set_border_color(_box, color.new(gapcolor, Highlightboxbordertransparancy))
+                        _applyHighlight(_box, gapcolor)
                         begaptouch := true
                         begaptouch
                 else if gapmitigationtype == 'Rebalance'
                     if high < _boxHigh and high > _boxLow
-                        box.set_bgcolor(_box, color.new(gapcolor, Highlightboxtransparancy))
-                        box.set_border_color(_box, color.new(gapcolor, Highlightboxbordertransparancy))
+                        _applyHighlight(_box, gapcolor)
                         begaptouch := true
                         begaptouch
+
+// ── Order Block Alerts ──
+alertcondition(ob_bullFormed, title = 'Bull OB Formed', message = 'Bullish OB formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(ob_bearFormed, title = 'Bear OB Formed', message = 'Bearish OB formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(ob_bullMit, title = 'Bull OB Mitigated', message = 'Bullish OB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(ob_bearMit, title = 'Bear OB Mitigated', message = 'Bearish OB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 
 // ── ICT Alerts ──
 alertcondition(barstate.isconfirmed and isFvgUp(0), title = 'FVG+', message = 'FVG+ : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
@@ -1241,7 +1178,7 @@ alertcondition(barstate.isconfirmed and isFvgDown(0), title = 'FVG-', message = 
 alertcondition(barstate.isconfirmed and isBuIFvg(0), title = 'Implied.FVG+', message = 'I.FVG+ : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(barstate.isconfirmed and isBeIFvg(0), title = 'Implied.FVG-', message = 'I.FVG- : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(barstate.isconfirmed and ((isBuVItype1(0) or isBuVItype2(0) or isBuVItype3(0)) and advancedvi or isBuVItype1(0) and classicvi), title = 'VI+', message = 'VI+ : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
-alertcondition(barstate.isconfirmed and ((isBeVItype1(0) or isBeVItype2(0) or isBeVItype3(0)) and advancedvi or isBuVItype1(0) and classicvi), title = 'VI-', message = 'VI- : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(barstate.isconfirmed and ((isBeVItype1(0) or isBeVItype2(0) or isBeVItype3(0)) and advancedvi or isBeVItype1(0) and classicvi), title = 'VI-', message = 'VI- : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(barstate.isconfirmed and high[1] < low, title = 'GAP+', message = 'GAP+ : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(barstate.isconfirmed and low[1] > high, title = 'GAP-', message = 'GAP- : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(barstate.isconfirmed and isbuinversefvg, title = 'Inverse.FVG+', message = 'Inverse.FVG+ : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
@@ -1586,10 +1523,11 @@ getCloseAtTime() =>
                 if isclosed.get(i)
                     index := i
                     break
-            if closeAt.size() >= index
-                closed := closeAt.get(index)
-            if closedAtTime.size() >= index
-                closedtime := closedAtTime.get(index)
+            if not na(index)
+                if closeAt.size() >= index
+                    closed := closeAt.get(index)
+                if closedAtTime.size() >= index
+                    closedtime := closedAtTime.get(index)
     [closed, closedtime]
 
 getOpenAtTime() =>
@@ -2491,10 +2429,17 @@ var label sh_lblAsiaH = na, var label sh_lblAsiaL = na
 var label sh_lblLonH  = na, var label sh_lblLonL  = na
 var label sh_lblNyH   = na, var label sh_lblNyL   = na
 
+// Current session drawing objects
+var line sh_curLineAsiaH = na, var line sh_curLineAsiaL = na
+var line sh_curLineLonH  = na, var line sh_curLineLonL  = na
+var line sh_curLineNyH   = na, var line sh_curLineNyL   = na
+var label sh_curLblAsiaH = na, var label sh_curLblAsiaL = na
+var label sh_curLblLonH  = na, var label sh_curLblLonL  = na
+var label sh_curLblNyH   = na, var label sh_curLblNyL   = na
+
 if ENABLE_SESSION_HL and timeframe.isintraday
-    // Reuse same NY time variables from killzone section
-    // Asia: uses killzone default 20:00–00:00 NY
-    bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
+    // Use independent session times (decoupled from Killzones)
+    bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, sh_asiaStart, 0, sh_asiaEnd, 0)
     if _isAsia and not sh_inAsia
         sh_prevAsiaH := sh_asiaH
         sh_prevAsiaL := sh_asiaL
@@ -2507,8 +2452,8 @@ if ENABLE_SESSION_HL and timeframe.isintraday
     else
         sh_inAsia := false
 
-    // London: uses killzone default 02:00–05:00 NY
-    bool _isLon = f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
+    // London: independent session times
+    bool _isLon = f_inSession(kz_nyHour, kz_nyMin, sh_lonStart, 0, sh_lonEnd, 0)
     if _isLon and not sh_inLon
         sh_prevLonH := sh_lonH
         sh_prevLonL := sh_lonL
@@ -2521,8 +2466,8 @@ if ENABLE_SESSION_HL and timeframe.isintraday
     else
         sh_inLon := false
 
-    // NY: 09:30–16:00
-    bool _isNY = f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nypmEnd, 0)
+    // NY: independent session times
+    bool _isNY = f_inSession(kz_nyHour, kz_nyMin, sh_nyStart, sh_nyStartM, sh_nyEnd, 0)
     if _isNY and not sh_inNY
         sh_prevNyH := sh_nyH
         sh_prevNyL := sh_nyL
@@ -2607,16 +2552,82 @@ if ENABLE_SESSION_HL and timeframe.isintraday
                 label.set_x(sh_lblNyL, bar_index + 20)
                 label.set_y(sh_lblNyL, sh_prevNyL)
 
+    // ── Current Session H/L (optional) ──
+    if sh_showCurrent
+        // Current Asia
+        if sh_showAsian and _isAsia and not na(sh_asiaH)
+            if na(sh_curLineAsiaH)
+                sh_curLineAsiaH := line.new(bar_index - 1, sh_asiaH, bar_index + 20, sh_asiaH, color = color.new(sh_asianHColor, 60), style = line.style_dotted, width = sh_lineWidth)
+                sh_curLineAsiaL := line.new(bar_index - 1, sh_asiaL, bar_index + 20, sh_asiaL, color = color.new(sh_asianLColor, 60), style = line.style_dotted, width = sh_lineWidth)
+            else
+                line.set_xy1(sh_curLineAsiaH, bar_index - 1, sh_asiaH)
+                line.set_xy2(sh_curLineAsiaH, bar_index + 20, sh_asiaH)
+                line.set_xy1(sh_curLineAsiaL, bar_index - 1, sh_asiaL)
+                line.set_xy2(sh_curLineAsiaL, bar_index + 20, sh_asiaL)
+            if sh_showLabels
+                if na(sh_curLblAsiaH)
+                    sh_curLblAsiaH := label.new(bar_index + 20, sh_asiaH, "Asia H*", style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(sh_asianHColor, 40), size = size.tiny)
+                    sh_curLblAsiaL := label.new(bar_index + 20, sh_asiaL, "Asia L*", style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(sh_asianLColor, 40), size = size.tiny)
+                else
+                    label.set_xy(sh_curLblAsiaH, bar_index + 20, sh_asiaH)
+                    label.set_xy(sh_curLblAsiaL, bar_index + 20, sh_asiaL)
+        else if not _isAsia
+            line.set_xy1(sh_curLineAsiaH, na, na)
+            line.set_xy2(sh_curLineAsiaH, na, na)
+            line.set_xy1(sh_curLineAsiaL, na, na)
+            line.set_xy2(sh_curLineAsiaL, na, na)
+
+        // Current London
+        if sh_showLondon and _isLon and not na(sh_lonH)
+            if na(sh_curLineLonH)
+                sh_curLineLonH := line.new(bar_index - 1, sh_lonH, bar_index + 20, sh_lonH, color = color.new(sh_londonHColor, 60), style = line.style_dotted, width = sh_lineWidth)
+                sh_curLineLonL := line.new(bar_index - 1, sh_lonL, bar_index + 20, sh_lonL, color = color.new(sh_londonLColor, 60), style = line.style_dotted, width = sh_lineWidth)
+            else
+                line.set_xy1(sh_curLineLonH, bar_index - 1, sh_lonH)
+                line.set_xy2(sh_curLineLonH, bar_index + 20, sh_lonH)
+                line.set_xy1(sh_curLineLonL, bar_index - 1, sh_lonL)
+                line.set_xy2(sh_curLineLonL, bar_index + 20, sh_lonL)
+            if sh_showLabels
+                if na(sh_curLblLonH)
+                    sh_curLblLonH := label.new(bar_index + 20, sh_lonH, "London H*", style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(sh_londonHColor, 40), size = size.tiny)
+                    sh_curLblLonL := label.new(bar_index + 20, sh_lonL, "London L*", style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(sh_londonLColor, 40), size = size.tiny)
+                else
+                    label.set_xy(sh_curLblLonH, bar_index + 20, sh_lonH)
+                    label.set_xy(sh_curLblLonL, bar_index + 20, sh_lonL)
+        else if not _isLon
+            line.set_xy1(sh_curLineLonH, na, na)
+            line.set_xy2(sh_curLineLonH, na, na)
+            line.set_xy1(sh_curLineLonL, na, na)
+            line.set_xy2(sh_curLineLonL, na, na)
+
+        // Current NY
+        if sh_showNY and _isNY and not na(sh_nyH)
+            if na(sh_curLineNyH)
+                sh_curLineNyH := line.new(bar_index - 1, sh_nyH, bar_index + 20, sh_nyH, color = color.new(sh_nyHColor, 60), style = line.style_dotted, width = sh_lineWidth)
+                sh_curLineNyL := line.new(bar_index - 1, sh_nyL, bar_index + 20, sh_nyL, color = color.new(sh_nyLColor, 60), style = line.style_dotted, width = sh_lineWidth)
+            else
+                line.set_xy1(sh_curLineNyH, bar_index - 1, sh_nyH)
+                line.set_xy2(sh_curLineNyH, bar_index + 20, sh_nyH)
+                line.set_xy1(sh_curLineNyL, bar_index - 1, sh_nyL)
+                line.set_xy2(sh_curLineNyL, bar_index + 20, sh_nyL)
+            if sh_showLabels
+                if na(sh_curLblNyH)
+                    sh_curLblNyH := label.new(bar_index + 20, sh_nyH, "NY H*", style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(sh_nyHColor, 40), size = size.tiny)
+                    sh_curLblNyL := label.new(bar_index + 20, sh_nyL, "NY L*", style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(sh_nyLColor, 40), size = size.tiny)
+                else
+                    label.set_xy(sh_curLblNyH, bar_index + 20, sh_nyH)
+                    label.set_xy(sh_curLblNyL, bar_index + 20, sh_nyL)
+        else if not _isNY
+            line.set_xy1(sh_curLineNyH, na, na)
+            line.set_xy2(sh_curLineNyH, na, na)
+            line.set_xy1(sh_curLineNyL, na, na)
+            line.set_xy2(sh_curLineNyL, na, na)
+
 
 // ════════════════════════════════════════════════════════════════
 //  SECTION H – PDH/PDL / PWH/PWL / PMH/PML LIQUIDITY LEVELS
 //  Previous Day, Week, Month High & Low — external liquidity pools
 // ════════════════════════════════════════════════════════════════
-
-// request.security for previous period highs/lows
-[lq_dayHigh, lq_dayLow]     = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
-[lq_weekHigh, lq_weekLow]   = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
-[lq_monthHigh, lq_monthLow] = request.security(syminfo.tickerid, "M", [high[1], low[1]], lookahead = barmerge.lookahead_on)
 
 // Drawing objects
 var line lq_linePDH = na, var line lq_linePDL = na
@@ -2627,6 +2638,10 @@ var label lq_lblPWH = na, var label lq_lblPWL = na
 var label lq_lblPMH = na, var label lq_lblPML = na
 
 if ENABLE_LIQUIDITY
+    // request.security for previous period highs/lows (only when section is enabled)
+    [lq_dayHigh, lq_dayLow]     = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+    [lq_weekHigh, lq_weekLow]   = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+    [lq_monthHigh, lq_monthLow] = request.security(syminfo.tickerid, "M", [high[1], low[1]], lookahead = barmerge.lookahead_on)
     // ── PDH / PDL ──  (create once, update coords thereafter)
     if lq_showPDH and not na(lq_dayHigh)
         if na(lq_linePDH)
@@ -2642,14 +2657,18 @@ if ENABLE_LIQUIDITY
             line.set_x2(lq_linePDL, bar_index + 30)
             line.set_y2(lq_linePDL, lq_dayLow)
         if lq_showLabels
+            string _pdhTxt = "PDH " + str.tostring(lq_dayHigh, format.mintick)
+            string _pdlTxt = "PDL " + str.tostring(lq_dayLow, format.mintick)
             if na(lq_lblPDH)
-                lq_lblPDH := label.new(bar_index + 30, lq_dayHigh, "PDH", style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pdhColor, size = size.small)
-                lq_lblPDL := label.new(bar_index + 30, lq_dayLow,  "PDL", style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pdlColor, size = size.small)
+                lq_lblPDH := label.new(bar_index + 30, lq_dayHigh, _pdhTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pdhColor, size = size.small)
+                lq_lblPDL := label.new(bar_index + 30, lq_dayLow,  _pdlTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pdlColor, size = size.small)
             else
                 label.set_x(lq_lblPDH, bar_index + 30)
                 label.set_y(lq_lblPDH, lq_dayHigh)
+                label.set_text(lq_lblPDH, _pdhTxt)
                 label.set_x(lq_lblPDL, bar_index + 30)
                 label.set_y(lq_lblPDL, lq_dayLow)
+                label.set_text(lq_lblPDL, _pdlTxt)
 
     // ── PWH / PWL ──
     if lq_showPWH and not na(lq_weekHigh)
@@ -2666,14 +2685,18 @@ if ENABLE_LIQUIDITY
             line.set_x2(lq_linePWL, bar_index + 30)
             line.set_y2(lq_linePWL, lq_weekLow)
         if lq_showLabels
+            string _pwhTxt = "PWH " + str.tostring(lq_weekHigh, format.mintick)
+            string _pwlTxt = "PWL " + str.tostring(lq_weekLow, format.mintick)
             if na(lq_lblPWH)
-                lq_lblPWH := label.new(bar_index + 30, lq_weekHigh, "PWH", style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pwhColor, size = size.small)
-                lq_lblPWL := label.new(bar_index + 30, lq_weekLow,  "PWL", style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pwlColor, size = size.small)
+                lq_lblPWH := label.new(bar_index + 30, lq_weekHigh, _pwhTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pwhColor, size = size.small)
+                lq_lblPWL := label.new(bar_index + 30, lq_weekLow,  _pwlTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pwlColor, size = size.small)
             else
                 label.set_x(lq_lblPWH, bar_index + 30)
                 label.set_y(lq_lblPWH, lq_weekHigh)
+                label.set_text(lq_lblPWH, _pwhTxt)
                 label.set_x(lq_lblPWL, bar_index + 30)
                 label.set_y(lq_lblPWL, lq_weekLow)
+                label.set_text(lq_lblPWL, _pwlTxt)
 
     // ── PMH / PML ──
     if lq_showPMH and not na(lq_monthHigh)
@@ -2690,14 +2713,37 @@ if ENABLE_LIQUIDITY
             line.set_x2(lq_linePML, bar_index + 30)
             line.set_y2(lq_linePML, lq_monthLow)
         if lq_showLabels
+            string _pmhTxt = "PMH " + str.tostring(lq_monthHigh, format.mintick)
+            string _pmlTxt = "PML " + str.tostring(lq_monthLow, format.mintick)
             if na(lq_lblPMH)
-                lq_lblPMH := label.new(bar_index + 30, lq_monthHigh, "PMH", style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pmhColor, size = size.small)
-                lq_lblPML := label.new(bar_index + 30, lq_monthLow,  "PML", style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pmlColor, size = size.small)
+                lq_lblPMH := label.new(bar_index + 30, lq_monthHigh, _pmhTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pmhColor, size = size.small)
+                lq_lblPML := label.new(bar_index + 30, lq_monthLow,  _pmlTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pmlColor, size = size.small)
             else
                 label.set_x(lq_lblPMH, bar_index + 30)
                 label.set_y(lq_lblPMH, lq_monthHigh)
+                label.set_text(lq_lblPMH, _pmhTxt)
                 label.set_x(lq_lblPML, bar_index + 30)
                 label.set_y(lq_lblPML, lq_monthLow)
+                label.set_text(lq_lblPML, _pmlTxt)
 
+
+// ── Timeframe Warning ──
+// Many sections require intraday charts; show a one-time warning on daily+ charts
+var label _tfWarning = na
+if barstate.islast and not timeframe.isintraday
+    bool _anyIntraday = ENABLE_HOURLY_OPEN or ENABLE_ORDER_BLOCKS or ENABLE_IMBALANCES or ENABLE_KILLZONES or ENABLE_SESSION_HL
+    if _anyIntraday
+        if na(_tfWarning)
+            _tfWarning := label.new(bar_index, close, "⚠ Switch to intraday for: " +
+                 (ENABLE_HOURLY_OPEN ? "Hourly Open, " : "") +
+                 (ENABLE_ORDER_BLOCKS ? "Order Blocks, " : "") +
+                 (ENABLE_IMBALANCES ? "Imbalances, " : "") +
+                 (ENABLE_KILLZONES ? "Killzones, " : "") +
+                 (ENABLE_SESSION_HL ? "Session H/L" : ""),
+                 style = label.style_label_down, color = color.new(#ff9800, 20),
+                 textcolor = color.white, size = size.normal)
+        else
+            label.set_x(_tfWarning, bar_index)
+            label.set_y(_tfWarning, close)
 
 // ── End of Merged Script ──
