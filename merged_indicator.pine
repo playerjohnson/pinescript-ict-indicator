@@ -2456,66 +2456,66 @@ _sh_archive(_histH, _histL, _curH, _curL, _curBar, _curHT, _curLT) =>
             label.delete(_old.lbl)
 
 // ── Process history array: check mitigation + draw/update lines ──
+// NOTE: Uses flat if-blocks (no else) to avoid Pine Script type mismatches
+//       between void-returning setters and typed assignments.
 _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
     if _show and array.size(_hist) > 0
+        string _side = _isHigh ? "High - Buyside Liquidity " : "Low - Sellside Liquidity "
         for i = 0 to array.size(_hist) - 1
             SHLevel _lvl = array.get(_hist, i)
-            if not na(_lvl.price)
-                if _lvl.mitigated
-                    // Already mitigated — hide if toggle is off
-                    if not sh_showMit
-                        if not na(_lvl.ln)
-                            line.delete(_lvl.ln)
-                            _lvl.ln := line(na)
-                        if not na(_lvl.lbl)
-                            label.delete(_lvl.lbl)
-                            _lvl.lbl := label(na)
-                else
-                    // Check for new mitigation on confirmed bars
-                    bool _hit = false
-                    if barstate.isconfirmed
-                        _hit := _isHigh ? close > _lvl.price : close < _lvl.price
-                    if _hit
-                        _lvl.mitigated := true
-                        if sh_showMit
-                            if not na(_lvl.ln)
-                                line.set_x2(_lvl.ln, bar_index)
-                                line.set_color(_lvl.ln, sh_mitColor)
-                                line.set_style(_lvl.ln, line.style_dotted)
-                            if sh_showLabels and not na(_lvl.lbl)
-                                string _side = _isHigh ? "High - Buyside Liquidity " : "Low - Sellside Liquidity "
-                                label.set_x(_lvl.lbl, bar_index)
-                                label.set_text(_lvl.lbl, _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + " [Mitigated]")
-                                label.set_textcolor(_lvl.lbl, sh_mitColor)
-                        else
-                            if not na(_lvl.ln)
-                                line.delete(_lvl.ln)
-                                _lvl.ln := line(na)
-                            if not na(_lvl.lbl)
-                                label.delete(_lvl.lbl)
-                                _lvl.lbl := label(na)
-                    else
-                        // Not mitigated — draw / extend
-                        int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
-                        int _x2 = bar_index + sh_lineExtend
-                        if na(_lvl.ln)
-                            _lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _color, style = f_get_line_style(_style), width = sh_lineWidth)
-                        else
-                            line.set_x2(_lvl.ln, _x2)
-                        if sh_showLabels
-                            string _side = _isHigh ? "High - Buyside Liquidity " : "Low - Sellside Liquidity "
-                            string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime)
-                            if na(_lvl.lbl)
-                                _lvl.lbl := label.new(_x2, _lvl.price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _color, size = size.tiny)
-                            else
-                                label.set_x(_lvl.lbl, _x2)
-                                label.set_text(_lvl.lbl, _txt)
+            if na(_lvl.price)
+                continue
+            // Already mitigated — optionally hide
+            if _lvl.mitigated and not sh_showMit
+                line.delete(_lvl.ln)
+                label.delete(_lvl.lbl)
+                _lvl.ln  := line(na)
+                _lvl.lbl := label(na)
+            if _lvl.mitigated
+                continue
+            // Check for new mitigation on confirmed bars
+            bool _hit = false
+            if barstate.isconfirmed
+                _hit := _isHigh ? close > _lvl.price : close < _lvl.price
+            // New mitigation — apply styling
+            if _hit
+                _lvl.mitigated := true
+            if _hit and sh_showMit and not na(_lvl.ln)
+                line.set_x2(_lvl.ln, bar_index)
+                line.set_color(_lvl.ln, sh_mitColor)
+                line.set_style(_lvl.ln, line.style_dotted)
+            if _hit and sh_showMit and sh_showLabels and not na(_lvl.lbl)
+                label.set_x(_lvl.lbl, bar_index)
+                label.set_text(_lvl.lbl, _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + " [Mitigated]")
+                label.set_textcolor(_lvl.lbl, sh_mitColor)
+            // New mitigation — hide if toggle off
+            if _hit and not sh_showMit
+                line.delete(_lvl.ln)
+                label.delete(_lvl.lbl)
+                _lvl.ln  := line(na)
+                _lvl.lbl := label(na)
+            if _hit
+                continue
+            // Not mitigated — draw / extend
+            int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
+            int _x2 = bar_index + sh_lineExtend
+            string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime)
+            if na(_lvl.ln)
+                _lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _color, style = f_get_line_style(_style), width = sh_lineWidth)
+            line.set_x2(_lvl.ln, _x2)
+            if sh_showLabels
+                if na(_lvl.lbl)
+                    _lvl.lbl := label.new(_x2, _lvl.price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _color, size = size.tiny)
+                label.set_x(_lvl.lbl, _x2)
+                label.set_text(_lvl.lbl, _txt)
 
 // ── Draw current (in-progress) session lines ──
+// NOTE: Uses create-then-always-set pattern to avoid if/else type mismatches.
 _sh_drawCur(_show, _inSess, _curH, _curL, _curHTime, _curLTime, _startBar, _hColor, _lColor, _name) =>
     var line _cLineH = na, var line _cLineL = na
     var label _cLblH = na, var label _cLblL = na
-    if _show and _inSess and not na(_curH)
+    bool _active = _show and _inSess and not na(_curH)
+    if _active
         int _x1 = math.max(nz(_startBar, bar_index - 1), 0)
         int _x2 = bar_index + sh_lineExtend
         string _hTxt = _name + " High* " + str.tostring(_curH, format.mintick) + _sh_fmtTime(_curHTime)
@@ -2523,21 +2523,19 @@ _sh_drawCur(_show, _inSess, _curH, _curL, _curHTime, _curLTime, _startBar, _hCol
         if na(_cLineH)
             _cLineH := line.new(_x1, _curH, _x2, _curH, color = color.new(_hColor, 60), style = line.style_dotted, width = sh_lineWidth)
             _cLineL := line.new(_x1, _curL, _x2, _curL, color = color.new(_lColor, 60), style = line.style_dotted, width = sh_lineWidth)
-        else
-            line.set_xy1(_cLineH, _x1, _curH)
-            line.set_xy2(_cLineH, _x2, _curH)
-            line.set_xy1(_cLineL, _x1, _curL)
-            line.set_xy2(_cLineL, _x2, _curL)
+        line.set_xy1(_cLineH, _x1, _curH)
+        line.set_xy2(_cLineH, _x2, _curH)
+        line.set_xy1(_cLineL, _x1, _curL)
+        line.set_xy2(_cLineL, _x2, _curL)
         if sh_showLabels
             if na(_cLblH)
                 _cLblH := label.new(_x2, _curH, _hTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_hColor, 40), size = size.tiny)
                 _cLblL := label.new(_x2, _curL, _lTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_lColor, 40), size = size.tiny)
-            else
-                label.set_xy(_cLblH, _x2, _curH)
-                label.set_text(_cLblH, _hTxt)
-                label.set_xy(_cLblL, _x2, _curL)
-                label.set_text(_cLblL, _lTxt)
-    else if not _inSess
+            label.set_xy(_cLblH, _x2, _curH)
+            label.set_text(_cLblH, _hTxt)
+            label.set_xy(_cLblL, _x2, _curL)
+            label.set_text(_cLblL, _lTxt)
+    if not _active and not _inSess
         // Hide when session is not active
         if not na(_cLineH)
             line.set_xy1(_cLineH, na, na)
