@@ -38,9 +38,8 @@ var bool   wh_enable      = input.bool(false, "Enable Webhook Alerts", group = "
 var bool   wh_formations  = input.bool(true,  "Formation Alerts  ", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "OB, FVG, I.FVG, VI, GAP, Inverse FVG, LV formations")
 var bool   wh_mitigations = input.bool(true,  "Mitigation Alerts", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "All mitigation/highlight events")
 
-_wh_json(_event, _high, _low) =>
-    string _ts = str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", "America/New_York")
-    '{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + _ts + '"}'
+_wh_json(string _event, float _high, float _low) =>
+    '{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '"}'
 
 
 // ════════════════════════════════════════════════════════════════
