@@ -452,22 +452,8 @@ var bool   sh_showLabels   = input.bool(true,  "Show Labels       ", group = "�
 var int    sh_lineWidth    = input.int(1, "Width", 1, 4, group = "⑲ Session Highs/Lows", inline = "sh4")
 var string sh_labelSize    = input.string("Tiny", "Label Size", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group = "⑲ Session Highs/Lows", inline = "sh4b")
 var bool   sh_showCurrent  = input.bool(false, "Show Current Session H/L", group = "⑲ Session Highs/Lows", tooltip = "Display in-progress session highs/lows in addition to previous.")
-var int    sh_asiaStart    = input.int(20, "Asia Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh5", tooltip = "NY time (24h). Independent of Killzone times.")
-var int    sh_asiaEnd      = input.int(0,  "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh5")
-var int    sh_lonStart     = input.int(2,  "London Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh6")
-var int    sh_lonEnd       = input.int(5,  "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh6")
-var int    sh_nyamStartH   = input.int(9,  "NY AM Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh7")
-var int    sh_nyamStartM   = input.int(30, ":", 0, 59, group = "⑲ Session Highs/Lows", inline = "sh7")
-var int    sh_nyamEnd      = input.int(12, "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh7")
-var int    sh_nylStartH    = input.int(12, "Lunch Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh8")
-var int    sh_nylStartM    = input.int(0,  ":", 0, 59, group = "⑲ Session Highs/Lows", inline = "sh8")
-var int    sh_nylEndH      = input.int(13, "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh8")
-var int    sh_nylEndM      = input.int(30, ":", 0, 59, group = "⑲ Session Highs/Lows", inline = "sh8")
-var int    sh_nypmStartH   = input.int(13, "NY PM Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh9")
-var int    sh_nypmStartM   = input.int(30, ":", 0, 59, group = "⑲ Session Highs/Lows", inline = "sh9")
-var int    sh_nypmEnd      = input.int(16, "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh9")
 var int    sh_lineExtend   = input.int(50, "Line Extend Bars  ", 10, 200, group = "⑲ Session Highs/Lows", inline = "sh10")
-var int    sh_historyCount = input.int(5, "Sessions to Show  ", 1, 5, group = "⑲ Session Highs/Lows", inline = "sh11", tooltip = "Number of previous sessions to display per session type (1-5).")
+var int    sh_historyCount = input.int(5, "Sessions to Show  ", 1, 20, group = "⑲ Session Highs/Lows", inline = "sh11", tooltip = "Number of previous sessions to display per session type (1-20). Uses same times as Killzone settings in ⑱.")
 var bool   sh_showMit      = input.bool(true, "Show Mitigated    ", group = "⑲ Session Highs/Lows", inline = "sh12")
 var color  sh_mitColor     = input.color(color.new(color.gray, 60), "Line", group = "⑲ Session Highs/Lows", inline = "sh12")
 var color  sh_mitLblColor  = input.color(color.new(color.gray, 70), "Lbl", group = "⑲ Session Highs/Lows", inline = "sh12")
@@ -2576,12 +2562,12 @@ var bool sh_inAsia = false, var bool sh_inLon = false
 var bool sh_inNYAM = false, var bool sh_inNYL = false, var bool sh_inNYPM = false
 
 if ENABLE_SESSION_HL and timeframe.isintraday
-    // ── Detect sessions ──
-    bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, sh_asiaStart, 0, sh_asiaEnd, 0)
-    bool _isLon  = f_inSession(kz_nyHour, kz_nyMin, sh_lonStart, 0, sh_lonEnd, 0)
-    bool _isNYAM = f_inSession(kz_nyHour, kz_nyMin, sh_nyamStartH, sh_nyamStartM, sh_nyamEnd, 0)
-    bool _isNYL  = f_inSession(kz_nyHour, kz_nyMin, sh_nylStartH, sh_nylStartM, sh_nylEndH, sh_nylEndM)
-    bool _isNYPM = f_inSession(kz_nyHour, kz_nyMin, sh_nypmStartH, sh_nypmStartM, sh_nypmEnd, 0)
+    // ── Detect sessions (uses Killzone times from ⑱, except NY Lunch which is hardcoded 12:00-13:30) ──
+    bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
+    bool _isLon  = f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
+    bool _isNYAM = f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, 0)
+    bool _isNYL  = f_inSession(kz_nyHour, kz_nyMin, 12, 0, 13, 30)
+    bool _isNYPM = f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
 
     // ── Track Asia ──
     if _isAsia and not sh_inAsia
