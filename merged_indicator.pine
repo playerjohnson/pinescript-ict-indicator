@@ -2496,7 +2496,7 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
             int _lw = _lvl.mitigated ? sh_mitLineWidth : sh_lineWidth
             string _mitTxt = _lvl.mitigated ? " [Mitigated]" : ""
             string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + _mitTxt
-            line.style _ls = _lvl.mitigated ? line.style_dotted : f_get_line_style(_style)
+            string _ls = _lvl.mitigated ? line.style_dotted : f_get_line_style(_style)
             string _sz = _lvl.mitigated ? _sh_getSize(sh_mitLabelSize) : _sh_getSize(sh_labelSize)
             if na(_lvl.ln)
                 _lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _lineClr, style = _ls, width = _lw)
