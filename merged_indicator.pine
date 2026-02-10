@@ -276,6 +276,8 @@ if ob_newHour and ENABLE_ORDER_BLOCKS
                               text_color   = color.new(ob_bullColor, 30))
             ob_bulls.push(OrderBlock.new(_ob, ob_A_c, false, 0))
             ob_bullFormed := true
+            if wh_enable and wh_formations
+                alert(_wh_json("Bull OB Formed", _top, _bot), alert.freq_once_per_bar_close)
             while ob_bulls.size() > ob_maxBoxes
                 OrderBlock _del = ob_bulls.shift()
                 box.delete(_del.bx)
@@ -297,6 +299,8 @@ if ob_newHour and ENABLE_ORDER_BLOCKS
                               text_color   = color.new(ob_bearColor, 30))
             ob_bears.push(OrderBlock.new(_ob, ob_A_c, false, 0))
             ob_bearFormed := true
+            if wh_enable and wh_formations
+                alert(_wh_json("Bear OB Formed", _top, _bot), alert.freq_once_per_bar_close)
             while ob_bears.size() > ob_maxBoxes
                 OrderBlock _del = ob_bears.shift()
                 box.delete(_del.bx)
@@ -331,6 +335,8 @@ if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
                 _ob.mitigated := true
                 _ob.mit_bar   := bar_index
                 ob_bullMit    := true
+                if wh_enable and wh_mitigations
+                    alert(_wh_json("Bull OB Mitigated", box.get_top(_ob.bx), box.get_bottom(_ob.bx)), alert.freq_once_per_bar)
                 if ob_invert
                     box.set_bgcolor(_ob.bx, ob_invBullColor)
                     box.set_border_color(_ob.bx, color.new(ob_invBullColor, 60))
@@ -359,6 +365,8 @@ if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
                 _ob.mitigated := true
                 _ob.mit_bar   := bar_index
                 ob_bearMit    := true
+                if wh_enable and wh_mitigations
+                    alert(_wh_json("Bear OB Mitigated", box.get_top(_ob.bx), box.get_bottom(_ob.bx)), alert.freq_once_per_bar)
                 if ob_invert
                     box.set_bgcolor(_ob.bx, ob_invBearColor)
                     box.set_border_color(_ob.bx, color.new(ob_invBearColor, 60))
@@ -531,6 +539,15 @@ var string lq_pmStyle     = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯'
 var bool   lq_showLabels  = input.bool(true,  "Show Labels       ", group = "⑳ Liquidity Levels", inline = "lq4")
 var int    lq_lineWidth   = input.int(1, "Width", 1, 4, group = "⑳ Liquidity Levels", inline = "lq4")
 
+// ── ㉑ Webhook JSON Alerts ──
+var bool   wh_enable      = input.bool(false, "Enable Webhook Alerts", group = "㉑ Webhook Alerts", tooltip = "Sends JSON payloads via alert() for bot/webhook integration.\nIn TradingView alert dialog, select 'Any alert() function call'.")
+var bool   wh_formations  = input.bool(true,  "Formation Alerts  ", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "OB, FVG, I.FVG, VI, GAP, Inverse FVG, LV formations")
+var bool   wh_mitigations = input.bool(true,  "Mitigation Alerts", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "All mitigation/highlight events")
+
+_wh_json(_event, _high, _low) =>
+    string _ts = str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", "America/New_York")
+    '{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + _ts + '"}'
+
 var bool buimpfvgtouch = false
 var bool beimpfvgtouch = false
 var bool bufvgtouch = false
@@ -602,6 +619,8 @@ if isBuVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
     if array.size(_bullishvi) > viMaxBoxSet
         box.delete(array.shift(_bullishvi))
     array.push(_bullishvi, _bullboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI+", open, close[1]), alert.freq_once_per_bar_close)
 
 // Bearish Volume Imbalance
 if isBeVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
@@ -610,6 +629,8 @@ if isBeVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
     if array.size(_bearishvi) > viMaxBoxSet
         box.delete(array.shift(_bearishvi))
     array.push(_bearishvi, _bearboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI-", close[1], open), alert.freq_once_per_bar_close)
 
 // Bullish Volume Imbalance Type 2
 if isBuVItype2(0) and advancedvi and ENABLE_IMBALANCES
@@ -618,6 +639,8 @@ if isBuVItype2(0) and advancedvi and ENABLE_IMBALANCES
     if array.size(_bullishvi) > viMaxBoxSet
         box.delete(array.shift(_bullishvi))
     array.push(_bullishvi, _bullboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI+", close[1], open), alert.freq_once_per_bar_close)
 
 // Bearish Volume Imbalance Type 2
 if isBeVItype2(0) and advancedvi and ENABLE_IMBALANCES
@@ -626,6 +649,8 @@ if isBeVItype2(0) and advancedvi and ENABLE_IMBALANCES
     if array.size(_bearishvi) > viMaxBoxSet
         box.delete(array.shift(_bearishvi))
     array.push(_bearishvi, _bearboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI-", open, close[1]), alert.freq_once_per_bar_close)
 
 // Bullish Volume Imbalance Type 3
 if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES
@@ -634,6 +659,8 @@ if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES
     if array.size(_bullishvi) > viMaxBoxSet
         box.delete(array.shift(_bullishvi))
     array.push(_bullishvi, _bullboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI+", math.max(open, close[1]), math.min(open, close[1])), alert.freq_once_per_bar_close)
 
 // Bearish Volume Imbalance Type 3
 if isBeVItype3(0) and advancedvi and ENABLE_IMBALANCES
@@ -642,6 +669,8 @@ if isBeVItype3(0) and advancedvi and ENABLE_IMBALANCES
     if array.size(_bearishvi) > viMaxBoxSet
         box.delete(array.shift(_bearishvi))
     array.push(_bearishvi, _bearboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI-", math.min(open, close[1]), math.max(open, close[1])), alert.freq_once_per_bar_close)
 
 if extendallvis
     _controlBox2(_bullishvi, high, low)
@@ -656,10 +685,14 @@ if (high[1] < low or low[1] > high) and truegap and ENABLE_IMBALANCES
     if high[1] < low
         _gapsbu := box.new(left = bar_index - 1, top = low, right = bar_index + 1, bottom = high[1], bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
         bugapceline := cegap ? line.new(bar_index - 1, math.avg(low, high[1]), bar_index, math.avg(low, high[1]), style = celinetype, color = color.new(gapcolor, cetransparency)) : na
+        if wh_enable and wh_formations and barstate.isconfirmed
+            alert(_wh_json("GAP+", low, high[1]), alert.freq_once_per_bar_close)
         bugapceline
     else if low[1] > high
         _gapsbe := box.new(left = bar_index - 1, top = low[1], right = bar_index + 1, bottom = high, bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
         begapceline := cegap ? line.new(bar_index - 1, math.avg(low[1], high), bar_index, math.avg(low[1], high), style = celinetype, color = color.new(gapcolor, cetransparency)) : na
+        if wh_enable and wh_formations and barstate.isconfirmed
+            alert(_wh_json("GAP-", low[1], high), alert.freq_once_per_bar_close)
         begapceline
     if array.size(_gapsboxesbu) > gapsMaxBoxSet and array.size(bugapce) > gapsMaxBoxSet
         box.delete(array.shift(_gapsboxesbu))
@@ -720,6 +753,8 @@ if isFvgUp(0) and not liquidityvoidmode and ENABLE_IMBALANCES
         line.delete(array.shift(_bufvgce))
     array.push(_bullBoxesFVG, _bullboxFVG)
     array.push(_bufvgce, _buline)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("FVG+", low, high[2]), alert.freq_once_per_bar_close)
 
 // Bearish FVG
 if isFvgDown(0) and not liquidityvoidmode and ENABLE_IMBALANCES
@@ -739,6 +774,8 @@ if isFvgDown(0) and not liquidityvoidmode and ENABLE_IMBALANCES
         line.delete(array.shift(_befvgce))
     array.push(_bearBoxesFVG, _bearboxFVG)
     array.push(_befvgce, _beline)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("FVG-", low[2], high), alert.freq_once_per_bar_close)
 
 // ── Liquidity Void Mode ──
 bool bulv = false
@@ -762,6 +799,8 @@ if isFvgUp(0) and isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and array
         line.delete(array.shift(_bufvgce))
     array.push(_bullBoxesFVG, _bullboxFVG)
     array.push(_bufvgce, _buline)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("LV+", low, tempboxlow), alert.freq_once_per_bar_close)
 else if isFvgUp(0) and not isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
     box _bullboxFVG = na
     line _buline = na
@@ -791,6 +830,8 @@ if isFvgDown(0) and isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and a
         line.delete(array.shift(_befvgce))
     array.push(_bearBoxesFVG, _bearboxFVG)
     array.push(_befvgce, _beline)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("LV-", tempboxhigh, high), alert.freq_once_per_bar_close)
 else if isFvgDown(0) and not isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
     box _bearboxFVG = na
     line _beline = na
@@ -815,6 +856,8 @@ if isBuIFvg(0) and showifvg and ENABLE_IMBALANCES
     if array.size(_bullishifvg) > fvgMaxBoxSet
         box.delete(array.shift(_bullishifvg))
     array.push(_bullishifvg, _bullboxifvg)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("I.FVG+", (math.min(open, close) + low) / 2, (high[2] + math.max(open[2], close[2])) / 2), alert.freq_once_per_bar_close)
 
 if isBeIFvg(0) and showifvg and ENABLE_IMBALANCES
     box _bearboxifvg = na
@@ -822,6 +865,8 @@ if isBeIFvg(0) and showifvg and ENABLE_IMBALANCES
     if array.size(_bearishifvg) > fvgMaxBoxSet
         box.delete(array.shift(_bearishifvg))
     array.push(_bearishifvg, _bearboxifvg)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("I.FVG-", (math.min(open[2], close[2]) + low[2]) / 2, (math.max(open, close) + high) / 2), alert.freq_once_per_bar_close)
 
 // ══════════════════════════════════════════════════════════════
 //  SECTION B – UNIFIED IMBALANCE LOOPS  (perf: 39 → 12 loops)
@@ -865,6 +910,8 @@ if ENABLE_IMBALANCES and array.size(_bullishifvg) > 0 and extendfvgbox
                 if close >= _boxLow and low < _boxHigh
                     _applyHighlight(_box, ifvgBullColor)
                     buimpfvgtouch := true
+                    if wh_enable and wh_mitigations
+                        alert(_wh_json("I.FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     buimpfvgtouch
 
 // ── Implied FVG – Bearish ──
@@ -891,6 +938,8 @@ if ENABLE_IMBALANCES and array.size(_bearishifvg) > 0 and extendfvgbox
                 if close <= _boxHigh and high > _boxLow
                     _applyHighlight(_box, ifvgBearColor)
                     beimpfvgtouch := true
+                    if wh_enable and wh_mitigations
+                        alert(_wh_json("I.FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     beimpfvgtouch
 
 // ── FVG – Bullish  (extend + highlight + inverse-create + hide) ──
@@ -917,6 +966,8 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
                         box.delete(_box)
                         line.delete(_line)
                         isbeinversefvg := true
+                        if wh_enable and wh_formations
+                            alert(_wh_json("Inverse.FVG-", _boxHigh, _boxLow), alert.freq_once_per_bar_close)
                         isbeinversefvg
                     else if close < _boxLow and filterMitBOX
                         _applyMitStyle(_box, _line, true)
@@ -947,11 +998,15 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
                     if close >= _boxLow and low < _boxHigh
                         _applyHighlight(_box, fvgBullColor)
                         bufvgtouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bufvgtouch
                 else if fvgmitigationtype == 'Rebalance'
                     if low < _boxHigh and low > _boxLow
                         _applyHighlight(_box, fvgBullColor)
                         bufvgtouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bufvgtouch
 
 // ── FVG – Bearish  (extend + highlight + inverse-create) ──
@@ -977,6 +1032,8 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
                         box.delete(_box)
                         line.delete(_line)
                         isbuinversefvg := true
+                        if wh_enable and wh_formations
+                            alert(_wh_json("Inverse.FVG+", _boxHigh, _boxLow), alert.freq_once_per_bar_close)
                         isbuinversefvg
                     else if close > _boxHigh and filterMitBOX
                         _applyMitStyle(_box, _line, true)
@@ -1006,11 +1063,15 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
                     if close <= _boxHigh and high > _boxLow
                         _applyHighlight(_box, fvgBearColor)
                         befvgtouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         befvgtouch
                 else if fvgmitigationtype == 'Rebalance'
                     if high > _boxLow and high < _boxHigh
                         _applyHighlight(_box, fvgBearColor)
                         befvgtouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         befvgtouch
 
 // ── Inverse FVG – Bullish  (restyle + extend + highlight) ──
@@ -1045,6 +1106,8 @@ if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'En
             if close >= _boxLow and low < _boxHigh
                 _applyHighlight(_box, buinvfvgcolor)
                 buinvfvgtouch := true
+                if wh_enable and wh_mitigations
+                    alert(_wh_json("Inv.FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                 buinvfvgtouch
 
 // ── Inverse FVG – Bearish  (restyle + extend + highlight) ──
@@ -1077,6 +1140,8 @@ if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'En
             if close <= _boxHigh and high > _boxLow
                 _applyHighlight(_box, beinvfvgcolor)
                 beinvfvgtouch := true
+                if wh_enable and wh_mitigations
+                    alert(_wh_json("Inv.FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                 beinvfvgtouch
 
 if array.size(bullInvFVG) > invfvgMaxBoxSet
@@ -1108,12 +1173,16 @@ if ENABLE_IMBALANCES and array.size(_bullishvi) > 0 and extendvibox
                     else if low <= _boxHigh and filterMitBOX
                         _applyMitStyle(_box, line(na), false)
                         buvitouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("VI+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         buvitouch
             _boxRight := box.get_right(_box)
             if bar_index == _boxRight and vimitigationtype == 'Engulf' and HighlightBox
                 if close >= _boxLow and low < _boxHigh
                     _applyHighlight(_box, bullimbalance)
                     buvitouch := true
+                    if wh_enable and wh_mitigations
+                        alert(_wh_json("VI+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     buvitouch
 
 // ── VI – Bearish  (Engulf/Mitigate extend + highlight) ──
@@ -1136,12 +1205,16 @@ if ENABLE_IMBALANCES and array.size(_bearishvi) > 0 and extendvibox
                     else if high >= _boxHigh and filterMitBOX
                         _applyMitStyle(_box, line(na), false)
                         bevitouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("VI- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bevitouch
             _boxRight := box.get_right(_box)
             if bar_index == _boxRight and vimitigationtype == 'Engulf' and HighlightBox
                 if close <= _boxHigh and high > _boxLow
                     _applyHighlight(_box, bearimbalance)
                     bevitouch := true
+                    if wh_enable and wh_mitigations
+                        alert(_wh_json("VI- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     bevitouch
 
 // ── GAP – Bullish  (Engulf/Rebalance extend + highlight) ──
@@ -1180,11 +1253,15 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbu) > 0 and array.size(bugapce) > 
                     if close >= _boxLow and open >= _boxLow and low < _boxHigh
                         _applyHighlight(_box, gapcolor)
                         bugaptouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("GAP+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bugaptouch
                 else if gapmitigationtype == 'Rebalance'
                     if low > _boxLow and low < _boxHigh
                         _applyHighlight(_box, gapcolor)
                         bugaptouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("GAP+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bugaptouch
 
 // ── GAP – Bearish  (Engulf/Rebalance extend + highlight) ──
@@ -1223,11 +1300,15 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbe) > 0 and array.size(begapce) > 
                     if close <= _boxHigh and open <= _boxHigh and high > _boxLow
                         _applyHighlight(_box, gapcolor)
                         begaptouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("GAP- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         begaptouch
                 else if gapmitigationtype == 'Rebalance'
                     if high < _boxHigh and high > _boxLow
                         _applyHighlight(_box, gapcolor)
                         begaptouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("GAP- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         begaptouch
 
 // ── Order Block Alerts ──
