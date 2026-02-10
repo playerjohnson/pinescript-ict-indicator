@@ -450,6 +450,7 @@ var color  sh_nypmLColor   = input.color(color.new(#4caf50, 20), "", group = "�
 var string sh_nypmStyle    = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3c")
 var bool   sh_showLabels   = input.bool(true,  "Show Labels       ", group = "⑲ Session Highs/Lows", inline = "sh4")
 var int    sh_lineWidth    = input.int(1, "Width", 1, 4, group = "⑲ Session Highs/Lows", inline = "sh4")
+var string sh_labelSize    = input.string("Tiny", "Label Size", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group = "⑲ Session Highs/Lows", inline = "sh4b")
 var bool   sh_showCurrent  = input.bool(false, "Show Current Session H/L", group = "⑲ Session Highs/Lows", tooltip = "Display in-progress session highs/lows in addition to previous.")
 var int    sh_asiaStart    = input.int(20, "Asia Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh5", tooltip = "NY time (24h). Independent of Killzone times.")
 var int    sh_asiaEnd      = input.int(0,  "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh5")
@@ -468,7 +469,10 @@ var int    sh_nypmEnd      = input.int(16, "End", 0, 23, group = "⑲ Session Hi
 var int    sh_lineExtend   = input.int(50, "Line Extend Bars  ", 10, 200, group = "⑲ Session Highs/Lows", inline = "sh10")
 var int    sh_historyCount = input.int(5, "Sessions to Show  ", 1, 5, group = "⑲ Session Highs/Lows", inline = "sh11", tooltip = "Number of previous sessions to display per session type (1-5).")
 var bool   sh_showMit      = input.bool(true, "Show Mitigated    ", group = "⑲ Session Highs/Lows", inline = "sh12")
-var color  sh_mitColor     = input.color(color.new(color.gray, 60), "", group = "⑲ Session Highs/Lows", inline = "sh12", tooltip = "Color for mitigated levels (candle body closed through). Line becomes dotted.")
+var color  sh_mitColor     = input.color(color.new(color.gray, 60), "Line", group = "⑲ Session Highs/Lows", inline = "sh12")
+var color  sh_mitLblColor  = input.color(color.new(color.gray, 70), "Lbl", group = "⑲ Session Highs/Lows", inline = "sh12")
+var int    sh_mitLineWidth = input.int(1, "Width", 1, 4, group = "⑲ Session Highs/Lows", inline = "sh12", tooltip = "Mitigated level styling: line color, label color, and line width.")
+var string sh_mitLabelSize = input.string("Tiny", "Mit Label Size", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group = "⑲ Session Highs/Lows", inline = "sh12b")
 
 // ── Liquidity Levels Inputs ──
 var bool   lq_showPDH     = input.bool(true,  "PDH / PDL         ", group = "⑳ Liquidity Levels", inline = "lq1")
@@ -2441,6 +2445,10 @@ type SHLevel
 _sh_fmtTime(_t) =>
     na(_t) ? "" : " (" + str.format_time(_t, "EEE MM/dd HH:mm", "America/New_York") + ")"
 
+// ── Session H/L helper: convert size string to size constant ──
+_sh_getSize(_s) =>
+    _s == "Auto" ? size.auto : _s == "Small" ? size.small : _s == "Normal" ? size.normal : _s == "Large" ? size.large : _s == "Huge" ? size.huge : size.tiny
+
 // ── Archive completed session H/L into history arrays, trim to max ──
 _sh_archive(_histH, _histL, _curH, _curL, _curBar, _curHT, _curLT) =>
     if not na(_curH)
@@ -2483,19 +2491,25 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
             // Draw / extend (both mitigated and unmitigated)
             int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
             int _x2 = bar_index + sh_lineExtend
-            color _clr = _lvl.mitigated ? sh_mitColor : _color
+            color _lineClr = _lvl.mitigated ? sh_mitColor : _color
+            color _lblClr  = _lvl.mitigated ? sh_mitLblColor : _color
+            int _lw = _lvl.mitigated ? sh_mitLineWidth : sh_lineWidth
             string _mitTxt = _lvl.mitigated ? " [Mitigated]" : ""
             string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + _mitTxt
             line.style _ls = _lvl.mitigated ? line.style_dotted : f_get_line_style(_style)
+            string _sz = _lvl.mitigated ? _sh_getSize(sh_mitLabelSize) : _sh_getSize(sh_labelSize)
             if na(_lvl.ln)
-                _lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _clr, style = _ls, width = sh_lineWidth)
+                _lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _lineClr, style = _ls, width = _lw)
             line.set_x2(_lvl.ln, _x2)
+            line.set_color(_lvl.ln, _lineClr)
+            line.set_width(_lvl.ln, _lw)
             if sh_showLabels
                 if na(_lvl.lbl)
-                    _lvl.lbl := label.new(_x2, _lvl.price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _clr, size = size.tiny)
+                    _lvl.lbl := label.new(_x2, _lvl.price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _lblClr, size = _sz)
                 label.set_x(_lvl.lbl, _x2)
                 label.set_text(_lvl.lbl, _txt)
-                label.set_textcolor(_lvl.lbl, _clr)
+                label.set_textcolor(_lvl.lbl, _lblClr)
+                label.set_size(_lvl.lbl, _sz)
 
 // ── Draw current (in-progress) session lines ──
 // NOTE: Uses create-then-always-set pattern to avoid if/else type mismatches.
@@ -2516,13 +2530,16 @@ _sh_drawCur(_show, _inSess, _curH, _curL, _curHTime, _curLTime, _startBar, _hCol
         line.set_xy1(_cLineL, _x1, _curL)
         line.set_xy2(_cLineL, _x2, _curL)
         if sh_showLabels
+            string _sz = _sh_getSize(sh_labelSize)
             if na(_cLblH)
-                _cLblH := label.new(_x2, _curH, _hTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_hColor, 40), size = size.tiny)
-                _cLblL := label.new(_x2, _curL, _lTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_lColor, 40), size = size.tiny)
+                _cLblH := label.new(_x2, _curH, _hTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_hColor, 40), size = _sz)
+                _cLblL := label.new(_x2, _curL, _lTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_lColor, 40), size = _sz)
             label.set_xy(_cLblH, _x2, _curH)
             label.set_text(_cLblH, _hTxt)
             label.set_xy(_cLblL, _x2, _curL)
             label.set_text(_cLblL, _lTxt)
+            label.set_size(_cLblH, _sz)
+            label.set_size(_cLblL, _sz)
     if not _active and not _inSess
         // Hide when session is not active
         if not na(_cLineH)
