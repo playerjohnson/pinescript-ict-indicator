@@ -2580,7 +2580,6 @@ if ENABLE_SESSION_HL and timeframe.isintraday
 
     // ── Track Asia ──
     if _isAsia and not sh_inAsia
-        _sh_archive(sh_histAsiaH, sh_histAsiaL, sh_asiaH, sh_asiaL, sh_asiaBar, sh_asiaHT, sh_asiaLT)
         sh_asiaH := high, sh_asiaL := low, sh_asiaBar := bar_index
         sh_asiaHT := time, sh_asiaLT := time
         sh_inAsia := true
@@ -2590,11 +2589,12 @@ if ENABLE_SESSION_HL and timeframe.isintraday
         if low < nz(sh_asiaL, low)
             sh_asiaL := low, sh_asiaLT := time
     else
+        if sh_inAsia
+            _sh_archive(sh_histAsiaH, sh_histAsiaL, sh_asiaH, sh_asiaL, sh_asiaBar, sh_asiaHT, sh_asiaLT)
         sh_inAsia := false
 
     // ── Track London ──
     if _isLon and not sh_inLon
-        _sh_archive(sh_histLonH, sh_histLonL, sh_lonH, sh_lonL, sh_lonBar, sh_lonHT, sh_lonLT)
         sh_lonH := high, sh_lonL := low, sh_lonBar := bar_index
         sh_lonHT := time, sh_lonLT := time
         sh_inLon := true
@@ -2604,11 +2604,12 @@ if ENABLE_SESSION_HL and timeframe.isintraday
         if low < nz(sh_lonL, low)
             sh_lonL := low, sh_lonLT := time
     else
+        if sh_inLon
+            _sh_archive(sh_histLonH, sh_histLonL, sh_lonH, sh_lonL, sh_lonBar, sh_lonHT, sh_lonLT)
         sh_inLon := false
 
     // ── Track NY AM ──
     if _isNYAM and not sh_inNYAM
-        _sh_archive(sh_histNyamH, sh_histNyamL, sh_nyamH, sh_nyamL, sh_nyamBar, sh_nyamHT, sh_nyamLT)
         sh_nyamH := high, sh_nyamL := low, sh_nyamBar := bar_index
         sh_nyamHT := time, sh_nyamLT := time
         sh_inNYAM := true
@@ -2618,11 +2619,12 @@ if ENABLE_SESSION_HL and timeframe.isintraday
         if low < nz(sh_nyamL, low)
             sh_nyamL := low, sh_nyamLT := time
     else
+        if sh_inNYAM
+            _sh_archive(sh_histNyamH, sh_histNyamL, sh_nyamH, sh_nyamL, sh_nyamBar, sh_nyamHT, sh_nyamLT)
         sh_inNYAM := false
 
     // ── Track NY Lunch ──
     if _isNYL and not sh_inNYL
-        _sh_archive(sh_histNylH, sh_histNylL, sh_nylH, sh_nylL, sh_nylBar, sh_nylHT, sh_nylLT)
         sh_nylH := high, sh_nylL := low, sh_nylBar := bar_index
         sh_nylHT := time, sh_nylLT := time
         sh_inNYL := true
@@ -2632,11 +2634,12 @@ if ENABLE_SESSION_HL and timeframe.isintraday
         if low < nz(sh_nylL, low)
             sh_nylL := low, sh_nylLT := time
     else
+        if sh_inNYL
+            _sh_archive(sh_histNylH, sh_histNylL, sh_nylH, sh_nylL, sh_nylBar, sh_nylHT, sh_nylLT)
         sh_inNYL := false
 
     // ── Track NY PM ──
     if _isNYPM and not sh_inNYPM
-        _sh_archive(sh_histNypmH, sh_histNypmL, sh_nypmH, sh_nypmL, sh_nypmBar, sh_nypmHT, sh_nypmLT)
         sh_nypmH := high, sh_nypmL := low, sh_nypmBar := bar_index
         sh_nypmHT := time, sh_nypmLT := time
         sh_inNYPM := true
@@ -2646,6 +2649,8 @@ if ENABLE_SESSION_HL and timeframe.isintraday
         if low < nz(sh_nypmL, low)
             sh_nypmL := low, sh_nypmLT := time
     else
+        if sh_inNYPM
+            _sh_archive(sh_histNypmH, sh_histNypmL, sh_nypmH, sh_nypmL, sh_nypmBar, sh_nypmHT, sh_nypmLT)
         sh_inNYPM := false
 
     // ── Process history: check mitigation + draw/update lines ──
