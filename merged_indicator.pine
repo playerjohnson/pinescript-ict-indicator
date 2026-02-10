@@ -2465,49 +2465,37 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
             SHLevel _lvl = array.get(_hist, i)
             if na(_lvl.price)
                 continue
-            // Already mitigated — optionally hide
+            // Already mitigated — hide if toggle is off
             if _lvl.mitigated and not sh_showMit
                 line.delete(_lvl.ln)
                 label.delete(_lvl.lbl)
                 _lvl.ln  := line(na)
                 _lvl.lbl := label(na)
-            if _lvl.mitigated
                 continue
             // Check for new mitigation on confirmed bars
-            bool _hit = false
-            if barstate.isconfirmed
-                _hit := _isHigh ? close > _lvl.price : close < _lvl.price
-            // New mitigation — apply styling
-            if _hit
-                _lvl.mitigated := true
-            if _hit and sh_showMit and not na(_lvl.ln)
-                line.set_x2(_lvl.ln, bar_index)
-                line.set_color(_lvl.ln, sh_mitColor)
-                line.set_style(_lvl.ln, line.style_dotted)
-            if _hit and sh_showMit and sh_showLabels and not na(_lvl.lbl)
-                label.set_x(_lvl.lbl, bar_index)
-                label.set_text(_lvl.lbl, _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + " [Mitigated]")
-                label.set_textcolor(_lvl.lbl, sh_mitColor)
-            // New mitigation — hide if toggle off
-            if _hit and not sh_showMit
-                line.delete(_lvl.ln)
-                label.delete(_lvl.lbl)
-                _lvl.ln  := line(na)
-                _lvl.lbl := label(na)
-            if _hit
-                continue
-            // Not mitigated — draw / extend
+            if not _lvl.mitigated and barstate.isconfirmed
+                bool _hit = _isHigh ? close > _lvl.price : close < _lvl.price
+                if _hit
+                    _lvl.mitigated := true
+                    if not na(_lvl.ln)
+                        line.set_color(_lvl.ln, sh_mitColor)
+                        line.set_style(_lvl.ln, line.style_dotted)
+            // Draw / extend (both mitigated and unmitigated)
             int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
             int _x2 = bar_index + sh_lineExtend
-            string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime)
+            color _clr = _lvl.mitigated ? sh_mitColor : _color
+            string _mitTxt = _lvl.mitigated ? " [Mitigated]" : ""
+            string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + _mitTxt
+            line.style _ls = _lvl.mitigated ? line.style_dotted : f_get_line_style(_style)
             if na(_lvl.ln)
-                _lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _color, style = f_get_line_style(_style), width = sh_lineWidth)
+                _lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _clr, style = _ls, width = sh_lineWidth)
             line.set_x2(_lvl.ln, _x2)
             if sh_showLabels
                 if na(_lvl.lbl)
-                    _lvl.lbl := label.new(_x2, _lvl.price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _color, size = size.tiny)
+                    _lvl.lbl := label.new(_x2, _lvl.price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _clr, size = size.tiny)
                 label.set_x(_lvl.lbl, _x2)
                 label.set_text(_lvl.lbl, _txt)
+                label.set_textcolor(_lvl.lbl, _clr)
 
 // ── Draw current (in-progress) session lines ──
 // NOTE: Uses create-then-always-set pattern to avoid if/else type mismatches.
