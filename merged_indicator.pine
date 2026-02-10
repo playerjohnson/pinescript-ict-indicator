@@ -47,6 +47,9 @@ var bool   ho_showMidnightLbl   = input.bool(true , "Show Label", group="① Hou
 var color  ho_midColor          = input.color(color.purple , "Midnight Line     ", group="① Hourly Open", inline="ho3")
 var string ho_midStyleInput     = input.string("Solid" , "", options=["Solid","Dotted","Dashed","Arrow Left","Arrow Right","Arrow Both"], group="① Hourly Open", inline="ho3")
 var int    ho_midWidth          = input.int(1 , "", 1, 4, group="① Hourly Open", inline="ho3")
+var int    ho_midDays           = input.int(5, "Midnight Days     ", 1, 20, group="① Hourly Open", inline="ho3b", tooltip = "Number of previous midnight opening prices to display (1-20).")
+var color  ho_midLblColor       = input.color(color.purple, "Label", group="① Hourly Open", inline="ho3b")
+var string ho_midLblSize        = input.string("Small", "", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="① Hourly Open", inline="ho3b")
 var int    ho_maxLines          = input.int(50, "Max Lines", 1, 100, group="① Hourly Open")
 
 // ⬩ Highlight first / last 10 min
@@ -82,31 +85,79 @@ f_get_line_style(style) =>
 
 var line[] ho_lines      = array.new_line()
 var line[] hs_lines      = array.new_line()
-var label  ho_midLbl     = na
+
+// ── Midnight open multi-day state ──
+var float[] ho_midPrices  = array.new_float()
+var int[]   ho_midBars    = array.new_int()
+var int[]   ho_midTimes   = array.new_int()
+var line[]  ho_midLines   = array.new_line()
+var label[] ho_midLabels  = array.new_label()
+var bool    ho_wasMidnight = false
+
+// ── Size string → size constant helper ──
+_ho_getSize(_s) =>
+    _s == "Auto" ? size.auto : _s == "Small" ? size.small : _s == "Normal" ? size.normal : _s == "Large" ? size.large : _s == "Huge" ? size.huge : size.tiny
 
 int _midnHour = syminfo.timezone == "America/Chicago" ? 23 : 0
 
 if timeframe.isintraday and ENABLE_HOURLY_OPEN
-    if minute == 0 and second == 0
+    bool _isMidnight = hour == _midnHour and minute == 0
+    // ── Archive new midnight open ──
+    if _isMidnight and not ho_wasMidnight
+        array.unshift(ho_midPrices, open)
+        array.unshift(ho_midBars, bar_index)
+        array.unshift(ho_midTimes, time)
+        array.unshift(ho_midLines, line(na))
+        array.unshift(ho_midLabels, label(na))
+        // Trim to max days
+        while array.size(ho_midPrices) > ho_midDays
+            array.pop(ho_midPrices)
+            array.pop(ho_midBars)
+            array.pop(ho_midTimes)
+            line.delete(array.pop(ho_midLines))
+            label.delete(array.pop(ho_midLabels))
+    ho_wasMidnight := _isMidnight
+
+    // ── Draw / extend all midnight open lines ──
+    if ho_extendMidnight and array.size(ho_midPrices) > 0
+        string _midSz = _ho_getSize(ho_midLblSize)
+        for i = 0 to array.size(ho_midPrices) - 1
+            float _price = array.get(ho_midPrices, i)
+            int _startBar = array.get(ho_midBars, i)
+            int _startTime = array.get(ho_midTimes, i)
+            int _x2 = bar_index + 20
+            string _dayStr = str.format_time(_startTime, "EEE MM/dd", "America/New_York")
+            string _txt = "Midnight Open " + str.tostring(_price, format.mintick) + " (" + _dayStr + ")"
+            line _ln = array.get(ho_midLines, i)
+            if na(_ln)
+                _ln := line.new(_startBar, _price, _x2, _price, color = ho_midColor, style = line_style(ho_midStyleInput), width = ho_midWidth)
+                array.set(ho_midLines, i, _ln)
+            line.set_x2(_ln, _x2)
+            line.set_color(_ln, ho_midColor)
+            line.set_width(_ln, ho_midWidth)
+            line.set_style(_ln, line_style(ho_midStyleInput))
+            if ho_showMidnightLbl
+                label _lbl = array.get(ho_midLabels, i)
+                if na(_lbl)
+                    _lbl := label.new(_x2, _price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = ho_midLblColor, size = _midSz)
+                    array.set(ho_midLabels, i, _lbl)
+                label.set_x(_lbl, _x2)
+                label.set_text(_lbl, _txt)
+                label.set_textcolor(_lbl, ho_midLblColor)
+                label.set_size(_lbl, _midSz)
+
+    // ── Regular hourly open lines (non-midnight) ──
+    if minute == 0 and second == 0 and hour != _midnHour
         int   segStart      = time
         int   segFirstEnd   = time + 10*60*1000
         int   segLastStart  = time + 50*60*1000
-        int   segEnd        = (hour == _midnHour and ho_extendMidnight) ? timenow : time + 60*60*1000
+        int   segEnd        = time + 60*60*1000
 
-        color _col   = hour == _midnHour ? ho_midColor  : ho_lineColor
-        int   _width = hour == _midnHour ? ho_midWidth  : ho_width
         line  _main  = line.new(segStart, open, segEnd, open,
-                                xloc.bar_time, color=_col,
-                                style=line_style(hour == _midnHour ? ho_midStyleInput : ho_styleInput),
-                                width=_width)
+                                xloc.bar_time, color=ho_lineColor,
+                                style=line_style(ho_styleInput),
+                                width=ho_width)
         array.push(ho_lines, _main)
-
-        if hour == _midnHour and ho_showMidnightLbl
-            label.delete(ho_midLbl)
-            ho_midLbl := label.new(segEnd, open, "Midnight Open", xloc.bar_time, yloc.price,
-                                   color=na, textcolor=ho_midColor,
-                                   style=label.style_label_left, size=size.small,
-                                   textalign=text.align_left)
 
         if ho_highlightFirst10
             array.push(ho_lines,
