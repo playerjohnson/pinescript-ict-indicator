@@ -33,6 +33,15 @@ var bool ENABLE_KILLZONES     = input.bool(true, "Enable Killzones",            
 var bool ENABLE_SESSION_HL    = input.bool(true, "Enable Session Highs/Lows",       group = "⓪ Section Toggles")
 var bool ENABLE_LIQUIDITY     = input.bool(true, "Enable PDH/PDL/PWH/PWL",          group = "⓪ Section Toggles")
 
+// ── ㉑ Webhook JSON Alerts ──
+var bool   wh_enable      = input.bool(false, "Enable Webhook Alerts", group = "㉑ Webhook Alerts", tooltip = "Sends JSON payloads via alert() for bot/webhook integration.\nIn TradingView alert dialog, select 'Any alert() function call'.")
+var bool   wh_formations  = input.bool(true,  "Formation Alerts  ", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "OB, FVG, I.FVG, VI, GAP, Inverse FVG, LV formations")
+var bool   wh_mitigations = input.bool(true,  "Mitigation Alerts", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "All mitigation/highlight events")
+
+_wh_json(_event, _high, _low) =>
+    string _ts = str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", "America/New_York")
+    '{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + _ts + '"}'
+
 
 // ════════════════════════════════════════════════════════════════
 //  SECTION A – HOURLY OPEN & SEPARATOR
@@ -538,15 +547,6 @@ var color  lq_pmlColor    = input.color(color.new(#ef5350, 0), "", group = "⑳ 
 var string lq_pmStyle     = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑳ Liquidity Levels", inline = "lq3")
 var bool   lq_showLabels  = input.bool(true,  "Show Labels       ", group = "⑳ Liquidity Levels", inline = "lq4")
 var int    lq_lineWidth   = input.int(1, "Width", 1, 4, group = "⑳ Liquidity Levels", inline = "lq4")
-
-// ── ㉑ Webhook JSON Alerts ──
-var bool   wh_enable      = input.bool(false, "Enable Webhook Alerts", group = "㉑ Webhook Alerts", tooltip = "Sends JSON payloads via alert() for bot/webhook integration.\nIn TradingView alert dialog, select 'Any alert() function call'.")
-var bool   wh_formations  = input.bool(true,  "Formation Alerts  ", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "OB, FVG, I.FVG, VI, GAP, Inverse FVG, LV formations")
-var bool   wh_mitigations = input.bool(true,  "Mitigation Alerts", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "All mitigation/highlight events")
-
-_wh_json(_event, _high, _low) =>
-    string _ts = str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", "America/New_York")
-    '{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + _ts + '"}'
 
 var bool buimpfvgtouch = false
 var bool beimpfvgtouch = false
