@@ -2886,11 +2886,12 @@ if ENABLE_EQH_EQL and barstate.isconfirmed
                     float _avgPrice = math.avg(_swH, _prevPrice)
                     // Check we don't already have this level
                     bool _dup = false
-                    for j = 0 to array.size(eq_levels) - 1
-                        EQLevel _exist = array.get(eq_levels, j)
-                        if _exist.isHigh and math.abs(_exist.price - _avgPrice) <= _tolPts
-                            _dup := true
-                            break
+                    if array.size(eq_levels) > 0
+                        for j = 0 to array.size(eq_levels) - 1
+                            EQLevel _exist = array.get(eq_levels, j)
+                            if _exist.isHigh and math.abs(_exist.price - _avgPrice) <= _tolPts
+                                _dup := true
+                                break
                     if not _dup
                         EQLevel _newLvl = EQLevel.new(price = _avgPrice, bar1 = _prevBar, bar2 = _pivotBar, formTime = time, isHigh = true)
                         array.unshift(eq_levels, _newLvl)
@@ -2916,11 +2917,12 @@ if ENABLE_EQH_EQL and barstate.isconfirmed
                     _matched := true
                     float _avgPrice = math.avg(_swL, _prevPrice)
                     bool _dup = false
-                    for j = 0 to array.size(eq_levels) - 1
-                        EQLevel _exist = array.get(eq_levels, j)
-                        if not _exist.isHigh and math.abs(_exist.price - _avgPrice) <= _tolPts
-                            _dup := true
-                            break
+                    if array.size(eq_levels) > 0
+                        for j = 0 to array.size(eq_levels) - 1
+                            EQLevel _exist = array.get(eq_levels, j)
+                            if not _exist.isHigh and math.abs(_exist.price - _avgPrice) <= _tolPts
+                                _dup := true
+                                break
                     if not _dup
                         EQLevel _newLvl = EQLevel.new(price = _avgPrice, bar1 = _prevBar, bar2 = _pivotBar, formTime = time, isHigh = false)
                         array.unshift(eq_levels, _newLvl)
