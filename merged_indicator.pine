@@ -33,6 +33,14 @@ var bool ENABLE_KILLZONES     = input.bool(true, "Enable Killzones",            
 var bool ENABLE_SESSION_HL    = input.bool(true, "Enable Session Highs/Lows",       group = "⓪ Section Toggles")
 var bool ENABLE_LIQUIDITY     = input.bool(true, "Enable PDH/PDL/PWH/PWL",          group = "⓪ Section Toggles")
 
+// ── ㉑ Webhook JSON Alerts ──
+var bool   wh_enable      = input.bool(false, "Enable Webhook Alerts", group = "㉑ Webhook Alerts", tooltip = "Sends JSON payloads via alert() for bot/webhook integration.\nIn TradingView alert dialog, select 'Any alert() function call'.")
+var bool   wh_formations  = input.bool(true,  "Formation Alerts  ", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "OB, FVG, I.FVG, VI, GAP, Inverse FVG, LV formations")
+var bool   wh_mitigations = input.bool(true,  "Mitigation Alerts", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "All mitigation/highlight events")
+
+_wh_json(string _event, float _high, float _low) =>
+    '{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '"}'
+
 
 // ════════════════════════════════════════════════════════════════
 //  SECTION A – HOURLY OPEN & SEPARATOR
@@ -47,6 +55,9 @@ var bool   ho_showMidnightLbl   = input.bool(true , "Show Label", group="① Hou
 var color  ho_midColor          = input.color(color.purple , "Midnight Line     ", group="① Hourly Open", inline="ho3")
 var string ho_midStyleInput     = input.string("Solid" , "", options=["Solid","Dotted","Dashed","Arrow Left","Arrow Right","Arrow Both"], group="① Hourly Open", inline="ho3")
 var int    ho_midWidth          = input.int(1 , "", 1, 4, group="① Hourly Open", inline="ho3")
+var int    ho_midDays           = input.int(5, "Midnight Days     ", 1, 20, group="① Hourly Open", inline="ho3b", tooltip = "Number of previous midnight opening prices to display (1-20).")
+var color  ho_midLblColor       = input.color(color.purple, "Label", group="① Hourly Open", inline="ho3b")
+var string ho_midLblSize        = input.string("Small", "", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="① Hourly Open", inline="ho3b")
 var int    ho_maxLines          = input.int(50, "Max Lines", 1, 100, group="① Hourly Open")
 
 // ⬩ Highlight first / last 10 min
@@ -82,31 +93,79 @@ f_get_line_style(style) =>
 
 var line[] ho_lines      = array.new_line()
 var line[] hs_lines      = array.new_line()
-var label  ho_midLbl     = na
+
+// ── Midnight open multi-day state ──
+var float[] ho_midPrices  = array.new_float()
+var int[]   ho_midBars    = array.new_int()
+var int[]   ho_midTimes   = array.new_int()
+var line[]  ho_midLines   = array.new_line()
+var label[] ho_midLabels  = array.new_label()
+var bool    ho_wasMidnight = false
+
+// ── Size string → size constant helper ──
+_ho_getSize(_s) =>
+    _s == "Auto" ? size.auto : _s == "Small" ? size.small : _s == "Normal" ? size.normal : _s == "Large" ? size.large : _s == "Huge" ? size.huge : size.tiny
 
 int _midnHour = syminfo.timezone == "America/Chicago" ? 23 : 0
 
 if timeframe.isintraday and ENABLE_HOURLY_OPEN
-    if minute == 0 and second == 0
+    bool _isMidnight = hour == _midnHour and minute == 0
+    // ── Archive new midnight open ──
+    if _isMidnight and not ho_wasMidnight
+        array.unshift(ho_midPrices, open)
+        array.unshift(ho_midBars, bar_index)
+        array.unshift(ho_midTimes, time)
+        array.unshift(ho_midLines, line(na))
+        array.unshift(ho_midLabels, label(na))
+        // Trim to max days
+        while array.size(ho_midPrices) > ho_midDays
+            array.pop(ho_midPrices)
+            array.pop(ho_midBars)
+            array.pop(ho_midTimes)
+            line.delete(array.pop(ho_midLines))
+            label.delete(array.pop(ho_midLabels))
+    ho_wasMidnight := _isMidnight
+
+    // ── Draw / extend all midnight open lines ──
+    if ho_extendMidnight and array.size(ho_midPrices) > 0
+        string _midSz = _ho_getSize(ho_midLblSize)
+        for i = 0 to array.size(ho_midPrices) - 1
+            float _price = array.get(ho_midPrices, i)
+            int _startBar = array.get(ho_midBars, i)
+            int _startTime = array.get(ho_midTimes, i)
+            int _x2 = bar_index + 20
+            string _dayStr = str.format_time(_startTime, "EEE MM/dd", "America/New_York")
+            string _txt = "Midnight Open " + str.tostring(_price, format.mintick) + " (" + _dayStr + ")"
+            line _ln = array.get(ho_midLines, i)
+            if na(_ln)
+                _ln := line.new(_startBar, _price, _x2, _price, color = ho_midColor, style = line_style(ho_midStyleInput), width = ho_midWidth)
+                array.set(ho_midLines, i, _ln)
+            line.set_x2(_ln, _x2)
+            line.set_color(_ln, ho_midColor)
+            line.set_width(_ln, ho_midWidth)
+            line.set_style(_ln, line_style(ho_midStyleInput))
+            if ho_showMidnightLbl
+                label _lbl = array.get(ho_midLabels, i)
+                if na(_lbl)
+                    _lbl := label.new(_x2, _price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = ho_midLblColor, size = _midSz)
+                    array.set(ho_midLabels, i, _lbl)
+                label.set_x(_lbl, _x2)
+                label.set_text(_lbl, _txt)
+                label.set_textcolor(_lbl, ho_midLblColor)
+                label.set_size(_lbl, _midSz)
+
+    // ── Regular hourly open lines (non-midnight) ──
+    if minute == 0 and second == 0 and hour != _midnHour
         int   segStart      = time
         int   segFirstEnd   = time + 10*60*1000
         int   segLastStart  = time + 50*60*1000
-        int   segEnd        = (hour == _midnHour and ho_extendMidnight) ? timenow : time + 60*60*1000
+        int   segEnd        = time + 60*60*1000
 
-        color _col   = hour == _midnHour ? ho_midColor  : ho_lineColor
-        int   _width = hour == _midnHour ? ho_midWidth  : ho_width
         line  _main  = line.new(segStart, open, segEnd, open,
-                                xloc.bar_time, color=_col,
-                                style=line_style(hour == _midnHour ? ho_midStyleInput : ho_styleInput),
-                                width=_width)
+                                xloc.bar_time, color=ho_lineColor,
+                                style=line_style(ho_styleInput),
+                                width=ho_width)
         array.push(ho_lines, _main)
-
-        if hour == _midnHour and ho_showMidnightLbl
-            label.delete(ho_midLbl)
-            ho_midLbl := label.new(segEnd, open, "Midnight Open", xloc.bar_time, yloc.price,
-                                   color=na, textcolor=ho_midColor,
-                                   style=label.style_label_left, size=size.small,
-                                   textalign=text.align_left)
 
         if ho_highlightFirst10
             array.push(ho_lines,
@@ -225,6 +284,8 @@ if ob_newHour and ENABLE_ORDER_BLOCKS
                               text_color   = color.new(ob_bullColor, 30))
             ob_bulls.push(OrderBlock.new(_ob, ob_A_c, false, 0))
             ob_bullFormed := true
+            if wh_enable and wh_formations
+                alert(_wh_json("Bull OB Formed", _top, _bot), alert.freq_once_per_bar_close)
             while ob_bulls.size() > ob_maxBoxes
                 OrderBlock _del = ob_bulls.shift()
                 box.delete(_del.bx)
@@ -246,6 +307,8 @@ if ob_newHour and ENABLE_ORDER_BLOCKS
                               text_color   = color.new(ob_bearColor, 30))
             ob_bears.push(OrderBlock.new(_ob, ob_A_c, false, 0))
             ob_bearFormed := true
+            if wh_enable and wh_formations
+                alert(_wh_json("Bear OB Formed", _top, _bot), alert.freq_once_per_bar_close)
             while ob_bears.size() > ob_maxBoxes
                 OrderBlock _del = ob_bears.shift()
                 box.delete(_del.bx)
@@ -280,6 +343,8 @@ if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
                 _ob.mitigated := true
                 _ob.mit_bar   := bar_index
                 ob_bullMit    := true
+                if wh_enable and wh_mitigations
+                    alert(_wh_json("Bull OB Mitigated", box.get_top(_ob.bx), box.get_bottom(_ob.bx)), alert.freq_once_per_bar)
                 if ob_invert
                     box.set_bgcolor(_ob.bx, ob_invBullColor)
                     box.set_border_color(_ob.bx, color.new(ob_invBullColor, 60))
@@ -308,6 +373,8 @@ if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
                 _ob.mitigated := true
                 _ob.mit_bar   := bar_index
                 ob_bearMit    := true
+                if wh_enable and wh_mitigations
+                    alert(_wh_json("Bear OB Mitigated", box.get_top(_ob.bx), box.get_bottom(_ob.bx)), alert.freq_once_per_bar)
                 if ob_invert
                     box.set_bgcolor(_ob.bx, ob_invBearColor)
                     box.set_border_color(_ob.bx, color.new(ob_invBearColor, 60))
@@ -440,6 +507,10 @@ var bool   sh_showNYAM     = input.bool(true,  "NY AM H/L         ", group = "�
 var color  sh_nyamHColor   = input.color(color.new(#ef5350, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3")
 var color  sh_nyamLColor   = input.color(color.new(#ef5350, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3")
 var string sh_nyamStyle    = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3")
+var bool   sh_showNYPre    = input.bool(true,  "NY Pre-AM H/L     ", group = "⑲ Session Highs/Lows", inline = "sh3a")
+var color  sh_nypreHColor  = input.color(color.new(#ffeb3b, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3a")
+var color  sh_nypreLColor  = input.color(color.new(#ffeb3b, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3a")
+var string sh_nypreStyle   = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3a")
 var bool   sh_showNYLunch  = input.bool(true,  "NY Lunch H/L      ", group = "⑲ Session Highs/Lows", inline = "sh3b")
 var color  sh_nylHColor    = input.color(color.new(#ab47bc, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3b")
 var color  sh_nylLColor    = input.color(color.new(#ab47bc, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3b")
@@ -450,25 +521,15 @@ var color  sh_nypmLColor   = input.color(color.new(#4caf50, 20), "", group = "�
 var string sh_nypmStyle    = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3c")
 var bool   sh_showLabels   = input.bool(true,  "Show Labels       ", group = "⑲ Session Highs/Lows", inline = "sh4")
 var int    sh_lineWidth    = input.int(1, "Width", 1, 4, group = "⑲ Session Highs/Lows", inline = "sh4")
+var string sh_labelSize    = input.string("Tiny", "Label Size", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group = "⑲ Session Highs/Lows", inline = "sh4b")
 var bool   sh_showCurrent  = input.bool(false, "Show Current Session H/L", group = "⑲ Session Highs/Lows", tooltip = "Display in-progress session highs/lows in addition to previous.")
-var int    sh_asiaStart    = input.int(20, "Asia Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh5", tooltip = "NY time (24h). Independent of Killzone times.")
-var int    sh_asiaEnd      = input.int(0,  "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh5")
-var int    sh_lonStart     = input.int(2,  "London Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh6")
-var int    sh_lonEnd       = input.int(5,  "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh6")
-var int    sh_nyamStartH   = input.int(9,  "NY AM Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh7")
-var int    sh_nyamStartM   = input.int(30, ":", 0, 59, group = "⑲ Session Highs/Lows", inline = "sh7")
-var int    sh_nyamEnd      = input.int(12, "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh7")
-var int    sh_nylStartH    = input.int(12, "Lunch Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh8")
-var int    sh_nylStartM    = input.int(0,  ":", 0, 59, group = "⑲ Session Highs/Lows", inline = "sh8")
-var int    sh_nylEndH      = input.int(13, "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh8")
-var int    sh_nylEndM      = input.int(30, ":", 0, 59, group = "⑲ Session Highs/Lows", inline = "sh8")
-var int    sh_nypmStartH   = input.int(13, "NY PM Start", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh9")
-var int    sh_nypmStartM   = input.int(30, ":", 0, 59, group = "⑲ Session Highs/Lows", inline = "sh9")
-var int    sh_nypmEnd      = input.int(16, "End", 0, 23, group = "⑲ Session Highs/Lows", inline = "sh9")
 var int    sh_lineExtend   = input.int(50, "Line Extend Bars  ", 10, 200, group = "⑲ Session Highs/Lows", inline = "sh10")
-var int    sh_historyCount = input.int(5, "Sessions to Show  ", 1, 5, group = "⑲ Session Highs/Lows", inline = "sh11", tooltip = "Number of previous sessions to display per session type (1-5).")
+var int    sh_historyCount = input.int(5, "Sessions to Show  ", 1, 20, group = "⑲ Session Highs/Lows", inline = "sh11", tooltip = "Number of previous sessions to display per session type (1-20). Uses same times as Killzone settings in ⑱.")
 var bool   sh_showMit      = input.bool(true, "Show Mitigated    ", group = "⑲ Session Highs/Lows", inline = "sh12")
-var color  sh_mitColor     = input.color(color.new(color.gray, 60), "", group = "⑲ Session Highs/Lows", inline = "sh12", tooltip = "Color for mitigated levels (candle body closed through). Line becomes dotted.")
+var color  sh_mitColor     = input.color(color.new(color.gray, 60), "Line", group = "⑲ Session Highs/Lows", inline = "sh12")
+var color  sh_mitLblColor  = input.color(color.new(color.gray, 70), "Lbl", group = "⑲ Session Highs/Lows", inline = "sh12")
+var int    sh_mitLineWidth = input.int(1, "Width", 1, 4, group = "⑲ Session Highs/Lows", inline = "sh12", tooltip = "Mitigated level styling: line color, label color, and line width.")
+var string sh_mitLabelSize = input.string("Tiny", "Mit Label Size", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group = "⑲ Session Highs/Lows", inline = "sh12b")
 
 // ── Liquidity Levels Inputs ──
 var bool   lq_showPDH     = input.bool(true,  "PDH / PDL         ", group = "⑳ Liquidity Levels", inline = "lq1")
@@ -557,6 +618,8 @@ if isBuVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
     if array.size(_bullishvi) > viMaxBoxSet
         box.delete(array.shift(_bullishvi))
     array.push(_bullishvi, _bullboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI+", open, close[1]), alert.freq_once_per_bar_close)
 
 // Bearish Volume Imbalance
 if isBeVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
@@ -565,6 +628,8 @@ if isBeVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
     if array.size(_bearishvi) > viMaxBoxSet
         box.delete(array.shift(_bearishvi))
     array.push(_bearishvi, _bearboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI-", close[1], open), alert.freq_once_per_bar_close)
 
 // Bullish Volume Imbalance Type 2
 if isBuVItype2(0) and advancedvi and ENABLE_IMBALANCES
@@ -573,6 +638,8 @@ if isBuVItype2(0) and advancedvi and ENABLE_IMBALANCES
     if array.size(_bullishvi) > viMaxBoxSet
         box.delete(array.shift(_bullishvi))
     array.push(_bullishvi, _bullboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI+", close[1], open), alert.freq_once_per_bar_close)
 
 // Bearish Volume Imbalance Type 2
 if isBeVItype2(0) and advancedvi and ENABLE_IMBALANCES
@@ -581,6 +648,8 @@ if isBeVItype2(0) and advancedvi and ENABLE_IMBALANCES
     if array.size(_bearishvi) > viMaxBoxSet
         box.delete(array.shift(_bearishvi))
     array.push(_bearishvi, _bearboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI-", open, close[1]), alert.freq_once_per_bar_close)
 
 // Bullish Volume Imbalance Type 3
 if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES
@@ -589,6 +658,8 @@ if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES
     if array.size(_bullishvi) > viMaxBoxSet
         box.delete(array.shift(_bullishvi))
     array.push(_bullishvi, _bullboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI+", math.max(open, close[1]), math.min(open, close[1])), alert.freq_once_per_bar_close)
 
 // Bearish Volume Imbalance Type 3
 if isBeVItype3(0) and advancedvi and ENABLE_IMBALANCES
@@ -597,6 +668,8 @@ if isBeVItype3(0) and advancedvi and ENABLE_IMBALANCES
     if array.size(_bearishvi) > viMaxBoxSet
         box.delete(array.shift(_bearishvi))
     array.push(_bearishvi, _bearboxVI)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("VI-", math.min(open, close[1]), math.max(open, close[1])), alert.freq_once_per_bar_close)
 
 if extendallvis
     _controlBox2(_bullishvi, high, low)
@@ -611,10 +684,14 @@ if (high[1] < low or low[1] > high) and truegap and ENABLE_IMBALANCES
     if high[1] < low
         _gapsbu := box.new(left = bar_index - 1, top = low, right = bar_index + 1, bottom = high[1], bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
         bugapceline := cegap ? line.new(bar_index - 1, math.avg(low, high[1]), bar_index, math.avg(low, high[1]), style = celinetype, color = color.new(gapcolor, cetransparency)) : na
+        if wh_enable and wh_formations and barstate.isconfirmed
+            alert(_wh_json("GAP+", low, high[1]), alert.freq_once_per_bar_close)
         bugapceline
     else if low[1] > high
         _gapsbe := box.new(left = bar_index - 1, top = low[1], right = bar_index + 1, bottom = high, bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
         begapceline := cegap ? line.new(bar_index - 1, math.avg(low[1], high), bar_index, math.avg(low[1], high), style = celinetype, color = color.new(gapcolor, cetransparency)) : na
+        if wh_enable and wh_formations and barstate.isconfirmed
+            alert(_wh_json("GAP-", low[1], high), alert.freq_once_per_bar_close)
         begapceline
     if array.size(_gapsboxesbu) > gapsMaxBoxSet and array.size(bugapce) > gapsMaxBoxSet
         box.delete(array.shift(_gapsboxesbu))
@@ -675,6 +752,8 @@ if isFvgUp(0) and not liquidityvoidmode and ENABLE_IMBALANCES
         line.delete(array.shift(_bufvgce))
     array.push(_bullBoxesFVG, _bullboxFVG)
     array.push(_bufvgce, _buline)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("FVG+", low, high[2]), alert.freq_once_per_bar_close)
 
 // Bearish FVG
 if isFvgDown(0) and not liquidityvoidmode and ENABLE_IMBALANCES
@@ -694,6 +773,8 @@ if isFvgDown(0) and not liquidityvoidmode and ENABLE_IMBALANCES
         line.delete(array.shift(_befvgce))
     array.push(_bearBoxesFVG, _bearboxFVG)
     array.push(_befvgce, _beline)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("FVG-", low[2], high), alert.freq_once_per_bar_close)
 
 // ── Liquidity Void Mode ──
 bool bulv = false
@@ -717,6 +798,8 @@ if isFvgUp(0) and isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and array
         line.delete(array.shift(_bufvgce))
     array.push(_bullBoxesFVG, _bullboxFVG)
     array.push(_bufvgce, _buline)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("LV+", low, tempboxlow), alert.freq_once_per_bar_close)
 else if isFvgUp(0) and not isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
     box _bullboxFVG = na
     line _buline = na
@@ -746,6 +829,8 @@ if isFvgDown(0) and isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and a
         line.delete(array.shift(_befvgce))
     array.push(_bearBoxesFVG, _bearboxFVG)
     array.push(_befvgce, _beline)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("LV-", tempboxhigh, high), alert.freq_once_per_bar_close)
 else if isFvgDown(0) and not isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
     box _bearboxFVG = na
     line _beline = na
@@ -770,6 +855,8 @@ if isBuIFvg(0) and showifvg and ENABLE_IMBALANCES
     if array.size(_bullishifvg) > fvgMaxBoxSet
         box.delete(array.shift(_bullishifvg))
     array.push(_bullishifvg, _bullboxifvg)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("I.FVG+", (math.min(open, close) + low) / 2, (high[2] + math.max(open[2], close[2])) / 2), alert.freq_once_per_bar_close)
 
 if isBeIFvg(0) and showifvg and ENABLE_IMBALANCES
     box _bearboxifvg = na
@@ -777,6 +864,8 @@ if isBeIFvg(0) and showifvg and ENABLE_IMBALANCES
     if array.size(_bearishifvg) > fvgMaxBoxSet
         box.delete(array.shift(_bearishifvg))
     array.push(_bearishifvg, _bearboxifvg)
+    if wh_enable and wh_formations and barstate.isconfirmed
+        alert(_wh_json("I.FVG-", (math.min(open[2], close[2]) + low[2]) / 2, (math.max(open, close) + high) / 2), alert.freq_once_per_bar_close)
 
 // ══════════════════════════════════════════════════════════════
 //  SECTION B – UNIFIED IMBALANCE LOOPS  (perf: 39 → 12 loops)
@@ -820,6 +909,8 @@ if ENABLE_IMBALANCES and array.size(_bullishifvg) > 0 and extendfvgbox
                 if close >= _boxLow and low < _boxHigh
                     _applyHighlight(_box, ifvgBullColor)
                     buimpfvgtouch := true
+                    if wh_enable and wh_mitigations
+                        alert(_wh_json("I.FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     buimpfvgtouch
 
 // ── Implied FVG – Bearish ──
@@ -846,6 +937,8 @@ if ENABLE_IMBALANCES and array.size(_bearishifvg) > 0 and extendfvgbox
                 if close <= _boxHigh and high > _boxLow
                     _applyHighlight(_box, ifvgBearColor)
                     beimpfvgtouch := true
+                    if wh_enable and wh_mitigations
+                        alert(_wh_json("I.FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     beimpfvgtouch
 
 // ── FVG – Bullish  (extend + highlight + inverse-create + hide) ──
@@ -872,6 +965,8 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
                         box.delete(_box)
                         line.delete(_line)
                         isbeinversefvg := true
+                        if wh_enable and wh_formations
+                            alert(_wh_json("Inverse.FVG-", _boxHigh, _boxLow), alert.freq_once_per_bar_close)
                         isbeinversefvg
                     else if close < _boxLow and filterMitBOX
                         _applyMitStyle(_box, _line, true)
@@ -902,11 +997,15 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
                     if close >= _boxLow and low < _boxHigh
                         _applyHighlight(_box, fvgBullColor)
                         bufvgtouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bufvgtouch
                 else if fvgmitigationtype == 'Rebalance'
                     if low < _boxHigh and low > _boxLow
                         _applyHighlight(_box, fvgBullColor)
                         bufvgtouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bufvgtouch
 
 // ── FVG – Bearish  (extend + highlight + inverse-create) ──
@@ -932,6 +1031,8 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
                         box.delete(_box)
                         line.delete(_line)
                         isbuinversefvg := true
+                        if wh_enable and wh_formations
+                            alert(_wh_json("Inverse.FVG+", _boxHigh, _boxLow), alert.freq_once_per_bar_close)
                         isbuinversefvg
                     else if close > _boxHigh and filterMitBOX
                         _applyMitStyle(_box, _line, true)
@@ -961,11 +1062,15 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
                     if close <= _boxHigh and high > _boxLow
                         _applyHighlight(_box, fvgBearColor)
                         befvgtouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         befvgtouch
                 else if fvgmitigationtype == 'Rebalance'
                     if high > _boxLow and high < _boxHigh
                         _applyHighlight(_box, fvgBearColor)
                         befvgtouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         befvgtouch
 
 // ── Inverse FVG – Bullish  (restyle + extend + highlight) ──
@@ -1000,6 +1105,8 @@ if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'En
             if close >= _boxLow and low < _boxHigh
                 _applyHighlight(_box, buinvfvgcolor)
                 buinvfvgtouch := true
+                if wh_enable and wh_mitigations
+                    alert(_wh_json("Inv.FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                 buinvfvgtouch
 
 // ── Inverse FVG – Bearish  (restyle + extend + highlight) ──
@@ -1032,6 +1139,8 @@ if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'En
             if close <= _boxHigh and high > _boxLow
                 _applyHighlight(_box, beinvfvgcolor)
                 beinvfvgtouch := true
+                if wh_enable and wh_mitigations
+                    alert(_wh_json("Inv.FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                 beinvfvgtouch
 
 if array.size(bullInvFVG) > invfvgMaxBoxSet
@@ -1063,12 +1172,16 @@ if ENABLE_IMBALANCES and array.size(_bullishvi) > 0 and extendvibox
                     else if low <= _boxHigh and filterMitBOX
                         _applyMitStyle(_box, line(na), false)
                         buvitouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("VI+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         buvitouch
             _boxRight := box.get_right(_box)
             if bar_index == _boxRight and vimitigationtype == 'Engulf' and HighlightBox
                 if close >= _boxLow and low < _boxHigh
                     _applyHighlight(_box, bullimbalance)
                     buvitouch := true
+                    if wh_enable and wh_mitigations
+                        alert(_wh_json("VI+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     buvitouch
 
 // ── VI – Bearish  (Engulf/Mitigate extend + highlight) ──
@@ -1091,12 +1204,16 @@ if ENABLE_IMBALANCES and array.size(_bearishvi) > 0 and extendvibox
                     else if high >= _boxHigh and filterMitBOX
                         _applyMitStyle(_box, line(na), false)
                         bevitouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("VI- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bevitouch
             _boxRight := box.get_right(_box)
             if bar_index == _boxRight and vimitigationtype == 'Engulf' and HighlightBox
                 if close <= _boxHigh and high > _boxLow
                     _applyHighlight(_box, bearimbalance)
                     bevitouch := true
+                    if wh_enable and wh_mitigations
+                        alert(_wh_json("VI- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     bevitouch
 
 // ── GAP – Bullish  (Engulf/Rebalance extend + highlight) ──
@@ -1135,11 +1252,15 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbu) > 0 and array.size(bugapce) > 
                     if close >= _boxLow and open >= _boxLow and low < _boxHigh
                         _applyHighlight(_box, gapcolor)
                         bugaptouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("GAP+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bugaptouch
                 else if gapmitigationtype == 'Rebalance'
                     if low > _boxLow and low < _boxHigh
                         _applyHighlight(_box, gapcolor)
                         bugaptouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("GAP+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bugaptouch
 
 // ── GAP – Bearish  (Engulf/Rebalance extend + highlight) ──
@@ -1178,11 +1299,15 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbe) > 0 and array.size(begapce) > 
                     if close <= _boxHigh and open <= _boxHigh and high > _boxLow
                         _applyHighlight(_box, gapcolor)
                         begaptouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("GAP- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         begaptouch
                 else if gapmitigationtype == 'Rebalance'
                     if high < _boxHigh and high > _boxLow
                         _applyHighlight(_box, gapcolor)
                         begaptouch := true
+                        if wh_enable and wh_mitigations
+                            alert(_wh_json("GAP- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         begaptouch
 
 // ── Order Block Alerts ──
@@ -2441,6 +2566,10 @@ type SHLevel
 _sh_fmtTime(_t) =>
     na(_t) ? "" : " (" + str.format_time(_t, "EEE MM/dd HH:mm", "America/New_York") + ")"
 
+// ── Session H/L helper: convert size string to size constant ──
+_sh_getSize(_s) =>
+    _s == "Auto" ? size.auto : _s == "Small" ? size.small : _s == "Normal" ? size.normal : _s == "Large" ? size.large : _s == "Huge" ? size.huge : size.tiny
+
 // ── Archive completed session H/L into history arrays, trim to max ──
 _sh_archive(_histH, _histL, _curH, _curL, _curBar, _curHT, _curLT) =>
     if not na(_curH)
@@ -2465,49 +2594,43 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
             SHLevel _lvl = array.get(_hist, i)
             if na(_lvl.price)
                 continue
-            // Already mitigated — optionally hide
+            // Already mitigated — hide if toggle is off
             if _lvl.mitigated and not sh_showMit
                 line.delete(_lvl.ln)
                 label.delete(_lvl.lbl)
                 _lvl.ln  := line(na)
                 _lvl.lbl := label(na)
-            if _lvl.mitigated
                 continue
             // Check for new mitigation on confirmed bars
-            bool _hit = false
-            if barstate.isconfirmed
-                _hit := _isHigh ? close > _lvl.price : close < _lvl.price
-            // New mitigation — apply styling
-            if _hit
-                _lvl.mitigated := true
-            if _hit and sh_showMit and not na(_lvl.ln)
-                line.set_x2(_lvl.ln, bar_index)
-                line.set_color(_lvl.ln, sh_mitColor)
-                line.set_style(_lvl.ln, line.style_dotted)
-            if _hit and sh_showMit and sh_showLabels and not na(_lvl.lbl)
-                label.set_x(_lvl.lbl, bar_index)
-                label.set_text(_lvl.lbl, _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + " [Mitigated]")
-                label.set_textcolor(_lvl.lbl, sh_mitColor)
-            // New mitigation — hide if toggle off
-            if _hit and not sh_showMit
-                line.delete(_lvl.ln)
-                label.delete(_lvl.lbl)
-                _lvl.ln  := line(na)
-                _lvl.lbl := label(na)
-            if _hit
-                continue
-            // Not mitigated — draw / extend
+            if not _lvl.mitigated and barstate.isconfirmed
+                bool _hit = _isHigh ? close > _lvl.price : close < _lvl.price
+                if _hit
+                    _lvl.mitigated := true
+                    if not na(_lvl.ln)
+                        line.set_color(_lvl.ln, sh_mitColor)
+                        line.set_style(_lvl.ln, line.style_dotted)
+            // Draw / extend (both mitigated and unmitigated)
             int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
             int _x2 = bar_index + sh_lineExtend
-            string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime)
+            color _lineClr = _lvl.mitigated ? sh_mitColor : _color
+            color _lblClr  = _lvl.mitigated ? sh_mitLblColor : _color
+            int _lw = _lvl.mitigated ? sh_mitLineWidth : sh_lineWidth
+            string _mitTxt = _lvl.mitigated ? " [Mitigated]" : ""
+            string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + _mitTxt
+            string _ls = _lvl.mitigated ? line.style_dotted : f_get_line_style(_style)
+            string _sz = _lvl.mitigated ? _sh_getSize(sh_mitLabelSize) : _sh_getSize(sh_labelSize)
             if na(_lvl.ln)
-                _lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _color, style = f_get_line_style(_style), width = sh_lineWidth)
+                _lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _lineClr, style = _ls, width = _lw)
             line.set_x2(_lvl.ln, _x2)
+            line.set_color(_lvl.ln, _lineClr)
+            line.set_width(_lvl.ln, _lw)
             if sh_showLabels
                 if na(_lvl.lbl)
-                    _lvl.lbl := label.new(_x2, _lvl.price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _color, size = size.tiny)
+                    _lvl.lbl := label.new(_x2, _lvl.price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _lblClr, size = _sz)
                 label.set_x(_lvl.lbl, _x2)
                 label.set_text(_lvl.lbl, _txt)
+                label.set_textcolor(_lvl.lbl, _lblClr)
+                label.set_size(_lvl.lbl, _sz)
 
 // ── Draw current (in-progress) session lines ──
 // NOTE: Uses create-then-always-set pattern to avoid if/else type mismatches.
@@ -2528,13 +2651,16 @@ _sh_drawCur(_show, _inSess, _curH, _curL, _curHTime, _curLTime, _startBar, _hCol
         line.set_xy1(_cLineL, _x1, _curL)
         line.set_xy2(_cLineL, _x2, _curL)
         if sh_showLabels
+            string _sz = _sh_getSize(sh_labelSize)
             if na(_cLblH)
-                _cLblH := label.new(_x2, _curH, _hTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_hColor, 40), size = size.tiny)
-                _cLblL := label.new(_x2, _curL, _lTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_lColor, 40), size = size.tiny)
+                _cLblH := label.new(_x2, _curH, _hTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_hColor, 40), size = _sz)
+                _cLblL := label.new(_x2, _curL, _lTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_lColor, 40), size = _sz)
             label.set_xy(_cLblH, _x2, _curH)
             label.set_text(_cLblH, _hTxt)
             label.set_xy(_cLblL, _x2, _curL)
             label.set_text(_cLblL, _lTxt)
+            label.set_size(_cLblH, _sz)
+            label.set_size(_cLblL, _sz)
     if not _active and not _inSess
         // Hide when session is not active
         if not na(_cLineH)
@@ -2554,6 +2680,8 @@ var array<SHLevel> sh_histLonH  = array.new<SHLevel>()
 var array<SHLevel> sh_histLonL  = array.new<SHLevel>()
 var array<SHLevel> sh_histNyamH = array.new<SHLevel>()
 var array<SHLevel> sh_histNyamL = array.new<SHLevel>()
+var array<SHLevel> sh_histNypreH = array.new<SHLevel>()
+var array<SHLevel> sh_histNypreL = array.new<SHLevel>()
 var array<SHLevel> sh_histNylH  = array.new<SHLevel>()
 var array<SHLevel> sh_histNylL  = array.new<SHLevel>()
 var array<SHLevel> sh_histNypmH = array.new<SHLevel>()
@@ -2563,20 +2691,22 @@ var array<SHLevel> sh_histNypmL = array.new<SHLevel>()
 var float sh_asiaH = na,  var float sh_asiaL = na,  var int sh_asiaBar = na,  var int sh_asiaHT = na, var int sh_asiaLT = na
 var float sh_lonH  = na,  var float sh_lonL  = na,  var int sh_lonBar  = na,  var int sh_lonHT  = na, var int sh_lonLT  = na
 var float sh_nyamH = na,  var float sh_nyamL = na,  var int sh_nyamBar = na,  var int sh_nyamHT = na, var int sh_nyamLT = na
+var float sh_nypreH = na, var float sh_nypreL = na, var int sh_nypreBar = na, var int sh_nypreHT = na, var int sh_nypreLT = na
 var float sh_nylH  = na,  var float sh_nylL  = na,  var int sh_nylBar  = na,  var int sh_nylHT  = na, var int sh_nylLT  = na
 var float sh_nypmH = na,  var float sh_nypmL = na,  var int sh_nypmBar = na,  var int sh_nypmHT = na, var int sh_nypmLT = na
 
 // In-session flags
 var bool sh_inAsia = false, var bool sh_inLon = false
-var bool sh_inNYAM = false, var bool sh_inNYL = false, var bool sh_inNYPM = false
+var bool sh_inNYAM = false, var bool sh_inNYPre = false, var bool sh_inNYL = false, var bool sh_inNYPM = false
 
 if ENABLE_SESSION_HL and timeframe.isintraday
-    // ── Detect sessions ──
-    bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, sh_asiaStart, 0, sh_asiaEnd, 0)
-    bool _isLon  = f_inSession(kz_nyHour, kz_nyMin, sh_lonStart, 0, sh_lonEnd, 0)
-    bool _isNYAM = f_inSession(kz_nyHour, kz_nyMin, sh_nyamStartH, sh_nyamStartM, sh_nyamEnd, 0)
-    bool _isNYL  = f_inSession(kz_nyHour, kz_nyMin, sh_nylStartH, sh_nylStartM, sh_nylEndH, sh_nylEndM)
-    bool _isNYPM = f_inSession(kz_nyHour, kz_nyMin, sh_nypmStartH, sh_nypmStartM, sh_nypmEnd, 0)
+    // ── Detect sessions (uses Killzone times from ⑱, except NY Lunch which is hardcoded 12:00-13:30) ──
+    bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
+    bool _isLon  = f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
+    bool _isNYAM  = f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, 0)
+    bool _isNYPre = f_inSession(kz_nyHour, kz_nyMin, 7, 0, 9, 30)
+    bool _isNYL   = f_inSession(kz_nyHour, kz_nyMin, 12, 0, 13, 30)
+    bool _isNYPM = f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
 
     // ── Track Asia ──
     if _isAsia and not sh_inAsia
@@ -2623,6 +2753,21 @@ if ENABLE_SESSION_HL and timeframe.isintraday
             _sh_archive(sh_histNyamH, sh_histNyamL, sh_nyamH, sh_nyamL, sh_nyamBar, sh_nyamHT, sh_nyamLT)
         sh_inNYAM := false
 
+    // ── Track NY Pre-AM ──
+    if _isNYPre and not sh_inNYPre
+        sh_nypreH := high, sh_nypreL := low, sh_nypreBar := bar_index
+        sh_nypreHT := time, sh_nypreLT := time
+        sh_inNYPre := true
+    else if _isNYPre
+        if high > nz(sh_nypreH, high)
+            sh_nypreH := high, sh_nypreHT := time
+        if low < nz(sh_nypreL, low)
+            sh_nypreL := low, sh_nypreLT := time
+    else
+        if sh_inNYPre
+            _sh_archive(sh_histNypreH, sh_histNypreL, sh_nypreH, sh_nypreL, sh_nypreBar, sh_nypreHT, sh_nypreLT)
+        sh_inNYPre := false
+
     // ── Track NY Lunch ──
     if _isNYL and not sh_inNYL
         sh_nylH := high, sh_nylL := low, sh_nylBar := bar_index
@@ -2660,6 +2805,8 @@ if ENABLE_SESSION_HL and timeframe.isintraday
     _sh_processHist(sh_showLondon,  sh_histLonL,  false, sh_londonLColor, sh_londonStyle, "London")
     _sh_processHist(sh_showNYAM,    sh_histNyamH, true,  sh_nyamHColor,   sh_nyamStyle,   "NY AM")
     _sh_processHist(sh_showNYAM,    sh_histNyamL, false, sh_nyamLColor,   sh_nyamStyle,   "NY AM")
+    _sh_processHist(sh_showNYPre,   sh_histNypreH, true,  sh_nypreHColor,  sh_nypreStyle,  "NY Pre-AM")
+    _sh_processHist(sh_showNYPre,   sh_histNypreL, false, sh_nypreLColor,  sh_nypreStyle,  "NY Pre-AM")
     _sh_processHist(sh_showNYLunch, sh_histNylH,  true,  sh_nylHColor,    sh_nylStyle,    "NY Lunch")
     _sh_processHist(sh_showNYLunch, sh_histNylL,  false, sh_nylLColor,    sh_nylStyle,    "NY Lunch")
     _sh_processHist(sh_showNYPM,    sh_histNypmH, true,  sh_nypmHColor,   sh_nypmStyle,   "NY PM")
@@ -2670,6 +2817,7 @@ if ENABLE_SESSION_HL and timeframe.isintraday
         _sh_drawCur(sh_showAsian,   _isAsia, sh_asiaH, sh_asiaL, sh_asiaHT, sh_asiaLT, sh_asiaBar, sh_asianHColor,  sh_asianLColor,  "Asia")
         _sh_drawCur(sh_showLondon,  _isLon,  sh_lonH,  sh_lonL,  sh_lonHT,  sh_lonLT,  sh_lonBar,  sh_londonHColor, sh_londonLColor, "London")
         _sh_drawCur(sh_showNYAM,    _isNYAM, sh_nyamH, sh_nyamL, sh_nyamHT, sh_nyamLT, sh_nyamBar, sh_nyamHColor,   sh_nyamLColor,   "NY AM")
+        _sh_drawCur(sh_showNYPre,   _isNYPre, sh_nypreH, sh_nypreL, sh_nypreHT, sh_nypreLT, sh_nypreBar, sh_nypreHColor, sh_nypreLColor, "NY Pre-AM")
         _sh_drawCur(sh_showNYLunch, _isNYL,  sh_nylH,  sh_nylL,  sh_nylHT,  sh_nylLT,  sh_nylBar,  sh_nylHColor,    sh_nylLColor,    "NY Lunch")
         _sh_drawCur(sh_showNYPM,    _isNYPM, sh_nypmH, sh_nypmL, sh_nypmHT, sh_nypmLT, sh_nypmBar, sh_nypmHColor,   sh_nypmLColor,   "NY PM")
 
