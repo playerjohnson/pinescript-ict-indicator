@@ -440,6 +440,10 @@ var bool   sh_showNYAM     = input.bool(true,  "NY AM H/L         ", group = "�
 var color  sh_nyamHColor   = input.color(color.new(#ef5350, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3")
 var color  sh_nyamLColor   = input.color(color.new(#ef5350, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3")
 var string sh_nyamStyle    = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3")
+var bool   sh_showNYPre    = input.bool(true,  "NY Pre-AM H/L     ", group = "⑲ Session Highs/Lows", inline = "sh3a")
+var color  sh_nypreHColor  = input.color(color.new(#ffeb3b, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3a")
+var color  sh_nypreLColor  = input.color(color.new(#ffeb3b, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3a")
+var string sh_nypreStyle   = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3a")
 var bool   sh_showNYLunch  = input.bool(true,  "NY Lunch H/L      ", group = "⑲ Session Highs/Lows", inline = "sh3b")
 var color  sh_nylHColor    = input.color(color.new(#ab47bc, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3b")
 var color  sh_nylLColor    = input.color(color.new(#ab47bc, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3b")
@@ -2545,6 +2549,8 @@ var array<SHLevel> sh_histLonH  = array.new<SHLevel>()
 var array<SHLevel> sh_histLonL  = array.new<SHLevel>()
 var array<SHLevel> sh_histNyamH = array.new<SHLevel>()
 var array<SHLevel> sh_histNyamL = array.new<SHLevel>()
+var array<SHLevel> sh_histNypreH = array.new<SHLevel>()
+var array<SHLevel> sh_histNypreL = array.new<SHLevel>()
 var array<SHLevel> sh_histNylH  = array.new<SHLevel>()
 var array<SHLevel> sh_histNylL  = array.new<SHLevel>()
 var array<SHLevel> sh_histNypmH = array.new<SHLevel>()
@@ -2554,19 +2560,21 @@ var array<SHLevel> sh_histNypmL = array.new<SHLevel>()
 var float sh_asiaH = na,  var float sh_asiaL = na,  var int sh_asiaBar = na,  var int sh_asiaHT = na, var int sh_asiaLT = na
 var float sh_lonH  = na,  var float sh_lonL  = na,  var int sh_lonBar  = na,  var int sh_lonHT  = na, var int sh_lonLT  = na
 var float sh_nyamH = na,  var float sh_nyamL = na,  var int sh_nyamBar = na,  var int sh_nyamHT = na, var int sh_nyamLT = na
+var float sh_nypreH = na, var float sh_nypreL = na, var int sh_nypreBar = na, var int sh_nypreHT = na, var int sh_nypreLT = na
 var float sh_nylH  = na,  var float sh_nylL  = na,  var int sh_nylBar  = na,  var int sh_nylHT  = na, var int sh_nylLT  = na
 var float sh_nypmH = na,  var float sh_nypmL = na,  var int sh_nypmBar = na,  var int sh_nypmHT = na, var int sh_nypmLT = na
 
 // In-session flags
 var bool sh_inAsia = false, var bool sh_inLon = false
-var bool sh_inNYAM = false, var bool sh_inNYL = false, var bool sh_inNYPM = false
+var bool sh_inNYAM = false, var bool sh_inNYPre = false, var bool sh_inNYL = false, var bool sh_inNYPM = false
 
 if ENABLE_SESSION_HL and timeframe.isintraday
     // ── Detect sessions (uses Killzone times from ⑱, except NY Lunch which is hardcoded 12:00-13:30) ──
     bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
     bool _isLon  = f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
-    bool _isNYAM = f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, 0)
-    bool _isNYL  = f_inSession(kz_nyHour, kz_nyMin, 12, 0, 13, 30)
+    bool _isNYAM  = f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, 0)
+    bool _isNYPre = f_inSession(kz_nyHour, kz_nyMin, 7, 0, 9, 30)
+    bool _isNYL   = f_inSession(kz_nyHour, kz_nyMin, 12, 0, 13, 30)
     bool _isNYPM = f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
 
     // ── Track Asia ──
@@ -2614,6 +2622,21 @@ if ENABLE_SESSION_HL and timeframe.isintraday
             _sh_archive(sh_histNyamH, sh_histNyamL, sh_nyamH, sh_nyamL, sh_nyamBar, sh_nyamHT, sh_nyamLT)
         sh_inNYAM := false
 
+    // ── Track NY Pre-AM ──
+    if _isNYPre and not sh_inNYPre
+        sh_nypreH := high, sh_nypreL := low, sh_nypreBar := bar_index
+        sh_nypreHT := time, sh_nypreLT := time
+        sh_inNYPre := true
+    else if _isNYPre
+        if high > nz(sh_nypreH, high)
+            sh_nypreH := high, sh_nypreHT := time
+        if low < nz(sh_nypreL, low)
+            sh_nypreL := low, sh_nypreLT := time
+    else
+        if sh_inNYPre
+            _sh_archive(sh_histNypreH, sh_histNypreL, sh_nypreH, sh_nypreL, sh_nypreBar, sh_nypreHT, sh_nypreLT)
+        sh_inNYPre := false
+
     // ── Track NY Lunch ──
     if _isNYL and not sh_inNYL
         sh_nylH := high, sh_nylL := low, sh_nylBar := bar_index
@@ -2651,6 +2674,8 @@ if ENABLE_SESSION_HL and timeframe.isintraday
     _sh_processHist(sh_showLondon,  sh_histLonL,  false, sh_londonLColor, sh_londonStyle, "London")
     _sh_processHist(sh_showNYAM,    sh_histNyamH, true,  sh_nyamHColor,   sh_nyamStyle,   "NY AM")
     _sh_processHist(sh_showNYAM,    sh_histNyamL, false, sh_nyamLColor,   sh_nyamStyle,   "NY AM")
+    _sh_processHist(sh_showNYPre,   sh_histNypreH, true,  sh_nypreHColor,  sh_nypreStyle,  "NY Pre-AM")
+    _sh_processHist(sh_showNYPre,   sh_histNypreL, false, sh_nypreLColor,  sh_nypreStyle,  "NY Pre-AM")
     _sh_processHist(sh_showNYLunch, sh_histNylH,  true,  sh_nylHColor,    sh_nylStyle,    "NY Lunch")
     _sh_processHist(sh_showNYLunch, sh_histNylL,  false, sh_nylLColor,    sh_nylStyle,    "NY Lunch")
     _sh_processHist(sh_showNYPM,    sh_histNypmH, true,  sh_nypmHColor,   sh_nypmStyle,   "NY PM")
@@ -2661,6 +2686,7 @@ if ENABLE_SESSION_HL and timeframe.isintraday
         _sh_drawCur(sh_showAsian,   _isAsia, sh_asiaH, sh_asiaL, sh_asiaHT, sh_asiaLT, sh_asiaBar, sh_asianHColor,  sh_asianLColor,  "Asia")
         _sh_drawCur(sh_showLondon,  _isLon,  sh_lonH,  sh_lonL,  sh_lonHT,  sh_lonLT,  sh_lonBar,  sh_londonHColor, sh_londonLColor, "London")
         _sh_drawCur(sh_showNYAM,    _isNYAM, sh_nyamH, sh_nyamL, sh_nyamHT, sh_nyamLT, sh_nyamBar, sh_nyamHColor,   sh_nyamLColor,   "NY AM")
+        _sh_drawCur(sh_showNYPre,   _isNYPre, sh_nypreH, sh_nypreL, sh_nypreHT, sh_nypreLT, sh_nypreBar, sh_nypreHColor, sh_nypreLColor, "NY Pre-AM")
         _sh_drawCur(sh_showNYLunch, _isNYL,  sh_nylH,  sh_nylL,  sh_nylHT,  sh_nylLT,  sh_nylBar,  sh_nylHColor,    sh_nylLColor,    "NY Lunch")
         _sh_drawCur(sh_showNYPM,    _isNYPM, sh_nypmH, sh_nypmL, sh_nypmHT, sh_nypmLT, sh_nypmBar, sh_nypmHColor,   sh_nypmLColor,   "NY PM")
 
