@@ -32,6 +32,7 @@ var bool ENABLE_HTF_CANDLES   = input.bool(true, "Enable HTF Candles",          
 var bool ENABLE_KILLZONES     = input.bool(true, "Enable Killzones",                group = "⓪ Section Toggles")
 var bool ENABLE_SESSION_HL    = input.bool(true, "Enable Session Highs/Lows",       group = "⓪ Section Toggles")
 var bool ENABLE_LIQUIDITY     = input.bool(true, "Enable PDH/PDL/PWH/PWL",          group = "⓪ Section Toggles")
+var bool ENABLE_EQH_EQL      = input.bool(true, "Enable Equal Highs/Lows",         group = "⓪ Section Toggles")
 
 // ── ㉑ Webhook JSON Alerts ──
 var bool   wh_enable      = input.bool(false, "Enable Webhook Alerts", group = "㉑ Webhook Alerts", tooltip = "Sends JSON payloads via alert() for bot/webhook integration.\nIn TradingView alert dialog, select 'Any alert() function call'.")
@@ -546,6 +547,21 @@ var color  lq_pmlColor    = input.color(color.new(#ef5350, 0), "", group = "⑳ 
 var string lq_pmStyle     = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑳ Liquidity Levels", inline = "lq3")
 var bool   lq_showLabels  = input.bool(true,  "Show Labels       ", group = "⑳ Liquidity Levels", inline = "lq4")
 var int    lq_lineWidth   = input.int(1, "Width", 1, 4, group = "⑳ Liquidity Levels", inline = "lq4")
+
+// ── ㉒ Equal Highs / Lows ──
+var int    eq_swingLen    = input.int(5, "Swing Length       ", 2, 50, group = "㉒ Equal Highs/Lows", inline = "eq0", tooltip = "Number of bars on each side to confirm a swing high/low (pivot).")
+var float  eq_threshold   = input.float(3.0, "Tolerance (ticks) ", 0.5, 50.0, step = 0.5, group = "㉒ Equal Highs/Lows", inline = "eq0", tooltip = "Two swings within this many ticks of each other are considered 'equal'.")
+var color  eq_eqhColor    = input.color(color.new(#26a69a, 20), "EQH Color         ", group = "㉒ Equal Highs/Lows", inline = "eq1")
+var color  eq_eqlColor    = input.color(color.new(#ef5350, 20), "EQL Color", group = "㉒ Equal Highs/Lows", inline = "eq1")
+var string eq_lineStyle   = input.string("----", "Style", options = ['⎯⎯⎯', '----', '····'], group = "㉒ Equal Highs/Lows", inline = "eq1")
+var int    eq_lineWidth   = input.int(1, "Width             ", 1, 4, group = "㉒ Equal Highs/Lows", inline = "eq2")
+var bool   eq_showLabels  = input.bool(true, "Labels", group = "㉒ Equal Highs/Lows", inline = "eq2")
+var string eq_labelSize   = input.string("Tiny", "Size", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group = "㉒ Equal Highs/Lows", inline = "eq2")
+var int    eq_lineExtend  = input.int(50, "Extend Bars       ", 10, 200, group = "㉒ Equal Highs/Lows", inline = "eq3")
+var int    eq_maxCount    = input.int(10, "Max Levels", 1, 30, group = "㉒ Equal Highs/Lows", inline = "eq3", tooltip = "Maximum number of EQH + EQL levels to display.")
+var bool   eq_showMit     = input.bool(true, "Show Mitigated    ", group = "㉒ Equal Highs/Lows", inline = "eq4")
+var color  eq_mitColor    = input.color(color.new(color.gray, 60), "Line", group = "㉒ Equal Highs/Lows", inline = "eq4")
+var color  eq_mitLblColor = input.color(color.new(color.gray, 70), "Lbl", group = "㉒ Equal Highs/Lows", inline = "eq4")
 
 var bool buimpfvgtouch = false
 var bool beimpfvgtouch = false
@@ -2823,6 +2839,157 @@ if ENABLE_SESSION_HL and timeframe.isintraday
 
 
 // ════════════════════════════════════════════════════════════════
+//  SECTION G-II – RELATIVE EQUAL HIGHS / LOWS  (EQH / EQL)
+//  Detects swing highs/lows at similar prices → liquidity pools.
+//  Uses ta.pivothigh / ta.pivotlow for fractal detection.
+// ════════════════════════════════════════════════════════════════
+
+// ── EQH/EQL UDT ──
+type EQLevel
+    float price          // avg price of the two equal swings
+    int   bar1           // bar_index of first swing
+    int   bar2           // bar_index of second swing (newer)
+    int   formTime       // time of the formation (2nd swing)
+    bool  isHigh         // true = EQH, false = EQL
+    bool  mitigated = false
+    line  ln  = na
+    label lbl = na
+
+// ── EQH/EQL helper: size string → size constant ──
+_eq_getSize(_s) =>
+    _s == "Auto" ? size.auto : _s == "Small" ? size.small : _s == "Normal" ? size.normal : _s == "Large" ? size.large : _s == "Huge" ? size.huge : size.tiny
+
+// ── State arrays ──
+var array<EQLevel> eq_levels = array.new<EQLevel>()
+var array<float>   eq_swingHPrices = array.new_float()
+var array<int>     eq_swingHBars   = array.new_int()
+var array<float>   eq_swingLPrices = array.new_float()
+var array<int>     eq_swingLBars   = array.new_int()
+
+if ENABLE_EQH_EQL and barstate.isconfirmed
+    float _tolPts = eq_threshold * syminfo.mintick
+    // ── Detect swing high / low using ta.pivothigh / ta.pivotlow ──
+    float _swH = ta.pivothigh(high, eq_swingLen, eq_swingLen)
+    float _swL = ta.pivotlow(low,   eq_swingLen, eq_swingLen)
+    int   _pivotBar = bar_index - eq_swingLen  // pivot confirmed N bars after
+
+    // ── New Swing High detected ──
+    if not na(_swH)
+        bool _matched = false
+        // Compare against previous swing highs
+        if array.size(eq_swingHPrices) > 0
+            for i = 0 to array.size(eq_swingHPrices) - 1
+                float _prevPrice = array.get(eq_swingHPrices, i)
+                int   _prevBar   = array.get(eq_swingHBars, i)
+                if math.abs(_swH - _prevPrice) <= _tolPts and _pivotBar != _prevBar
+                    _matched := true
+                    float _avgPrice = math.avg(_swH, _prevPrice)
+                    // Check we don't already have this level
+                    bool _dup = false
+                    for j = 0 to array.size(eq_levels) - 1
+                        EQLevel _exist = array.get(eq_levels, j)
+                        if _exist.isHigh and math.abs(_exist.price - _avgPrice) <= _tolPts
+                            _dup := true
+                            break
+                    if not _dup
+                        EQLevel _newLvl = EQLevel.new(price = _avgPrice, bar1 = _prevBar, bar2 = _pivotBar, formTime = time, isHigh = true)
+                        array.unshift(eq_levels, _newLvl)
+                        if wh_enable and wh_formations
+                            alert(_wh_json("EQH Formed", _avgPrice, _avgPrice), alert.freq_once_per_bar_close)
+                    break
+        // Store this swing high
+        array.unshift(eq_swingHPrices, _swH)
+        array.unshift(eq_swingHBars, _pivotBar)
+        // Trim swing history (keep last 50)
+        while array.size(eq_swingHPrices) > 50
+            array.pop(eq_swingHPrices)
+            array.pop(eq_swingHBars)
+
+    // ── New Swing Low detected ──
+    if not na(_swL)
+        bool _matched = false
+        if array.size(eq_swingLPrices) > 0
+            for i = 0 to array.size(eq_swingLPrices) - 1
+                float _prevPrice = array.get(eq_swingLPrices, i)
+                int   _prevBar   = array.get(eq_swingLBars, i)
+                if math.abs(_swL - _prevPrice) <= _tolPts and _pivotBar != _prevBar
+                    _matched := true
+                    float _avgPrice = math.avg(_swL, _prevPrice)
+                    bool _dup = false
+                    for j = 0 to array.size(eq_levels) - 1
+                        EQLevel _exist = array.get(eq_levels, j)
+                        if not _exist.isHigh and math.abs(_exist.price - _avgPrice) <= _tolPts
+                            _dup := true
+                            break
+                    if not _dup
+                        EQLevel _newLvl = EQLevel.new(price = _avgPrice, bar1 = _prevBar, bar2 = _pivotBar, formTime = time, isHigh = false)
+                        array.unshift(eq_levels, _newLvl)
+                        if wh_enable and wh_formations
+                            alert(_wh_json("EQL Formed", _avgPrice, _avgPrice), alert.freq_once_per_bar_close)
+                    break
+        array.unshift(eq_swingLPrices, _swL)
+        array.unshift(eq_swingLBars, _pivotBar)
+        while array.size(eq_swingLPrices) > 50
+            array.pop(eq_swingLPrices)
+            array.pop(eq_swingLBars)
+
+    // ── Trim to max levels (delete oldest drawing objects) ──
+    while array.size(eq_levels) > eq_maxCount
+        EQLevel _old = array.pop(eq_levels)
+        line.delete(_old.ln)
+        label.delete(_old.lbl)
+
+    // ── Draw / extend / mitigate all levels ──
+    if array.size(eq_levels) > 0
+        for i = 0 to array.size(eq_levels) - 1
+            EQLevel _lvl = array.get(eq_levels, i)
+            // ── Mitigation check ──
+            if not _lvl.mitigated
+                bool _hit = _lvl.isHigh ? close > _lvl.price : close < _lvl.price
+                if _hit
+                    _lvl.mitigated := true
+                    if not na(_lvl.ln)
+                        line.set_color(_lvl.ln, eq_mitColor)
+                        line.set_style(_lvl.ln, line.style_dotted)
+                        line.set_width(_lvl.ln, 1)
+                    if wh_enable and wh_mitigations
+                        string _evtName = _lvl.isHigh ? "EQH Mitigated" : "EQL Mitigated"
+                        alert(_wh_json(_evtName, _lvl.price, _lvl.price), alert.freq_once_per_bar)
+            // ── Skip mitigated if user doesn't want them ──
+            if _lvl.mitigated and not eq_showMit
+                line.delete(_lvl.ln)
+                label.delete(_lvl.lbl)
+                _lvl.ln  := line(na)
+                _lvl.lbl := label(na)
+                continue
+            // ── Draw / update line ──
+            int _x1 = math.max(nz(_lvl.bar1, bar_index - 1), 0)
+            int _x2 = bar_index + eq_lineExtend
+            color _lineClr = _lvl.mitigated ? eq_mitColor : (_lvl.isHigh ? eq_eqhColor : eq_eqlColor)
+            color _lblClr  = _lvl.mitigated ? eq_mitLblColor : (_lvl.isHigh ? eq_eqhColor : eq_eqlColor)
+            string _ls     = _lvl.mitigated ? line.style_dotted : f_get_line_style(eq_lineStyle)
+            int _lw        = _lvl.mitigated ? 1 : eq_lineWidth
+            string _side   = _lvl.isHigh ? "EQH " : "EQL "
+            string _mitTxt = _lvl.mitigated ? " [Mitigated]" : ""
+            string _txt    = _side + str.tostring(_lvl.price, format.mintick) + _mitTxt
+            if na(_lvl.ln)
+                _lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _lineClr, style = _ls, width = _lw)
+            line.set_x2(_lvl.ln, _x2)
+            line.set_color(_lvl.ln, _lineClr)
+            line.set_style(_lvl.ln, _ls)
+            line.set_width(_lvl.ln, _lw)
+            // ── Label ──
+            if eq_showLabels
+                string _sz = _lvl.mitigated ? _eq_getSize(eq_labelSize) : _eq_getSize(eq_labelSize)
+                if na(_lvl.lbl)
+                    _lvl.lbl := label.new(_x2, _lvl.price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _lblClr, size = _sz)
+                label.set_x(_lvl.lbl, _x2)
+                label.set_text(_lvl.lbl, _txt)
+                label.set_textcolor(_lvl.lbl, _lblClr)
+                label.set_size(_lvl.lbl, _sz)
+
+
+// ════════════════════════════════════════════════════════════════
 //  SECTION H – PDH/PDL / PWH/PWL / PMH/PML LIQUIDITY LEVELS
 //  Previous Day, Week, Month High & Low — external liquidity pools
 // ════════════════════════════════════════════════════════════════
@@ -2929,7 +3096,7 @@ if ENABLE_LIQUIDITY
 // Many sections require intraday charts; show a one-time warning on daily+ charts
 var label _tfWarning = na
 if barstate.islast and not timeframe.isintraday
-    bool _anyIntraday = ENABLE_HOURLY_OPEN or ENABLE_ORDER_BLOCKS or ENABLE_IMBALANCES or ENABLE_KILLZONES or ENABLE_SESSION_HL
+    bool _anyIntraday = ENABLE_HOURLY_OPEN or ENABLE_ORDER_BLOCKS or ENABLE_IMBALANCES or ENABLE_KILLZONES or ENABLE_SESSION_HL or ENABLE_EQH_EQL
     if _anyIntraday
         if na(_tfWarning)
             _tfWarning := label.new(bar_index, close, "⚠ Switch to intraday for: " +
@@ -2937,7 +3104,8 @@ if barstate.islast and not timeframe.isintraday
                  (ENABLE_ORDER_BLOCKS ? "Order Blocks, " : "") +
                  (ENABLE_IMBALANCES ? "Imbalances, " : "") +
                  (ENABLE_KILLZONES ? "Killzones, " : "") +
-                 (ENABLE_SESSION_HL ? "Session H/L" : ""),
+                 (ENABLE_SESSION_HL ? "Session H/L, " : "") +
+                 (ENABLE_EQH_EQL ? "Equal H/L" : ""),
                  style = label.style_label_down, color = color.new(#ff9800, 20),
                  textcolor = color.white, size = size.normal)
         else
