@@ -2424,15 +2424,19 @@ bgcolor(kz_bg)
 //  draws lines from session start as buyside/sellside liquidity.
 // ════════════════════════════════════════════════════════════════
 
+// ── Session H/L helper: format time as "Mon 02/09 22:15" ──
+_sh_fmtTime(_t) =>
+    na(_t) ? "" : " (" + str.format_time(_t, "EEE MM/dd HH:mm", "America/New_York") + ")"
+
 // ── Session H/L helper: draw or update a pair of lines + labels ──
-_sh_draw(_show, _prevH, _prevL, _startBar, _hColor, _lColor, _style, _name) =>
+_sh_draw(_show, _prevH, _prevL, _prevHTime, _prevLTime, _startBar, _hColor, _lColor, _style, _name) =>
     var line _lineH = na, var line _lineL = na
     var label _lblH = na, var label _lblL = na
     if _show and not na(_prevH)
         int _x1 = math.max(nz(_startBar, bar_index - 1), 0)
         int _x2 = bar_index + sh_lineExtend
-        string _hTxt = _name + " High - Buyside Liquidity " + str.tostring(_prevH, format.mintick)
-        string _lTxt = _name + " Low - Sellside Liquidity " + str.tostring(_prevL, format.mintick)
+        string _hTxt = _name + " High - Buyside Liquidity " + str.tostring(_prevH, format.mintick) + _sh_fmtTime(_prevHTime)
+        string _lTxt = _name + " Low - Sellside Liquidity " + str.tostring(_prevL, format.mintick) + _sh_fmtTime(_prevLTime)
         if na(_lineH)
             _lineH := line.new(_x1, _prevH, _x2, _prevH, color = _hColor, style = f_get_line_style(_style), width = sh_lineWidth)
             _lineL := line.new(_x1, _prevL, _x2, _prevL, color = _lColor, style = f_get_line_style(_style), width = sh_lineWidth)
@@ -2455,14 +2459,14 @@ _sh_draw(_show, _prevH, _prevL, _startBar, _hColor, _lColor, _style, _name) =>
     [_lineH, _lineL, _lblH, _lblL]
 
 // ── Session H/L helper: draw current (in-progress) session lines ──
-_sh_drawCur(_show, _inSess, _curH, _curL, _startBar, _hColor, _lColor, _name) =>
+_sh_drawCur(_show, _inSess, _curH, _curL, _curHTime, _curLTime, _startBar, _hColor, _lColor, _name) =>
     var line _cLineH = na, var line _cLineL = na
     var label _cLblH = na, var label _cLblL = na
     if _show and _inSess and not na(_curH)
         int _x1 = math.max(nz(_startBar, bar_index - 1), 0)
         int _x2 = bar_index + sh_lineExtend
-        string _hTxt = _name + " High* " + str.tostring(_curH, format.mintick)
-        string _lTxt = _name + " Low* " + str.tostring(_curL, format.mintick)
+        string _hTxt = _name + " High* " + str.tostring(_curH, format.mintick) + _sh_fmtTime(_curHTime)
+        string _lTxt = _name + " Low* " + str.tostring(_curL, format.mintick) + _sh_fmtTime(_curLTime)
         if na(_cLineH)
             _cLineH := line.new(_x1, _curH, _x2, _curH, color = color.new(_hColor, 60), style = line.style_dotted, width = sh_lineWidth)
             _cLineL := line.new(_x1, _curL, _x2, _curL, color = color.new(_lColor, 60), style = line.style_dotted, width = sh_lineWidth)
@@ -2493,19 +2497,19 @@ _sh_drawCur(_show, _inSess, _curH, _curL, _startBar, _hColor, _lColor, _name) =>
     [_cLineH, _cLineL, _cLblH, _cLblL]
 
 // ── Session tracking state ──
-// Current session H/L + start bars
-var float sh_asiaH = na,  var float sh_asiaL = na,  var int sh_asiaBar = na
-var float sh_lonH  = na,  var float sh_lonL  = na,  var int sh_lonBar  = na
-var float sh_nyamH = na,  var float sh_nyamL = na,  var int sh_nyamBar = na
-var float sh_nylH  = na,  var float sh_nylL  = na,  var int sh_nylBar  = na
-var float sh_nypmH = na,  var float sh_nypmL = na,  var int sh_nypmBar = na
+// Current session H/L + start bars + time of H/L
+var float sh_asiaH = na,  var float sh_asiaL = na,  var int sh_asiaBar = na,  var int sh_asiaHT = na, var int sh_asiaLT = na
+var float sh_lonH  = na,  var float sh_lonL  = na,  var int sh_lonBar  = na,  var int sh_lonHT  = na, var int sh_lonLT  = na
+var float sh_nyamH = na,  var float sh_nyamL = na,  var int sh_nyamBar = na,  var int sh_nyamHT = na, var int sh_nyamLT = na
+var float sh_nylH  = na,  var float sh_nylL  = na,  var int sh_nylBar  = na,  var int sh_nylHT  = na, var int sh_nylLT  = na
+var float sh_nypmH = na,  var float sh_nypmL = na,  var int sh_nypmBar = na,  var int sh_nypmHT = na, var int sh_nypmLT = na
 
-// Previous completed session values + start bars (for line x1 position)
-var float sh_prevAsiaH = na, var float sh_prevAsiaL = na, var int sh_prevAsiaBar = na
-var float sh_prevLonH  = na, var float sh_prevLonL  = na, var int sh_prevLonBar  = na
-var float sh_prevNyamH = na, var float sh_prevNyamL = na, var int sh_prevNyamBar = na
-var float sh_prevNylH  = na, var float sh_prevNylL  = na, var int sh_prevNylBar  = na
-var float sh_prevNypmH = na, var float sh_prevNypmL = na, var int sh_prevNypmBar = na
+// Previous completed session values + start bars + time of H/L (for labels)
+var float sh_prevAsiaH = na, var float sh_prevAsiaL = na, var int sh_prevAsiaBar = na, var int sh_prevAsiaHT = na, var int sh_prevAsiaLT = na
+var float sh_prevLonH  = na, var float sh_prevLonL  = na, var int sh_prevLonBar  = na, var int sh_prevLonHT  = na, var int sh_prevLonLT  = na
+var float sh_prevNyamH = na, var float sh_prevNyamL = na, var int sh_prevNyamBar = na, var int sh_prevNyamHT = na, var int sh_prevNyamLT = na
+var float sh_prevNylH  = na, var float sh_prevNylL  = na, var int sh_prevNylBar  = na, var int sh_prevNylHT  = na, var int sh_prevNylLT  = na
+var float sh_prevNypmH = na, var float sh_prevNypmL = na, var int sh_prevNypmBar = na, var int sh_prevNypmHT = na, var int sh_prevNypmLT = na
 
 // In-session flags
 var bool sh_inAsia = false, var bool sh_inLon = false
@@ -2522,72 +2526,92 @@ if ENABLE_SESSION_HL and timeframe.isintraday
     // ── Track Asia ──
     if _isAsia and not sh_inAsia
         sh_prevAsiaH := sh_asiaH, sh_prevAsiaL := sh_asiaL, sh_prevAsiaBar := sh_asiaBar
+        sh_prevAsiaHT := sh_asiaHT, sh_prevAsiaLT := sh_asiaLT
         sh_asiaH := high, sh_asiaL := low, sh_asiaBar := bar_index
+        sh_asiaHT := time, sh_asiaLT := time
         sh_inAsia := true
     else if _isAsia
-        sh_asiaH := math.max(nz(sh_asiaH, high), high)
-        sh_asiaL := math.min(nz(sh_asiaL, low), low)
+        if high > nz(sh_asiaH, high)
+            sh_asiaH := high, sh_asiaHT := time
+        if low < nz(sh_asiaL, low)
+            sh_asiaL := low, sh_asiaLT := time
     else
         sh_inAsia := false
 
     // ── Track London ──
     if _isLon and not sh_inLon
         sh_prevLonH := sh_lonH, sh_prevLonL := sh_lonL, sh_prevLonBar := sh_lonBar
+        sh_prevLonHT := sh_lonHT, sh_prevLonLT := sh_lonLT
         sh_lonH := high, sh_lonL := low, sh_lonBar := bar_index
+        sh_lonHT := time, sh_lonLT := time
         sh_inLon := true
     else if _isLon
-        sh_lonH := math.max(nz(sh_lonH, high), high)
-        sh_lonL := math.min(nz(sh_lonL, low), low)
+        if high > nz(sh_lonH, high)
+            sh_lonH := high, sh_lonHT := time
+        if low < nz(sh_lonL, low)
+            sh_lonL := low, sh_lonLT := time
     else
         sh_inLon := false
 
     // ── Track NY AM ──
     if _isNYAM and not sh_inNYAM
         sh_prevNyamH := sh_nyamH, sh_prevNyamL := sh_nyamL, sh_prevNyamBar := sh_nyamBar
+        sh_prevNyamHT := sh_nyamHT, sh_prevNyamLT := sh_nyamLT
         sh_nyamH := high, sh_nyamL := low, sh_nyamBar := bar_index
+        sh_nyamHT := time, sh_nyamLT := time
         sh_inNYAM := true
     else if _isNYAM
-        sh_nyamH := math.max(nz(sh_nyamH, high), high)
-        sh_nyamL := math.min(nz(sh_nyamL, low), low)
+        if high > nz(sh_nyamH, high)
+            sh_nyamH := high, sh_nyamHT := time
+        if low < nz(sh_nyamL, low)
+            sh_nyamL := low, sh_nyamLT := time
     else
         sh_inNYAM := false
 
     // ── Track NY Lunch ──
     if _isNYL and not sh_inNYL
         sh_prevNylH := sh_nylH, sh_prevNylL := sh_nylL, sh_prevNylBar := sh_nylBar
+        sh_prevNylHT := sh_nylHT, sh_prevNylLT := sh_nylLT
         sh_nylH := high, sh_nylL := low, sh_nylBar := bar_index
+        sh_nylHT := time, sh_nylLT := time
         sh_inNYL := true
     else if _isNYL
-        sh_nylH := math.max(nz(sh_nylH, high), high)
-        sh_nylL := math.min(nz(sh_nylL, low), low)
+        if high > nz(sh_nylH, high)
+            sh_nylH := high, sh_nylHT := time
+        if low < nz(sh_nylL, low)
+            sh_nylL := low, sh_nylLT := time
     else
         sh_inNYL := false
 
     // ── Track NY PM ──
     if _isNYPM and not sh_inNYPM
         sh_prevNypmH := sh_nypmH, sh_prevNypmL := sh_nypmL, sh_prevNypmBar := sh_nypmBar
+        sh_prevNypmHT := sh_nypmHT, sh_prevNypmLT := sh_nypmLT
         sh_nypmH := high, sh_nypmL := low, sh_nypmBar := bar_index
+        sh_nypmHT := time, sh_nypmLT := time
         sh_inNYPM := true
     else if _isNYPM
-        sh_nypmH := math.max(nz(sh_nypmH, high), high)
-        sh_nypmL := math.min(nz(sh_nypmL, low), low)
+        if high > nz(sh_nypmH, high)
+            sh_nypmH := high, sh_nypmHT := time
+        if low < nz(sh_nypmL, low)
+            sh_nypmL := low, sh_nypmLT := time
     else
         sh_inNYPM := false
 
     // ── Draw previous session H/L (lines from session start bar) ──
-    _sh_draw(sh_showAsian,   sh_prevAsiaH, sh_prevAsiaL, sh_prevAsiaBar, sh_asianHColor,  sh_asianLColor,  sh_asianStyle,  "Asian Session")
-    _sh_draw(sh_showLondon,  sh_prevLonH,  sh_prevLonL,  sh_prevLonBar,  sh_londonHColor, sh_londonLColor, sh_londonStyle, "London Session")
-    _sh_draw(sh_showNYAM,    sh_prevNyamH, sh_prevNyamL, sh_prevNyamBar, sh_nyamHColor,   sh_nyamLColor,   sh_nyamStyle,   "NY AM Session")
-    _sh_draw(sh_showNYLunch, sh_prevNylH,  sh_prevNylL,  sh_prevNylBar,  sh_nylHColor,    sh_nylLColor,    sh_nylStyle,    "NY Lunch Session")
-    _sh_draw(sh_showNYPM,    sh_prevNypmH, sh_prevNypmL, sh_prevNypmBar, sh_nypmHColor,   sh_nypmLColor,   sh_nypmStyle,   "NY PM Session")
+    _sh_draw(sh_showAsian,   sh_prevAsiaH, sh_prevAsiaL, sh_prevAsiaHT, sh_prevAsiaLT, sh_prevAsiaBar, sh_asianHColor,  sh_asianLColor,  sh_asianStyle,  "Asian Session")
+    _sh_draw(sh_showLondon,  sh_prevLonH,  sh_prevLonL,  sh_prevLonHT,  sh_prevLonLT,  sh_prevLonBar,  sh_londonHColor, sh_londonLColor, sh_londonStyle, "London Session")
+    _sh_draw(sh_showNYAM,    sh_prevNyamH, sh_prevNyamL, sh_prevNyamHT, sh_prevNyamLT, sh_prevNyamBar, sh_nyamHColor,   sh_nyamLColor,   sh_nyamStyle,   "NY AM Session")
+    _sh_draw(sh_showNYLunch, sh_prevNylH,  sh_prevNylL,  sh_prevNylHT,  sh_prevNylLT,  sh_prevNylBar,  sh_nylHColor,    sh_nylLColor,    sh_nylStyle,    "NY Lunch Session")
+    _sh_draw(sh_showNYPM,    sh_prevNypmH, sh_prevNypmL, sh_prevNypmHT, sh_prevNypmLT, sh_prevNypmBar, sh_nypmHColor,   sh_nypmLColor,   sh_nypmStyle,   "NY PM Session")
 
     // ── Draw current (in-progress) session H/L ──
     if sh_showCurrent
-        _sh_drawCur(sh_showAsian,   _isAsia, sh_asiaH, sh_asiaL, sh_asiaBar, sh_asianHColor,  sh_asianLColor,  "Asian Session")
-        _sh_drawCur(sh_showLondon,  _isLon,  sh_lonH,  sh_lonL,  sh_lonBar,  sh_londonHColor, sh_londonLColor, "London Session")
-        _sh_drawCur(sh_showNYAM,    _isNYAM, sh_nyamH, sh_nyamL, sh_nyamBar, sh_nyamHColor,   sh_nyamLColor,   "NY AM Session")
-        _sh_drawCur(sh_showNYLunch, _isNYL,  sh_nylH,  sh_nylL,  sh_nylBar,  sh_nylHColor,    sh_nylLColor,    "NY Lunch Session")
-        _sh_drawCur(sh_showNYPM,    _isNYPM, sh_nypmH, sh_nypmL, sh_nypmBar, sh_nypmHColor,   sh_nypmLColor,   "NY PM Session")
+        _sh_drawCur(sh_showAsian,   _isAsia, sh_asiaH, sh_asiaL, sh_asiaHT, sh_asiaLT, sh_asiaBar, sh_asianHColor,  sh_asianLColor,  "Asian Session")
+        _sh_drawCur(sh_showLondon,  _isLon,  sh_lonH,  sh_lonL,  sh_lonHT,  sh_lonLT,  sh_lonBar,  sh_londonHColor, sh_londonLColor, "London Session")
+        _sh_drawCur(sh_showNYAM,    _isNYAM, sh_nyamH, sh_nyamL, sh_nyamHT, sh_nyamLT, sh_nyamBar, sh_nyamHColor,   sh_nyamLColor,   "NY AM Session")
+        _sh_drawCur(sh_showNYLunch, _isNYL,  sh_nylH,  sh_nylL,  sh_nylHT,  sh_nylLT,  sh_nylBar,  sh_nylHColor,    sh_nylLColor,    "NY Lunch Session")
+        _sh_drawCur(sh_showNYPM,    _isNYPM, sh_nypmH, sh_nypmL, sh_nypmHT, sh_nypmLT, sh_nypmBar, sh_nypmHColor,   sh_nypmLColor,   "NY PM Session")
 
 
 // ════════════════════════════════════════════════════════════════
