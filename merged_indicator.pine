@@ -32,6 +32,7 @@ var bool ENABLE_HTF_CANDLES   = input.bool(true, "Enable HTF Candles",          
 var bool ENABLE_KILLZONES     = input.bool(true, "Enable Killzones",                group = "⓪ Section Toggles")
 var bool ENABLE_SESSION_HL    = input.bool(true, "Enable Session Highs/Lows",       group = "⓪ Section Toggles")
 var bool ENABLE_LIQUIDITY     = input.bool(true, "Enable PDH/PDL/PWH/PWL",          group = "⓪ Section Toggles")
+var bool ENABLE_REJECTION_BLK = input.bool(true, "Enable Rejection Blocks",         group = "⓪ Section Toggles")
 
 // ── ㉑ Webhook JSON Alerts ──
 var bool   wh_enable      = input.bool(false, "Enable Webhook Alerts", group = "㉑ Webhook Alerts", tooltip = "Sends JSON payloads via alert() for bot/webhook integration.\nIn TradingView alert dialog, select 'Any alert() function call'.")
@@ -2923,6 +2924,184 @@ if ENABLE_LIQUIDITY
                 label.set_x(lq_lblPML, bar_index + 30)
                 label.set_y(lq_lblPML, lq_monthLow)
                 label.set_text(lq_lblPML, _pmlTxt)
+
+
+// ════════════════════════════════════════════════════════════════
+//  SECTION I – ICT REJECTION BLOCKS
+//  A Rejection Block is the wick range at a swing high or swing low.
+//  Bearish RB: highest open/close → highest high at a swing high.
+//  Bullish RB: lowest low → lowest open/close at a swing low.
+//  Wicks highlight where liquidity was swept before rejection.
+//  The zone is treated like an order block for re-entry.
+// ════════════════════════════════════════════════════════════════
+
+// ── Rejection Block Inputs ──
+var bool   rb_showBull     = input.bool(true,  "Bullish RB         ", group = "㉒ Rejection Blocks", inline = "rb1")
+var color  rb_bullColor    = input.color(color.new(#089981, 75), "",  group = "㉒ Rejection Blocks", inline = "rb1")
+var bool   rb_showBear     = input.bool(true,  "Bearish RB         ", group = "㉒ Rejection Blocks", inline = "rb2")
+var color  rb_bearColor    = input.color(color.new(#f23645, 75), "",  group = "㉒ Rejection Blocks", inline = "rb2")
+var int    rb_swingLen     = input.int(5, "Swing Length       ", 2, 50, group = "㉒ Rejection Blocks", inline = "rb3", tooltip = "Pivot lookback/lookforward bars for swing detection. Higher = fewer, larger swings.")
+var float  rb_minWickPct   = input.float(33.0, "Min Wick %", 0, 90, step = 5, group = "㉒ Rejection Blocks", inline = "rb3", tooltip = "Minimum wick size as % of swing range to qualify as a rejection block.")
+var string rb_borderStyle  = input.string("Dashed", "Border            ", options = ["Solid", "Dashed", "Dotted"], group = "㉒ Rejection Blocks", inline = "rb4")
+var bool   rb_extend       = input.bool(true,  "Extend",  group = "㉒ Rejection Blocks", inline = "rb4")
+var bool   rb_showLabel    = input.bool(true,  "Label",   group = "㉒ Rejection Blocks", inline = "rb4")
+var color  rb_mitColor     = input.color(color.new(color.gray, 92), "Mitigated         ", group = "㉒ Rejection Blocks", inline = "rb5")
+var int    rb_maxBoxes     = input.int(10, "Max Boxes", 1, 50, group = "㉒ Rejection Blocks", inline = "rb5")
+var int    rb_pruneAge     = input.int(500, "Prune After", 0, 5000, group = "㉒ Rejection Blocks", inline = "rb5", tooltip = "Auto-delete mitigated RBs older than N bars. 0 = never.")
+
+// ── Rejection Block UDT ──
+type RejBlock
+    box     bx
+    float   triggerLevel    // body boundary — entry trigger level
+    bool    isBull
+    bool    mitigated
+    int     mit_bar
+
+var array<RejBlock> rb_blocks = array.new<RejBlock>()
+
+// Alert flags (reset each bar)
+bool rb_bullFormed = false
+bool rb_bearFormed = false
+bool rb_bullMit    = false
+bool rb_bearMit    = false
+
+rb_border = switch rb_borderStyle
+    "Solid"  => line.style_solid
+    "Dashed" => line.style_dashed
+    "Dotted" => line.style_dotted
+    =>          line.style_dashed
+
+// ── Swing detection via pivots ──
+float rb_pvtHi = ta.pivothigh(high, rb_swingLen, rb_swingLen)
+float rb_pvtLo = ta.pivotlow(low,   rb_swingLen, rb_swingLen)
+
+if ENABLE_REJECTION_BLK
+    // ── Bearish Rejection Block (at swing highs) ──
+    if rb_showBear and not na(rb_pvtHi)
+        int _pvtOff = rb_swingLen   // pivot candle is this many bars back
+        // Highest high is the pivot value itself
+        float _wickHigh = rb_pvtHi
+        // Scan the swing formation for the highest body (max of open/close)
+        float _highestBody = math.max(open[_pvtOff], close[_pvtOff])
+        int   _leftBar     = bar_index - _pvtOff
+        for j = 1 to rb_swingLen
+            int idx = _pvtOff + j
+            float _bt = math.max(open[idx], close[idx])
+            if _bt > _highestBody
+                _highestBody := _bt
+            if bar_index - idx < _leftBar
+                _leftBar := bar_index - idx
+        // Also check a couple bars on the right of the pivot (part of the topping formation)
+        for j = 1 to math.min(2, _pvtOff - 1)
+            int idx = _pvtOff - j
+            float _bt = math.max(open[idx], close[idx])
+            if _bt > _highestBody
+                _highestBody := _bt
+        // Ensure body doesn't exceed wick high (can happen if body IS the high)
+        _highestBody := math.min(_highestBody, _wickHigh)
+        // Wick range = rejection block zone
+        float _wickRange  = _wickHigh - _highestBody
+        float _swingRange = _wickHigh - ta.lowest(low, rb_swingLen * 2 + 1)[0]
+        // Only qualify if the wick is meaningful
+        bool _valid = _wickRange > 0 and _swingRange > 0 and (_wickRange / _swingRange * 100 >= rb_minWickPct)
+        if _valid
+            box _bx = box.new(_leftBar, _wickHigh, bar_index, _highestBody,
+                              bgcolor      = rb_bearColor,
+                              border_color = color.new(rb_bearColor, 60),
+                              border_style = rb_border,
+                              border_width = 1,
+                              text         = rb_showLabel ? "Bear RB" : na,
+                              text_halign  = text.align_left,
+                              text_valign  = text.align_bottom,
+                              text_size    = size.tiny,
+                              text_color   = color.new(rb_bearColor, 30))
+            rb_blocks.push(RejBlock.new(_bx, _highestBody, false, false, 0))
+            rb_bearFormed := true
+            if wh_enable and wh_formations
+                alert(_wh_json("Bear RB Formed", _wickHigh, _highestBody), alert.freq_once_per_bar_close)
+            while rb_blocks.size() > rb_maxBoxes * 2
+                RejBlock _del = rb_blocks.shift()
+                box.delete(_del.bx)
+
+    // ── Bullish Rejection Block (at swing lows) ──
+    if rb_showBull and not na(rb_pvtLo)
+        int _pvtOff = rb_swingLen
+        float _wickLow = rb_pvtLo
+        // Scan the swing formation for the lowest body (min of open/close)
+        float _lowestBody = math.min(open[_pvtOff], close[_pvtOff])
+        int   _leftBar    = bar_index - _pvtOff
+        for j = 1 to rb_swingLen
+            int idx = _pvtOff + j
+            float _bb = math.min(open[idx], close[idx])
+            if _bb < _lowestBody
+                _lowestBody := _bb
+            if bar_index - idx < _leftBar
+                _leftBar := bar_index - idx
+        // Also check a couple bars on the right of the pivot
+        for j = 1 to math.min(2, _pvtOff - 1)
+            int idx = _pvtOff - j
+            float _bb = math.min(open[idx], close[idx])
+            if _bb < _lowestBody
+                _lowestBody := _bb
+        // Ensure body doesn't go below wick low
+        _lowestBody := math.max(_lowestBody, _wickLow)
+        float _wickRange  = _lowestBody - _wickLow
+        float _swingRange = ta.highest(high, rb_swingLen * 2 + 1)[0] - _wickLow
+        bool _valid = _wickRange > 0 and _swingRange > 0 and (_wickRange / _swingRange * 100 >= rb_minWickPct)
+        if _valid
+            box _bx = box.new(_leftBar, _lowestBody, bar_index, _wickLow,
+                              bgcolor      = rb_bullColor,
+                              border_color = color.new(rb_bullColor, 60),
+                              border_style = rb_border,
+                              border_width = 1,
+                              text         = rb_showLabel ? "Bull RB" : na,
+                              text_halign  = text.align_left,
+                              text_valign  = text.align_top,
+                              text_size    = size.tiny,
+                              text_color   = color.new(rb_bullColor, 30))
+            rb_blocks.push(RejBlock.new(_bx, _lowestBody, true, false, 0))
+            rb_bullFormed := true
+            if wh_enable and wh_formations
+                alert(_wh_json("Bull RB Formed", _lowestBody, _wickLow), alert.freq_once_per_bar_close)
+            while rb_blocks.size() > rb_maxBoxes * 2
+                RejBlock _del = rb_blocks.shift()
+                box.delete(_del.bx)
+
+// ── Extend, Mitigate & Auto-Prune Rejection Blocks ──
+if ENABLE_REJECTION_BLK and rb_blocks.size() > 0
+    for i = rb_blocks.size() - 1 to 0 by 1
+        RejBlock _rb = rb_blocks.get(i)
+        if not _rb.mitigated
+            // Bullish RB (support): mitigated when price closes below zone bottom (wick low)
+            // Bearish RB (resistance): mitigated when price closes above zone top (wick high)
+            bool _hit = _rb.isBull ? (close < box.get_bottom(_rb.bx)) : (close > box.get_top(_rb.bx))
+            if _hit
+                _rb.mitigated := true
+                _rb.mit_bar   := bar_index
+                if _rb.isBull
+                    rb_bullMit := true
+                    if wh_enable and wh_mitigations
+                        alert(_wh_json("Bull RB Mitigated", box.get_top(_rb.bx), box.get_bottom(_rb.bx)), alert.freq_once_per_bar)
+                else
+                    rb_bearMit := true
+                    if wh_enable and wh_mitigations
+                        alert(_wh_json("Bear RB Mitigated", box.get_top(_rb.bx), box.get_bottom(_rb.bx)), alert.freq_once_per_bar)
+                box.set_bgcolor(_rb.bx, rb_mitColor)
+                box.set_border_color(_rb.bx, rb_mitColor)
+                box.set_text_color(_rb.bx, color.new(color.gray, 70))
+            else if rb_extend
+                box.set_right(_rb.bx, bar_index + 1)
+        else
+            // Already mitigated — auto-prune if old
+            if rb_pruneAge > 0 and (bar_index - _rb.mit_bar) > rb_pruneAge
+                box.delete(_rb.bx)
+                rb_blocks.remove(i)
+
+// ── Rejection Block Alerts ──
+alertcondition(rb_bullFormed, title = 'Bull RB Formed', message = 'Bullish Rejection Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(rb_bearFormed, title = 'Bear RB Formed', message = 'Bearish Rejection Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(rb_bullMit,    title = 'Bull RB Mitigated', message = 'Bullish RB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(rb_bearMit,    title = 'Bear RB Mitigated', message = 'Bearish RB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 
 
 // ── Timeframe Warning ──
