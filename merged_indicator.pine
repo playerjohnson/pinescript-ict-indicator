@@ -2945,13 +2945,17 @@ var float  rb_minWickPct   = input.float(33.0, "Min Wick %", 0, 90, step = 5, gr
 var string rb_borderStyle  = input.string("Dashed", "Border            ", options = ["Solid", "Dashed", "Dotted"], group = "㉒ Rejection Blocks", inline = "rb4")
 var bool   rb_extend       = input.bool(true,  "Extend",  group = "㉒ Rejection Blocks", inline = "rb4")
 var bool   rb_showLabel    = input.bool(true,  "Label",   group = "㉒ Rejection Blocks", inline = "rb4")
-var color  rb_mitColor     = input.color(color.new(color.gray, 92), "Mitigated         ", group = "㉒ Rejection Blocks", inline = "rb5")
-var int    rb_maxBoxes     = input.int(10, "Max Boxes", 1, 50, group = "㉒ Rejection Blocks", inline = "rb5")
-var int    rb_pruneAge     = input.int(500, "Prune After", 0, 5000, group = "㉒ Rejection Blocks", inline = "rb5", tooltip = "Auto-delete mitigated RBs older than N bars. 0 = never.")
+var bool   rb_showTrigger  = input.bool(true,  "Trigger Line      ", group = "㉒ Rejection Blocks", inline = "rb5")
+var string rb_triggerStyle = input.string("Dotted", "", options = ["Solid", "Dashed", "Dotted"], group = "㉒ Rejection Blocks", inline = "rb5")
+var int    rb_triggerWidth = input.int(1, "", 1, 4, group = "㉒ Rejection Blocks", inline = "rb5", tooltip = "Line at the body boundary (entry trigger level per ICT).")
+var color  rb_mitColor     = input.color(color.new(color.gray, 92), "Mitigated         ", group = "㉒ Rejection Blocks", inline = "rb6")
+var int    rb_maxBoxes     = input.int(10, "Max Boxes", 1, 50, group = "㉒ Rejection Blocks", inline = "rb6")
+var int    rb_pruneAge     = input.int(500, "Prune After", 0, 5000, group = "㉒ Rejection Blocks", inline = "rb6", tooltip = "Auto-delete mitigated RBs older than N bars. 0 = never.")
 
 // ── Rejection Block UDT ──
 type RejBlock
     box     bx
+    line    trigLine        // trigger line at body boundary
     float   triggerLevel    // body boundary — entry trigger level
     bool    isBull
     bool    mitigated
@@ -2970,6 +2974,12 @@ rb_border = switch rb_borderStyle
     "Dashed" => line.style_dashed
     "Dotted" => line.style_dotted
     =>          line.style_dashed
+
+rb_trigStyle = switch rb_triggerStyle
+    "Solid"  => line.style_solid
+    "Dashed" => line.style_dashed
+    "Dotted" => line.style_dotted
+    =>          line.style_dotted
 
 // ── Swing detection via pivots ──
 float rb_pvtHi = ta.pivothigh(high, rb_swingLen, rb_swingLen)
@@ -3015,13 +3025,18 @@ if ENABLE_REJECTION_BLK
                               text_valign  = text.align_bottom,
                               text_size    = size.tiny,
                               text_color   = color.new(rb_bearColor, 30))
-            rb_blocks.push(RejBlock.new(_bx, _highestBody, false, false, 0))
+            line _tl = rb_showTrigger ? line.new(_leftBar, _highestBody, bar_index, _highestBody,
+                              color = color.new(rb_bearColor, 40),
+                              style = rb_trigStyle,
+                              width = rb_triggerWidth) : na
+            rb_blocks.push(RejBlock.new(_bx, _tl, _highestBody, false, false, 0))
             rb_bearFormed := true
             if wh_enable and wh_formations
                 alert(_wh_json("Bear RB Formed", _wickHigh, _highestBody), alert.freq_once_per_bar_close)
             while rb_blocks.size() > rb_maxBoxes * 2
                 RejBlock _del = rb_blocks.shift()
                 box.delete(_del.bx)
+                line.delete(_del.trigLine)
 
     // ── Bullish Rejection Block (at swing lows) ──
     if rb_showBull and not na(rb_pvtLo)
@@ -3059,13 +3074,18 @@ if ENABLE_REJECTION_BLK
                               text_valign  = text.align_top,
                               text_size    = size.tiny,
                               text_color   = color.new(rb_bullColor, 30))
-            rb_blocks.push(RejBlock.new(_bx, _lowestBody, true, false, 0))
+            line _tl = rb_showTrigger ? line.new(_leftBar, _lowestBody, bar_index, _lowestBody,
+                              color = color.new(rb_bullColor, 40),
+                              style = rb_trigStyle,
+                              width = rb_triggerWidth) : na
+            rb_blocks.push(RejBlock.new(_bx, _tl, _lowestBody, true, false, 0))
             rb_bullFormed := true
             if wh_enable and wh_formations
                 alert(_wh_json("Bull RB Formed", _lowestBody, _wickLow), alert.freq_once_per_bar_close)
             while rb_blocks.size() > rb_maxBoxes * 2
                 RejBlock _del = rb_blocks.shift()
                 box.delete(_del.bx)
+                line.delete(_del.trigLine)
 
 // ── Extend, Mitigate & Auto-Prune Rejection Blocks ──
 if ENABLE_REJECTION_BLK and rb_blocks.size() > 0
@@ -3089,12 +3109,17 @@ if ENABLE_REJECTION_BLK and rb_blocks.size() > 0
                 box.set_bgcolor(_rb.bx, rb_mitColor)
                 box.set_border_color(_rb.bx, rb_mitColor)
                 box.set_text_color(_rb.bx, color.new(color.gray, 70))
+                if not na(_rb.trigLine)
+                    line.set_color(_rb.trigLine, rb_mitColor)
             else if rb_extend
                 box.set_right(_rb.bx, bar_index + 1)
+                if not na(_rb.trigLine)
+                    line.set_x2(_rb.trigLine, bar_index + 1)
         else
             // Already mitigated — auto-prune if old
             if rb_pruneAge > 0 and (bar_index - _rb.mit_bar) > rb_pruneAge
                 box.delete(_rb.bx)
+                line.delete(_rb.trigLine)
                 rb_blocks.remove(i)
 
 // ── Rejection Block Alerts ──
