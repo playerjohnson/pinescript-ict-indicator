@@ -224,6 +224,22 @@ var int    ob_pruneAge     = input.int(500, "Prune After", 0, 5000, group = "③
 var int    ob_maxBlend     = input.int(3, "Max Blend         ", 1, 5, group = "③ Order Blocks", inline = "ob7", tooltip = "Max consecutive same-direction candles to blend into one OB. ICT typically blends 2 consecutive candles.")
 var float  ob_displacement = input.float(0, "Min Displacement  ", 0, 10, step = 0.5, group = "③ Order Blocks", inline = "ob7b", tooltip = "Minimum confirming-candle displacement as a multiple of OB body height. 0 = no filter. ICT recommends 2–3× displacement before expecting a retrace.")
 
+// ── MTF Order Block Inputs ──
+var string OB_MTF_GRP      = "③ᵇ MTF Order Blocks"
+var bool   ob_mtf1_show    = input.bool(false, "HTF 1             ", group = OB_MTF_GRP, inline = "mtf1")
+var string ob_mtf1_tf      = input.timeframe("60", "", group = OB_MTF_GRP, inline = "mtf1", tooltip = "Higher-timeframe layer 1. Shares Blend / Displacement settings from ③.")
+var color  ob_mtf1_bullClr = input.color(color.new(#00e640, 65), "", group = OB_MTF_GRP, inline = "mtf1")
+var color  ob_mtf1_bearClr = input.color(color.new(#e30000, 65), "", group = OB_MTF_GRP, inline = "mtf1")
+var bool   ob_mtf2_show    = input.bool(false, "HTF 2             ", group = OB_MTF_GRP, inline = "mtf2")
+var string ob_mtf2_tf      = input.timeframe("240", "", group = OB_MTF_GRP, inline = "mtf2", tooltip = "Higher-timeframe layer 2.")
+var color  ob_mtf2_bullClr = input.color(color.new(#00e640, 55), "", group = OB_MTF_GRP, inline = "mtf2")
+var color  ob_mtf2_bearClr = input.color(color.new(#e30000, 55), "", group = OB_MTF_GRP, inline = "mtf2")
+var bool   ob_mtf3_show    = input.bool(false, "HTF 3             ", group = OB_MTF_GRP, inline = "mtf3")
+var string ob_mtf3_tf      = input.timeframe("D", "", group = OB_MTF_GRP, inline = "mtf3", tooltip = "Higher-timeframe layer 3.")
+var color  ob_mtf3_bullClr = input.color(color.new(#00e640, 45), "", group = OB_MTF_GRP, inline = "mtf3")
+var color  ob_mtf3_bearClr = input.color(color.new(#e30000, 45), "", group = OB_MTF_GRP, inline = "mtf3")
+var int    ob_mtf_maxBoxes = input.int(10, "Max Boxes / Layer ", 1, 30, group = OB_MTF_GRP, inline = "mtf_cfg", tooltip = "Maximum boxes per HTF layer (bull + bear combined).")
+
 // ── Order Block UDT ──
 type OrderBlock
     box     bx              // the drawn box
@@ -431,6 +447,236 @@ if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
                 if not na(_ob.mtLine)
                     line.delete(_ob.mtLine)
                 ob_bears.remove(i)
+
+// ── MTF OB Detection Function ──
+// Runs on HTF bars via request.security(); returns sequence counters + zone data.
+f_obScan(int _blend, float _disp) =>
+    var int   _bullSeq = 0
+    var float _bullBT  = na
+    var float _bullBB  = na
+    var float _bullHi  = na
+    var float _bullLo  = na
+    var int   _bearSeq = 0
+    var float _bearBT  = na
+    var float _bearBB  = na
+    var float _bearHi  = na
+    var float _bearLo  = na
+    if barstate.isconfirmed
+        if close > open
+            int   _cnt  = 0
+            float _bTop = na
+            float _bBot = na
+            float _hi   = na
+            float _lo   = na
+            for j = 1 to _blend
+                if close[j] < open[j]
+                    _cnt  += 1
+                    _bTop := na(_bTop) ? open[j]  : math.max(_bTop, open[j])
+                    _bBot := na(_bBot) ? close[j] : math.min(_bBot, close[j])
+                    _hi   := na(_hi)   ? high[j]  : math.max(_hi, high[j])
+                    _lo   := na(_lo)   ? low[j]   : math.min(_lo, low[j])
+                else
+                    break
+            if _cnt > 0 and close > _bTop
+                float _bodyH  = _bTop - _bBot
+                bool  _dispOk = _disp <= 0 or (_bodyH > 0 and (close - _bTop) >= _disp * _bodyH)
+                if _dispOk
+                    _bullSeq += 1
+                    _bullBT  := _bTop
+                    _bullBB  := _bBot
+                    _bullHi  := _hi
+                    _bullLo  := _lo
+        if close < open
+            int   _cnt  = 0
+            float _bTop = na
+            float _bBot = na
+            float _hi   = na
+            float _lo   = na
+            for j = 1 to _blend
+                if close[j] > open[j]
+                    _cnt  += 1
+                    _bTop := na(_bTop) ? close[j] : math.max(_bTop, close[j])
+                    _bBot := na(_bBot) ? open[j]  : math.min(_bBot, open[j])
+                    _hi   := na(_hi)   ? high[j]  : math.max(_hi, high[j])
+                    _lo   := na(_lo)   ? low[j]   : math.min(_lo, low[j])
+                else
+                    break
+            if _cnt > 0 and close < _bBot
+                float _bodyH  = _bTop - _bBot
+                bool  _dispOk = _disp <= 0 or (_bodyH > 0 and (_bBot - close) >= _disp * _bodyH)
+                if _dispOk
+                    _bearSeq += 1
+                    _bearBT  := _bTop
+                    _bearBB  := _bBot
+                    _bearHi  := _hi
+                    _bearLo  := _lo
+    [_bullSeq, _bullBT, _bullBB, _bullHi, _bullLo,
+     _bearSeq, _bearBT, _bearBB, _bearHi, _bearLo]
+
+// ── TF display helper ──
+f_tfStr(string _tf) =>
+    float _n = str.tonumber(_tf)
+    if not na(_n)
+        int _m = int(_n)
+        _m >= 1440 ? str.tostring(_m / 1440) + "D" :
+         _m >= 60  ? str.tostring(_m / 60) + "H"   :
+         str.tostring(_m) + "m"
+    else
+        _tf
+
+// ── request.security() – one call per HTF layer ──
+[mtf1_bSq, mtf1_bBT, mtf1_bBB, mtf1_bHi, mtf1_bLo,
+ mtf1_sSq, mtf1_sBT, mtf1_sBB, mtf1_sHi, mtf1_sLo] =
+     request.security(syminfo.tickerid, ob_mtf1_tf, f_obScan(ob_maxBlend, ob_displacement))
+
+[mtf2_bSq, mtf2_bBT, mtf2_bBB, mtf2_bHi, mtf2_bLo,
+ mtf2_sSq, mtf2_sBT, mtf2_sBB, mtf2_sHi, mtf2_sLo] =
+     request.security(syminfo.tickerid, ob_mtf2_tf, f_obScan(ob_maxBlend, ob_displacement))
+
+[mtf3_bSq, mtf3_bBT, mtf3_bBB, mtf3_bHi, mtf3_bLo,
+ mtf3_sSq, mtf3_sBT, mtf3_sBB, mtf3_sHi, mtf3_sLo] =
+     request.security(syminfo.tickerid, ob_mtf3_tf, f_obScan(ob_maxBlend, ob_displacement))
+
+// ── HTF OB state arrays ──
+var array<OrderBlock> ob_mtf1 = array.new<OrderBlock>()
+var array<OrderBlock> ob_mtf2 = array.new<OrderBlock>()
+var array<OrderBlock> ob_mtf3 = array.new<OrderBlock>()
+
+// Previous sequence counters (detect new OBs when counter changes)
+var int _prevM1b = 0
+var int _prevM1s = 0
+var int _prevM2b = 0
+var int _prevM2s = 0
+var int _prevM3b = 0
+var int _prevM3s = 0
+
+// ── Helper: create an MTF OB box ──
+f_mtfObCreate(array<OrderBlock> _arr, bool _isBull, float _bodyTop, float _bodyBot,
+              float _hi, float _lo, color _clr, string _label, int _maxBox) =>
+    float _top = ob_zone == "Body" ? _bodyTop : _hi
+    float _bot = ob_zone == "Body" ? _bodyBot : _lo
+    box _bx = box.new(bar_index, _top, bar_index, _bot,
+         bgcolor      = _clr,
+         border_color = color.new(_clr, 60),
+         border_style = ob_border,
+         border_width = 1,
+         text         = ob_showLabel ? _label : na,
+         text_halign  = text.align_left,
+         text_valign  = _isBull ? text.align_top : text.align_bottom,
+         text_size    = size.tiny,
+         text_color   = color.new(_clr, 30))
+    float _mt  = (_bodyTop + _bodyBot) / 2
+    line  _mtL = ob_showMT ? line.new(bar_index, _mt, bar_index, _mt,
+         color = ob_mtColor, style = line.style_dashed, width = 1) : na
+    _arr.push(OrderBlock.new(_bx, _mtL, _bodyTop, _bodyBot, _isBull, false, 0))
+    while _arr.size() > _maxBox
+        OrderBlock _del = _arr.shift()
+        box.delete(_del.bx)
+        if not na(_del.mtLine)
+            line.delete(_del.mtLine)
+
+// ── Helper: extend / mitigate / prune an MTF OB array ──
+f_mtfObManage(array<OrderBlock> _arr) =>
+    if _arr.size() > 0
+        for i = _arr.size() - 1 to 0 by 1
+            OrderBlock _ob = _arr.get(i)
+            if not _ob.mitigated
+                bool _hit = _ob.isBull ? (close < _ob.bodyBot) : (close > _ob.bodyTop)
+                if _hit and barstate.isconfirmed
+                    _ob.mitigated := true
+                    _ob.mit_bar   := bar_index
+                    if ob_invert
+                        color _invClr = _ob.isBull ? ob_invBullColor : ob_invBearColor
+                        box.set_bgcolor(_ob.bx, _invClr)
+                        box.set_border_color(_ob.bx, color.new(_invClr, 60))
+                        box.set_text_color(_ob.bx, color.new(_invClr, 30))
+                        string _invTxt = _ob.isBull ? "Inv Bear" : "Inv Bull"
+                        box.set_text(_ob.bx, ob_showLabel ? _invTxt : na)
+                        if not na(_ob.mtLine)
+                            line.set_color(_ob.mtLine, color.new(_invClr, 60))
+                    else
+                        box.set_bgcolor(_ob.bx, ob_mitColor)
+                        box.set_border_color(_ob.bx, ob_mitColor)
+                        box.set_text_color(_ob.bx, color.new(color.gray, 70))
+                        if not na(_ob.mtLine)
+                            line.set_color(_ob.mtLine, color.new(color.gray, 85))
+                else if ob_extend
+                    box.set_right(_ob.bx, bar_index + 1)
+                    if not na(_ob.mtLine)
+                        line.set_x2(_ob.mtLine, bar_index + 1)
+            else
+                if ob_invert and ob_extend
+                    box.set_right(_ob.bx, bar_index + 1)
+                    if not na(_ob.mtLine)
+                        line.set_x2(_ob.mtLine, bar_index + 1)
+                if ob_pruneAge > 0 and (bar_index - _ob.mit_bar) > ob_pruneAge
+                    box.delete(_ob.bx)
+                    if not na(_ob.mtLine)
+                        line.delete(_ob.mtLine)
+                    _arr.remove(i)
+
+// ── Create new MTF OB boxes when sequence counters tick ──
+if ENABLE_ORDER_BLOCKS
+    string _tf1Lbl = f_tfStr(ob_mtf1_tf)
+    string _tf2Lbl = f_tfStr(ob_mtf2_tf)
+    string _tf3Lbl = f_tfStr(ob_mtf3_tf)
+
+    if ob_mtf1_show
+        if mtf1_bSq != _prevM1b
+            _prevM1b := mtf1_bSq
+            f_mtfObCreate(ob_mtf1, true, mtf1_bBT, mtf1_bBB, mtf1_bHi, mtf1_bLo,
+                 ob_mtf1_bullClr, "Bull OB (" + _tf1Lbl + ")", ob_mtf_maxBoxes)
+            if wh_enable and wh_formations
+                float _t = ob_zone == "Body" ? mtf1_bBT : mtf1_bHi
+                float _b = ob_zone == "Body" ? mtf1_bBB : mtf1_bLo
+                alert(_wh_json("Bull OB " + _tf1Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
+        if mtf1_sSq != _prevM1s
+            _prevM1s := mtf1_sSq
+            f_mtfObCreate(ob_mtf1, false, mtf1_sBT, mtf1_sBB, mtf1_sHi, mtf1_sLo,
+                 ob_mtf1_bearClr, "Bear OB (" + _tf1Lbl + ")", ob_mtf_maxBoxes)
+            if wh_enable and wh_formations
+                float _t = ob_zone == "Body" ? mtf1_sBT : mtf1_sHi
+                float _b = ob_zone == "Body" ? mtf1_sBB : mtf1_sLo
+                alert(_wh_json("Bear OB " + _tf1Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
+        f_mtfObManage(ob_mtf1)
+
+    if ob_mtf2_show
+        if mtf2_bSq != _prevM2b
+            _prevM2b := mtf2_bSq
+            f_mtfObCreate(ob_mtf2, true, mtf2_bBT, mtf2_bBB, mtf2_bHi, mtf2_bLo,
+                 ob_mtf2_bullClr, "Bull OB (" + _tf2Lbl + ")", ob_mtf_maxBoxes)
+            if wh_enable and wh_formations
+                float _t = ob_zone == "Body" ? mtf2_bBT : mtf2_bHi
+                float _b = ob_zone == "Body" ? mtf2_bBB : mtf2_bLo
+                alert(_wh_json("Bull OB " + _tf2Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
+        if mtf2_sSq != _prevM2s
+            _prevM2s := mtf2_sSq
+            f_mtfObCreate(ob_mtf2, false, mtf2_sBT, mtf2_sBB, mtf2_sHi, mtf2_sLo,
+                 ob_mtf2_bearClr, "Bear OB (" + _tf2Lbl + ")", ob_mtf_maxBoxes)
+            if wh_enable and wh_formations
+                float _t = ob_zone == "Body" ? mtf2_sBT : mtf2_sHi
+                float _b = ob_zone == "Body" ? mtf2_sBB : mtf2_sLo
+                alert(_wh_json("Bear OB " + _tf2Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
+        f_mtfObManage(ob_mtf2)
+
+    if ob_mtf3_show
+        if mtf3_bSq != _prevM3b
+            _prevM3b := mtf3_bSq
+            f_mtfObCreate(ob_mtf3, true, mtf3_bBT, mtf3_bBB, mtf3_bHi, mtf3_bLo,
+                 ob_mtf3_bullClr, "Bull OB (" + _tf3Lbl + ")", ob_mtf_maxBoxes)
+            if wh_enable and wh_formations
+                float _t = ob_zone == "Body" ? mtf3_bBT : mtf3_bHi
+                float _b = ob_zone == "Body" ? mtf3_bBB : mtf3_bLo
+                alert(_wh_json("Bull OB " + _tf3Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
+        if mtf3_sSq != _prevM3s
+            _prevM3s := mtf3_sSq
+            f_mtfObCreate(ob_mtf3, false, mtf3_sBT, mtf3_sBB, mtf3_sHi, mtf3_sLo,
+                 ob_mtf3_bearClr, "Bear OB (" + _tf3Lbl + ")", ob_mtf_maxBoxes)
+            if wh_enable and wh_formations
+                float _t = ob_zone == "Body" ? mtf3_sBT : mtf3_sHi
+                float _b = ob_zone == "Body" ? mtf3_sBB : mtf3_sLo
+                alert(_wh_json("Bear OB " + _tf3Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
+        f_mtfObManage(ob_mtf3)
 
 
 // ════════════════════════════════════════════════════════════════
