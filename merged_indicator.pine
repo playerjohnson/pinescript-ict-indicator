@@ -1972,6 +1972,7 @@ type CandleSet
 	label tfNameBottom
 	label tfTimerTop
 	label tfTimerBottom
+	int prevBarTime = na
 
 HTFSettings htfSettings = HTFSettings.new()
 
@@ -2367,8 +2368,9 @@ method FindImbalance(CandleSet candleSet) =>
 	candleSet
 
 method Monitor(CandleSet candleSet) =>
-	HTFBarTime = time(candleSet.csettings.htf, 'america/New_York')
-	isNewHTFCandle = ta.change(HTFBarTime) > 0
+	int HTFBarTime = time(candleSet.csettings.htf, 'america/New_York')
+	bool isNewHTFCandle = not na(HTFBarTime) and (na(candleSet.prevBarTime) or HTFBarTime != candleSet.prevBarTime)
+	candleSet.prevBarTime := HTFBarTime
 
 	if htfSettings.use_custom_daily
 		int _830 = 0
