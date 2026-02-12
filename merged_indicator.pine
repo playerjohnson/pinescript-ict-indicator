@@ -2421,6 +2421,25 @@ method Monitor(CandleSet candleSet) =>
 
 	candleSet
 
+_htf_traceUpd(_ln, _lb, _srcIdx, _srcVal, _x2, _bRight, _clr, _style, _sz) =>
+	line _oLn = _ln
+	label _oLb = _lb
+	if bar_index - _srcIdx < 5000
+		if na(_oLn)
+			_oLn := line.new(_srcIdx, _srcVal, _x2, _srcVal, xloc=xloc.bar_index, color=_clr, style=_htf_LineStyle(_style), width=_sz)
+		else
+			line.set_xy1(_oLn, _srcIdx, _srcVal)
+			line.set_xy2(_oLn, _x2, _srcVal)
+			_oLn
+		if htfSettings.label_show
+			if na(_oLb)
+				_oLb := label.new(_bRight, _srcVal, str.tostring(_srcVal), textalign=text.align_center, style=label.style_label_left, size=htfSettings.label_size, color=htfc_color_transparent, textcolor=htfSettings.label_color)
+			else
+				label.set_xy(_oLb, _bRight, _srcVal)
+				label.set_text(_oLb, str.tostring(_srcVal))
+				_oLb
+	[_oLn, _oLb]
+
 method Update(CandleSet candleSet, int offset, bool showTrace) =>
 	if candleSet.candles.size() > 0
 		Candle candle = candleSet.candles.first()
@@ -2447,69 +2466,16 @@ method Update(CandleSet candleSet, int offset, bool showTrace) =>
 		if barstate.isrealtime or barstate.islast
 			candleSet.Reorder(offset)
 			if htfSettings.trace_show and showTrace
-				if bar_index - candle.o_idx < 5000
-					if na(htfTrace.o)
-						htfTrace.o := line.new(candle.o_idx, candle.o, box.get_left(candle.body), candle.o, xloc = xloc.bar_index, color = htfSettings.trace_o_color, style = _htf_LineStyle(htfSettings.trace_o_style), width = htfSettings.trace_o_size)
-						htfTrace.o
-					else
-						line.set_xy1(htfTrace.o, candle.o_idx, candle.o)
-						line.set_xy2(htfTrace.o, box.get_left(candle.body), candle.o)
-
-					if htfSettings.label_show
-						if na(htfTrace.o_l)
-							htfTrace.o_l := label.new(box.get_right(candle.body), candle.o, str.tostring(candle.o), textalign = text.align_center, style = label.style_label_left, size = htfSettings.label_size, color = htfc_color_transparent, textcolor = htfSettings.label_color)
-							htfTrace.o_l
-						else
-							label.set_xy(htfTrace.o_l, box.get_right(candle.body), candle.o)
-							label.set_text(htfTrace.o_l, str.tostring(candle.o))
-
-				if bar_index - candle.c_idx < 5000
-					if na(htfTrace.c)
-						htfTrace.c := line.new(candle.c_idx, candle.c, box.get_left(candle.body), candle.c, xloc = xloc.bar_index, color = htfSettings.trace_c_color, style = _htf_LineStyle(htfSettings.trace_c_style), width = htfSettings.trace_c_size)
-						htfTrace.c
-					else
-						line.set_xy1(htfTrace.c, candle.c_idx, candle.c)
-						line.set_xy2(htfTrace.c, box.get_left(candle.body), candle.c)
-
-					if htfSettings.label_show
-						if na(htfTrace.c_l)
-							htfTrace.c_l := label.new(box.get_right(candle.body), candle.c, str.tostring(candle.c), textalign = text.align_center, style = label.style_label_left, size = htfSettings.label_size, color = htfc_color_transparent, textcolor = htfSettings.label_color)
-							htfTrace.c_l
-						else
-							label.set_xy(htfTrace.c_l, box.get_right(candle.body), candle.c)
-							label.set_text(htfTrace.c_l, str.tostring(candle.c))
-
-				if bar_index - candle.h_idx < 5000
-					if na(htfTrace.h)
-						htfTrace.h := line.new(candle.h_idx, candle.h, line.get_x1(candle.wick_up), candle.h, xloc = xloc.bar_index, color = htfSettings.trace_h_color, style = _htf_LineStyle(htfSettings.trace_h_style), width = htfSettings.trace_h_size)
-						htfTrace.h
-					else
-						line.set_xy1(htfTrace.h, candle.h_idx, candle.h)
-						line.set_xy2(htfTrace.h, line.get_x1(candle.wick_up), candle.h)
-
-					if htfSettings.label_show
-						if na(htfTrace.h_l)
-							htfTrace.h_l := label.new(box.get_right(candle.body), candle.h, str.tostring(candle.h), textalign = text.align_center, style = label.style_label_left, size = htfSettings.label_size, color = htfc_color_transparent, textcolor = htfSettings.label_color)
-							htfTrace.h_l
-						else
-							label.set_xy(htfTrace.h_l, box.get_right(candle.body), candle.h)
-							label.set_text(htfTrace.h_l, str.tostring(candle.h))
-
-				if bar_index - candle.l_idx < 5000
-					if na(htfTrace.l)
-						htfTrace.l := line.new(candle.l_idx, candle.l, line.get_x1(candle.wick_down), candle.l, xloc = xloc.bar_index, color = htfSettings.trace_l_color, style = _htf_LineStyle(htfSettings.trace_l_style), width = htfSettings.trace_l_size)
-						htfTrace.l
-					else
-						line.set_xy1(htfTrace.l, candle.l_idx, candle.l)
-						line.set_xy2(htfTrace.l, line.get_x1(candle.wick_down), candle.l)
-
-					if htfSettings.label_show
-						if na(htfTrace.l_l)
-							htfTrace.l_l := label.new(box.get_right(candle.body), candle.l, str.tostring(candle.l), textalign = text.align_center, style = label.style_label_left, size = htfSettings.label_size, color = htfc_color_transparent, textcolor = htfSettings.label_color)
-							htfTrace.l_l
-						else
-							label.set_xy(htfTrace.l_l, box.get_right(candle.body), candle.l)
-							label.set_text(htfTrace.l_l, str.tostring(candle.l))
+				int _bR = box.get_right(candle.body)
+				int _bL = box.get_left(candle.body)
+				[_to, _to_l] = _htf_traceUpd(htfTrace.o, htfTrace.o_l, candle.o_idx, candle.o, _bL, _bR, htfSettings.trace_o_color, htfSettings.trace_o_style, htfSettings.trace_o_size)
+				htfTrace.o := _to, htfTrace.o_l := _to_l
+				[_tc, _tc_l] = _htf_traceUpd(htfTrace.c, htfTrace.c_l, candle.c_idx, candle.c, _bL, _bR, htfSettings.trace_c_color, htfSettings.trace_c_style, htfSettings.trace_c_size)
+				htfTrace.c := _tc, htfTrace.c_l := _tc_l
+				[_th, _th_l] = _htf_traceUpd(htfTrace.h, htfTrace.h_l, candle.h_idx, candle.h, line.get_x1(candle.wick_up), _bR, htfSettings.trace_h_color, htfSettings.trace_h_style, htfSettings.trace_h_size)
+				htfTrace.h := _th, htfTrace.h_l := _th_l
+				[_tl, _tl_l] = _htf_traceUpd(htfTrace.l, htfTrace.l_l, candle.l_idx, candle.l, line.get_x1(candle.wick_down), _bR, htfSettings.trace_l_color, htfSettings.trace_l_style, htfSettings.trace_l_size)
+				htfTrace.l := _tl, htfTrace.l_l := _tl_l
 	candleSet
 
 int htfCnt = 0
