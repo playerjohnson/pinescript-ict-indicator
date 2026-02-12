@@ -815,8 +815,7 @@ isBeVItype3(index) =>
 	open[index] != close[index + 1] and close[index] < open[index] and close[index + 1] > open[index + 1] and low[index] <= high[index + 1] and high[index] >= low[index + 1]
 
 if isBuVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
-	box _bullboxVI = na
-	_bullboxVI := box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	box _bullboxVI = box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	if array.size(_bullishvi) > viMaxBoxSet
 		box.delete(array.shift(_bullishvi))
 	array.push(_bullishvi, _bullboxVI)
@@ -824,8 +823,7 @@ if isBuVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
 		alert(_wh_json("VI+", open, close[1]), alert.freq_once_per_bar_close)
 
 if isBeVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
-	box _bearboxVI = na
-	_bearboxVI := box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	box _bearboxVI = box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	if array.size(_bearishvi) > viMaxBoxSet
 		box.delete(array.shift(_bearishvi))
 	array.push(_bearishvi, _bearboxVI)
@@ -833,8 +831,7 @@ if isBeVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
 		alert(_wh_json("VI-", close[1], open), alert.freq_once_per_bar_close)
 
 if isBuVItype2(0) and advancedvi and ENABLE_IMBALANCES
-	box _bullboxVI = na
-	_bullboxVI := box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	box _bullboxVI = box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	if array.size(_bullishvi) > viMaxBoxSet
 		box.delete(array.shift(_bullishvi))
 	array.push(_bullishvi, _bullboxVI)
@@ -842,8 +839,7 @@ if isBuVItype2(0) and advancedvi and ENABLE_IMBALANCES
 		alert(_wh_json("VI+", close[1], open), alert.freq_once_per_bar_close)
 
 if isBeVItype2(0) and advancedvi and ENABLE_IMBALANCES
-	box _bearboxVI = na
-	_bearboxVI := box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	box _bearboxVI = box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	if array.size(_bearishvi) > viMaxBoxSet
 		box.delete(array.shift(_bearishvi))
 	array.push(_bearishvi, _bearboxVI)
@@ -851,8 +847,7 @@ if isBeVItype2(0) and advancedvi and ENABLE_IMBALANCES
 		alert(_wh_json("VI-", open, close[1]), alert.freq_once_per_bar_close)
 
 if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES
-	box _bullboxVI = na
-	_bullboxVI := box.new(left = bar_index - 1, top = math.max(open, close[1]), right = bar_index + 1, bottom = math.min(open, close[1]), bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	box _bullboxVI = box.new(left = bar_index - 1, top = math.max(open, close[1]), right = bar_index + 1, bottom = math.min(open, close[1]), bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	if array.size(_bullishvi) > viMaxBoxSet
 		box.delete(array.shift(_bullishvi))
 	array.push(_bullishvi, _bullboxVI)
@@ -860,8 +855,7 @@ if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES
 		alert(_wh_json("VI+", math.max(open, close[1]), math.min(open, close[1])), alert.freq_once_per_bar_close)
 
 if isBeVItype3(0) and advancedvi and ENABLE_IMBALANCES
-	box _bearboxVI = na
-	_bearboxVI := box.new(left = bar_index - 1, top = math.min(open, close[1]), right = bar_index + 1, bottom = math.max(open, close[1]), bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	box _bearboxVI = box.new(left = bar_index - 1, top = math.min(open, close[1]), right = bar_index + 1, bottom = math.max(open, close[1]), bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	if array.size(_bearishvi) > viMaxBoxSet
 		box.delete(array.shift(_bearishvi))
 	array.push(_bearishvi, _bearboxVI)
@@ -972,16 +966,14 @@ bool belv = false
 
 if isFvgUp(0) and isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and array.size(_bullBoxesFVG) > 0 and not plotFVG
 	bulv := true
-	box _bullboxFVG = na
-	line _buline = na
 	x = array.size(_bullBoxesFVG) - 1
 	_box = array.get(_bullBoxesFVG, x)
 	tempboxlow = box.get_bottom(_box)
 	tempboxleft = box.get_left(_box)
 	box.delete(array.pop(_bullBoxesFVG))
 	line.delete(array.pop(_bufvgce))
-	_bullboxFVG := box.new(left = tempboxleft, top = low[0], right = bar_index, bottom = tempboxlow, bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	_buline := cefvg ? line.new(tempboxleft, math.avg(low, tempboxlow), bar_index, math.avg(low, tempboxlow), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
+	box _bullboxFVG = box.new(left = tempboxleft, top = low[0], right = bar_index, bottom = tempboxlow, bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	line _buline = cefvg ? line.new(tempboxleft, math.avg(low, tempboxlow), bar_index, math.avg(low, tempboxlow), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
 	if array.size(_bullBoxesFVG) > fvgMaxBoxSet and array.size(_bufvgce) > fvgMaxBoxSet
 		box.delete(array.shift(_bullBoxesFVG))
 		line.delete(array.shift(_bufvgce))
@@ -990,10 +982,8 @@ if isFvgUp(0) and isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and array
 	if wh_enable and wh_formations and barstate.isconfirmed
 		alert(_wh_json("LV+", low, tempboxlow), alert.freq_once_per_bar_close)
 else if isFvgUp(0) and not isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
-	box _bullboxFVG = na
-	line _buline = na
-	_bullboxFVG := box.new(left = bar_index - 2, top = low[0], right = bar_index, bottom = high[2], bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	_buline := cefvg ? line.new(bar_index - 2, math.avg(low, high[2]), bar_index, math.avg(low, high[2]), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
+	box _bullboxFVG = box.new(left = bar_index - 2, top = low[0], right = bar_index, bottom = high[2], bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	line _buline = cefvg ? line.new(bar_index - 2, math.avg(low, high[2]), bar_index, math.avg(low, high[2]), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
 	if array.size(_bullBoxesFVG) > fvgMaxBoxSet and array.size(_bufvgce) > fvgMaxBoxSet
 		box.delete(array.shift(_bullBoxesFVG))
 		line.delete(array.shift(_bufvgce))
@@ -1002,16 +992,14 @@ else if isFvgUp(0) and not isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) 
 
 if isFvgDown(0) and isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and array.size(_bearBoxesFVG) > 0 and not plotFVG
 	belv := true
-	box _bearboxFVG = na
-	line _beline = na
 	x = array.size(_bearBoxesFVG) - 1
 	_box = array.get(_bearBoxesFVG, x)
 	tempboxhigh = box.get_top(_box)
 	tempboxleft = box.get_left(_box)
 	box.delete(array.pop(_bearBoxesFVG))
 	line.delete(array.pop(_befvgce))
-	_bearboxFVG := box.new(left = tempboxleft, top = tempboxhigh, right = bar_index, bottom = high[0], bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	_beline := cefvg ? line.new(tempboxleft, math.avg(tempboxhigh, high), bar_index, math.avg(tempboxhigh, high), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
+	box _bearboxFVG = box.new(left = tempboxleft, top = tempboxhigh, right = bar_index, bottom = high[0], bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	line _beline = cefvg ? line.new(tempboxleft, math.avg(tempboxhigh, high), bar_index, math.avg(tempboxhigh, high), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
 	if array.size(_bearBoxesFVG) > fvgMaxBoxSet and array.size(_befvgce) > fvgMaxBoxSet
 		box.delete(array.shift(_bearBoxesFVG))
 		line.delete(array.shift(_befvgce))
@@ -1020,10 +1008,8 @@ if isFvgDown(0) and isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and a
 	if wh_enable and wh_formations and barstate.isconfirmed
 		alert(_wh_json("LV-", tempboxhigh, high), alert.freq_once_per_bar_close)
 else if isFvgDown(0) and not isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
-	box _bearboxFVG = na
-	line _beline = na
-	_bearboxFVG := box.new(left = bar_index - 2, top = low[2], right = bar_index, bottom = high[0], bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	_beline := cefvg ? line.new(bar_index - 2, math.avg(low[2], high), bar_index, math.avg(low[2], high), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
+	box _bearboxFVG = box.new(left = bar_index - 2, top = low[2], right = bar_index, bottom = high[0], bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	line _beline = cefvg ? line.new(bar_index - 2, math.avg(low[2], high), bar_index, math.avg(low[2], high), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
 	if array.size(_bearBoxesFVG) > fvgMaxBoxSet and array.size(_befvgce) > fvgMaxBoxSet
 		box.delete(array.shift(_bearBoxesFVG))
 		line.delete(array.shift(_befvgce))
@@ -1037,8 +1023,7 @@ isBeIFvg(index) =>
 	low[index] < low[index + 2] and high[index + 2] > high[index] and high[index] >= low[index + 2] and math.min(open[index + 2], close[index + 2]) - low[index + 2] > (math.max(open[index + 2], close[index + 2]) - math.min(open[index + 2], close[index + 2])) / 2 and high[index] - math.max(open[index], close[index]) > (math.max(open[index], close[index]) - math.min(open[index], close[index])) / 2 and high[index] < high[index + 1] and (math.min(open[index + 2], close[index + 2]) + low[index + 2]) / 2 > (high[index] + math.max(open[index], close[index])) / 2 and low[index] < low[index + 1] and close[index + 1] < open[index + 1]
 
 if isBuIFvg(0) and showifvg and ENABLE_IMBALANCES
-	box _bullboxifvg = na
-	_bullboxifvg := box.new(left = bar_index - 2, top = (math.min(open, close) + low) / 2, right = bar_index + 1, bottom = (high[2] + math.max(open[2], close[2])) / 2, bgcolor = ifvgBullColor, border_style = BoxBorder, border_color = color.new(ifvgBullColor, BorderTransparency), text = plotBoxLabel ? 'Imp.FVG+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	box _bullboxifvg = box.new(left = bar_index - 2, top = (math.min(open, close) + low) / 2, right = bar_index + 1, bottom = (high[2] + math.max(open[2], close[2])) / 2, bgcolor = ifvgBullColor, border_style = BoxBorder, border_color = color.new(ifvgBullColor, BorderTransparency), text = plotBoxLabel ? 'Imp.FVG+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	if array.size(_bullishifvg) > fvgMaxBoxSet
 		box.delete(array.shift(_bullishifvg))
 	array.push(_bullishifvg, _bullboxifvg)
@@ -1046,8 +1031,7 @@ if isBuIFvg(0) and showifvg and ENABLE_IMBALANCES
 		alert(_wh_json("I.FVG+", (math.min(open, close) + low) / 2, (high[2] + math.max(open[2], close[2])) / 2), alert.freq_once_per_bar_close)
 
 if isBeIFvg(0) and showifvg and ENABLE_IMBALANCES
-	box _bearboxifvg = na
-	_bearboxifvg := box.new(left = bar_index - 2, top = (math.min(open[2], close[2]) + low[2]) / 2, right = bar_index + 1, bottom = (math.max(open, close) + high) / 2, bgcolor = ifvgBearColor, border_style = BoxBorder, border_color = color.new(ifvgBearColor, BorderTransparency), text = plotBoxLabel ? 'Imp.FVG-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	box _bearboxifvg = box.new(left = bar_index - 2, top = (math.min(open[2], close[2]) + low[2]) / 2, right = bar_index + 1, bottom = (math.max(open, close) + high) / 2, bgcolor = ifvgBearColor, border_style = BoxBorder, border_color = color.new(ifvgBearColor, BorderTransparency), text = plotBoxLabel ? 'Imp.FVG-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	if array.size(_bearishifvg) > fvgMaxBoxSet
 		box.delete(array.shift(_bearishifvg))
 	array.push(_bearishifvg, _bearboxifvg)
