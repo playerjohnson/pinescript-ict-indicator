@@ -409,6 +409,7 @@ f_obManageBulls() =>
                 if not na(_ob.mtLine)
                     line.delete(_ob.mtLine)
                 ob_bulls.remove(i)
+        true
 
 if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
     f_obManageBulls()
@@ -452,6 +453,7 @@ f_obManageBears() =>
                 if not na(_ob.mtLine)
                     line.delete(_ob.mtLine)
                 ob_bears.remove(i)
+        true
 
 if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
     f_obManageBears()
@@ -685,6 +687,7 @@ f_mtfObTick() =>
                 float _b = ob_zone == "Body" ? mtf3_sBB : mtf3_sLo
                 alert(_wh_json("Bear OB " + _tf3Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
         f_mtfObManage(ob_mtf3)
+    true
 
 if ENABLE_ORDER_BLOCKS
     f_mtfObTick()
@@ -3115,6 +3118,7 @@ f_sessionHL() =>
         _sh_drawCur(sh_showNYPre,   _isNYPre, sh_nypreH, sh_nypreL, sh_nypreHT, sh_nypreLT, sh_nypreBar, sh_nypreHColor, sh_nypreLColor, "NY Pre-AM")
         _sh_drawCur(sh_showNYLunch, _isNYL,  sh_nylH,  sh_nylL,  sh_nylHT,  sh_nylLT,  sh_nylBar,  sh_nylHColor,    sh_nylLColor,    "NY Lunch")
         _sh_drawCur(sh_showNYPM,    _isNYPM, sh_nypmH, sh_nypmL, sh_nypmHT, sh_nypmLT, sh_nypmBar, sh_nypmHColor,   sh_nypmLColor,   "NY PM")
+    true
 
 if ENABLE_SESSION_HL and timeframe.isintraday
     f_sessionHL()
@@ -3404,6 +3408,7 @@ f_rbDetect() =>
                 RejBlock _del = rb_blocks.shift()
                 box.delete(_del.bx)
                 line.delete(_del.trigLine)
+    true
 
 if ENABLE_REJECTION_BLK
     f_rbDetect()
@@ -3442,6 +3447,7 @@ f_rbManage() =>
                 box.delete(_rb.bx)
                 line.delete(_rb.trigLine)
                 rb_blocks.remove(i)
+        true
 
 if ENABLE_REJECTION_BLK and rb_blocks.size() > 0
     f_rbManage()
@@ -3682,6 +3688,7 @@ f_breakerMitProcess() =>
         for i = bm_pendBrk.size() - 1 to 0 by 1
             if bar_index - bm_pendBrk.get(i).zoneBar > 200
                 bm_pendBrk.remove(i)
+            true
 
     // ──────────────────────────────────────────────────
     //  MANAGEMENT: extend, mitigate, prune (both types)
@@ -3716,6 +3723,7 @@ f_breakerMitProcess() =>
                     box.delete(_ob.bx)
                     if not na(_ob.mtLine)
                         line.delete(_ob.mtLine)
+            true
 
     // ── Mitigation Block management ──
     if mb_blocks.size() > 0
@@ -3746,6 +3754,8 @@ f_breakerMitProcess() =>
                     box.delete(_ob.bx)
                     if not na(_ob.mtLine)
                         line.delete(_ob.mtLine)
+            true
+    true
 
 if ENABLE_BREAKER_MIT
     f_breakerMitProcess()
@@ -4157,6 +4167,7 @@ f_pdaScanner() =>
                 table.cell(pda_tbl, 3, _row, _gate, text_color = _gateClr,
                      text_size = size.tiny)
                 _row += 1
+    true
 
 if ENABLE_PDA_SCANNER
     f_pdaScanner()
