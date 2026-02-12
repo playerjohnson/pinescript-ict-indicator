@@ -25,7 +25,7 @@ indicator(
 //  MASTER SECTION TOGGLES  (disable a section = zero runtime cost)
 // ════════════════════════════════════════════════════════════════
 var bool ENABLE_HOURLY_OPEN   = input.bool(true, "Enable Hourly Open & Separator",  group = "⓪ Section Toggles")
-var bool ENABLE_ORDER_BLOCKS  = input.bool(true, "Enable Hourly Order Blocks",      group = "⓪ Section Toggles")
+var bool ENABLE_ORDER_BLOCKS  = input.bool(true, "Enable Order Blocks",             group = "⓪ Section Toggles")
 var bool ENABLE_IMBALANCES    = input.bool(true, "Enable ICT Imbalances (FVG/VI/GAP)", group = "⓪ Section Toggles")
 var bool ENABLE_NWOG_NDOG     = input.bool(true, "Enable NWOG / NDOG",              group = "⓪ Section Toggles")
 var bool ENABLE_HTF_CANDLES   = input.bool(true, "Enable HTF Candles",              group = "⓪ Section Toggles")
@@ -196,65 +196,52 @@ while array.size(hs_lines) > hs_maxLines
 
 
 // ════════════════════════════════════════════════════════════════
-//  SECTION A2 – ICT HOURLY ORDER BLOCKS
-//  A bullish OB forms when a bearish hourly candle (close < open)
-//  is followed by an hour that closes above that candle's open.
-//  A bearish OB forms when a bullish hourly candle (close > open)
-//  is followed by an hour that closes below that candle's open.
-//  The OB zone extends to the right until mitigated.
+//  SECTION A2 – ICT ORDER BLOCKS
+//  A bullish OB: consecutive bearish candle(s) displaced above by a
+//  confirming candle.  Zone = blended body of the OB candle(s).
+//  Bearish OB is the mirror.  Works on any chart timeframe.
+//  Based on ICT Mentorship Teaching 3 of 8.
 // ════════════════════════════════════════════════════════════════
 
 // ── Order Block Inputs ──
-var bool   ob_showBull    = input.bool(true,  "Bullish OB        ",  group = "③ Hourly Order Blocks", inline = "ob1")
-var color  ob_bullColor   = input.color(color.new(#00e640, 80), "", group = "③ Hourly Order Blocks", inline = "ob1")
-var bool   ob_showBear    = input.bool(true,  "Bearish OB        ",  group = "③ Hourly Order Blocks", inline = "ob2")
-var color  ob_bearColor   = input.color(color.new(#e30000, 80), "", group = "③ Hourly Order Blocks", inline = "ob2")
-var string ob_zone        = input.string("Body", "Zone / Border     ", options = ["Body", "Full Range"], group = "③ Hourly Order Blocks", inline = "ob3", tooltip = "Body = open‑to‑close.  Full Range = high‑to‑low.")
-var string ob_borderStyle = input.string("Solid", "", options = ["Solid", "Dashed", "Dotted"], group = "③ Hourly Order Blocks", inline = "ob3")
+var bool   ob_showBull     = input.bool(true,  "Bullish OB        ",  group = "③ Order Blocks", inline = "ob1")
+var color  ob_bullColor    = input.color(color.new(#00e640, 80), "", group = "③ Order Blocks", inline = "ob1")
+var bool   ob_showBear     = input.bool(true,  "Bearish OB        ",  group = "③ Order Blocks", inline = "ob2")
+var color  ob_bearColor    = input.color(color.new(#e30000, 80), "", group = "③ Order Blocks", inline = "ob2")
+var string ob_zone         = input.string("Body", "Zone / Border     ", options = ["Body", "Full Range"], group = "③ Order Blocks", inline = "ob3", tooltip = "Body = open‑to‑close (ICT default).  Full Range = high‑to‑low.")
+var string ob_borderStyle  = input.string("Solid", "", options = ["Solid", "Dashed", "Dotted"], group = "③ Order Blocks", inline = "ob3")
 
-var bool   ob_extend      = input.bool(true,  "Extend            ",    group = "③ Hourly Order Blocks", inline = "ob4")
-var bool   ob_showLabel   = input.bool(true,  "Label",             group = "③ Hourly Order Blocks", inline = "ob4")
-var color  ob_mitColor    = input.color(color.new(color.gray, 92), "Mit.", group = "③ Hourly Order Blocks", inline = "ob4")
-var bool   ob_invert      = input.bool(false, "Invert Mitigated  ",      group = "③ Hourly Order Blocks", inline = "ob5", tooltip = "When mitigated, a Bullish OB becomes a Bearish zone and vice versa.")
-var color  ob_invBullColor = input.color(color.new(#e30000, 75), "", group = "③ Hourly Order Blocks", inline = "ob5")
-var color  ob_invBearColor = input.color(color.new(#00e640, 75), "", group = "③ Hourly Order Blocks", inline = "ob5")
-var int    ob_maxBoxes    = input.int(20, "Max Boxes         ", 1, 50, group = "③ Hourly Order Blocks", inline = "ob6")
-var int    ob_pruneAge   = input.int(500, "Prune After", 0, 5000, group = "③ Hourly Order Blocks", inline = "ob6", tooltip = "Auto-delete mitigated OBs older than N bars. 0 = never.")
-
-
-// ── Hourly OHLC tracking for OB detection ──
-//   "Hour A" = the candidate OB candle (2 hours ago)
-//   "Hour B" = the confirming candle   (1 hour ago, just closed)
-//   On each new hour we check whether A→B qualifies as an OB.
-
-var float  ob_A_o   = na       // Hour A open
-var float  ob_A_c   = na       // Hour A close
-var float  ob_A_h   = na       // Hour A high
-var float  ob_A_l   = na       // Hour A low
-var int    ob_A_idx = na       // Hour A start bar_index
-var int    ob_A_t   = na       // Hour A start time
-
-var float  ob_B_o   = na       // Hour B (current tracking) open
-var float  ob_B_h   = na       // Hour B running high
-var float  ob_B_l   = na       // Hour B running low
-var int    ob_B_idx = na       // Hour B start bar_index
-var int    ob_B_t   = na       // Hour B start time
+var bool   ob_extend       = input.bool(true,  "Extend            ", group = "③ Order Blocks", inline = "ob4")
+var bool   ob_showLabel    = input.bool(true,  "Label",              group = "③ Order Blocks", inline = "ob4")
+var color  ob_mitColor     = input.color(color.new(color.gray, 92), "Mit.", group = "③ Order Blocks", inline = "ob4")
+var bool   ob_showMT       = input.bool(true,  "Mean Threshold    ", group = "③ Order Blocks", inline = "ob4b", tooltip = "50% of OB body (open‑to‑close midpoint). ICT's key level for entry refinement and stop management.")
+var color  ob_mtColor      = input.color(color.new(color.white, 60), "", group = "③ Order Blocks", inline = "ob4b")
+var bool   ob_invert       = input.bool(false, "Invert Mitigated  ", group = "③ Order Blocks", inline = "ob5", tooltip = "When mitigated, a Bullish OB becomes a Bearish zone and vice versa.")
+var color  ob_invBullColor = input.color(color.new(#e30000, 75), "", group = "③ Order Blocks", inline = "ob5")
+var color  ob_invBearColor = input.color(color.new(#00e640, 75), "", group = "③ Order Blocks", inline = "ob5")
+var int    ob_maxBoxes     = input.int(20, "Max Boxes         ", 1, 50, group = "③ Order Blocks", inline = "ob6")
+var int    ob_pruneAge     = input.int(500, "Prune After", 0, 5000, group = "③ Order Blocks", inline = "ob6", tooltip = "Auto-delete mitigated OBs older than N bars. 0 = never.")
+var int    ob_maxBlend     = input.int(3, "Max Blend         ", 1, 5, group = "③ Order Blocks", inline = "ob7", tooltip = "Max consecutive same-direction candles to blend into one OB. ICT typically blends 2 consecutive candles.")
+var float  ob_displacement = input.float(0, "Min Displacement  ", 0, 10, step = 0.5, group = "③ Order Blocks", inline = "ob7b", tooltip = "Minimum confirming-candle displacement as a multiple of OB body height. 0 = no filter. ICT recommends 2–3× displacement before expecting a retrace.")
 
 // ── Order Block UDT ──
 type OrderBlock
     box     bx              // the drawn box
-    float   ob_close        // the OB candle's close (mitigation level)
-    bool    mitigated        // has it been mitigated?
-    int     mit_bar          // bar_index when mitigated (for auto-prune)
+    line    mtLine          // mean threshold line (50% of body)
+    float   bodyTop         // top of body zone (mitigation / entry level)
+    float   bodyBot         // bottom of body zone (mitigation level)
+    bool    isBull          // true = bullish OB, false = bearish OB
+    bool    mitigated       // has it been mitigated?
+    int     mit_bar         // bar_index when mitigated (for auto-prune)
 
 var array<OrderBlock> ob_bulls = array.new<OrderBlock>()
 var array<OrderBlock> ob_bears = array.new<OrderBlock>()
 
 // OB alert flags (reset each bar)
-bool ob_bullFormed   = false
-bool ob_bearFormed   = false
-bool ob_bullMit      = false
-bool ob_bearMit      = false
+bool ob_bullFormed = false
+bool ob_bearFormed = false
+bool ob_bullMit    = false
+bool ob_bearMit    = false
 
 ob_border = switch ob_borderStyle
     "Solid"  => line.style_solid
@@ -262,85 +249,115 @@ ob_border = switch ob_borderStyle
     "Dotted" => line.style_dotted
     =>          line.style_solid
 
-// Detect top‑of‑hour on any intraday sub‑hourly chart
-bool ob_newHour = timeframe.isintraday and (minute == 0 and minute[1] > 0)
+// ── Order Block Detection (any timeframe, on confirmed bars) ──
+if barstate.isconfirmed and ENABLE_ORDER_BLOCKS
 
-if ob_newHour and ENABLE_ORDER_BLOCKS
-    float hourB_close = close[1]   // last bar of the hour that just ended
+    // === Bullish OB ===
+    // Scan backward for consecutive bearish candle(s); current bar is
+    // the bullish confirming candle that closes above their highest open.
+    if ob_showBull and close > open
+        int   _cnt  = 0
+        float _bTop = na        // highest open  among bearish candles (body top)
+        float _bBot = na        // lowest close   among bearish candles (body bot)
+        float _hi   = na        // highest high  (for Full Range zone)
+        float _lo   = na        // lowest low    (for Full Range zone)
+        int   _sIdx = na        // bar_index of earliest OB candle
+        for j = 1 to ob_maxBlend
+            if close[j] < open[j]
+                _cnt  += 1
+                _bTop := na(_bTop) ? open[j]  : math.max(_bTop, open[j])
+                _bBot := na(_bBot) ? close[j] : math.min(_bBot, close[j])
+                _hi   := na(_hi)   ? high[j]  : math.max(_hi, high[j])
+                _lo   := na(_lo)   ? low[j]   : math.min(_lo, low[j])
+                _sIdx := bar_index - j
+            else
+                break
 
-    // ── Check Bullish OB ──
-    if ob_showBull and not na(ob_A_o) and not na(ob_A_c)
-        if ob_A_c < ob_A_o and hourB_close > ob_A_o
-            float _top = ob_zone == "Body" ? ob_A_o : ob_A_h
-            float _bot = ob_zone == "Body" ? ob_A_c : ob_A_l
-            box _ob = box.new(ob_A_idx, _top, bar_index, _bot,
-                              bgcolor      = ob_bullColor,
-                              border_color = color.new(ob_bullColor, 60),
-                              border_style = ob_border,
-                              border_width = 1,
-                              text         = ob_showLabel ? "Bull OB" : na,
-                              text_halign  = text.align_left,
-                              text_valign  = text.align_top,
-                              text_size    = size.tiny,
-                              text_color   = color.new(ob_bullColor, 30))
-            ob_bulls.push(OrderBlock.new(_ob, ob_A_c, false, 0))
-            ob_bullFormed := true
-            if wh_enable and wh_formations
-                alert(_wh_json("Bull OB Formed", _top, _bot), alert.freq_once_per_bar_close)
-            while ob_bulls.size() > ob_maxBoxes
-                OrderBlock _del = ob_bulls.shift()
-                box.delete(_del.bx)
+        if _cnt > 0 and close > _bTop
+            float _bodyH  = _bTop - _bBot
+            bool  _dispOk = ob_displacement <= 0 or (_bodyH > 0 and (close - _bTop) >= ob_displacement * _bodyH)
+            if _dispOk
+                float _top = ob_zone == "Body" ? _bTop : _hi
+                float _bot = ob_zone == "Body" ? _bBot : _lo
+                box _bx = box.new(_sIdx, _top, bar_index, _bot,
+                     bgcolor      = ob_bullColor,
+                     border_color = color.new(ob_bullColor, 60),
+                     border_style = ob_border,
+                     border_width = 1,
+                     text         = ob_showLabel ? "Bull OB" : na,
+                     text_halign  = text.align_left,
+                     text_valign  = text.align_top,
+                     text_size    = size.tiny,
+                     text_color   = color.new(ob_bullColor, 30))
+                float _mt  = (_bTop + _bBot) / 2
+                line  _mtL = ob_showMT ? line.new(_sIdx, _mt, bar_index, _mt,
+                     color = ob_mtColor, style = line.style_dashed, width = 1) : na
+                ob_bulls.push(OrderBlock.new(_bx, _mtL, _bTop, _bBot, true, false, 0))
+                ob_bullFormed := true
+                if wh_enable and wh_formations
+                    alert(_wh_json("Bull OB Formed", _top, _bot), alert.freq_once_per_bar_close)
+                while ob_bulls.size() > ob_maxBoxes
+                    OrderBlock _del = ob_bulls.shift()
+                    box.delete(_del.bx)
+                    if not na(_del.mtLine)
+                        line.delete(_del.mtLine)
 
-    // ── Check Bearish OB ──
-    if ob_showBear and not na(ob_A_o) and not na(ob_A_c)
-        if ob_A_c > ob_A_o and hourB_close < ob_A_o
-            float _top = ob_zone == "Body" ? ob_A_c : ob_A_h
-            float _bot = ob_zone == "Body" ? ob_A_o : ob_A_l
-            box _ob = box.new(ob_A_idx, _top, bar_index, _bot,
-                              bgcolor      = ob_bearColor,
-                              border_color = color.new(ob_bearColor, 60),
-                              border_style = ob_border,
-                              border_width = 1,
-                              text         = ob_showLabel ? "Bear OB" : na,
-                              text_halign  = text.align_left,
-                              text_valign  = text.align_bottom,
-                              text_size    = size.tiny,
-                              text_color   = color.new(ob_bearColor, 30))
-            ob_bears.push(OrderBlock.new(_ob, ob_A_c, false, 0))
-            ob_bearFormed := true
-            if wh_enable and wh_formations
-                alert(_wh_json("Bear OB Formed", _top, _bot), alert.freq_once_per_bar_close)
-            while ob_bears.size() > ob_maxBoxes
-                OrderBlock _del = ob_bears.shift()
-                box.delete(_del.bx)
+    // === Bearish OB ===
+    // Scan backward for consecutive bullish candle(s); current bar is
+    // the bearish confirming candle that closes below their lowest open.
+    if ob_showBear and close < open
+        int   _cnt  = 0
+        float _bTop = na        // highest close among bullish candles (body top)
+        float _bBot = na        // lowest open   among bullish candles (body bot)
+        float _hi   = na
+        float _lo   = na
+        int   _sIdx = na
+        for j = 1 to ob_maxBlend
+            if close[j] > open[j]
+                _cnt  += 1
+                _bTop := na(_bTop) ? close[j] : math.max(_bTop, close[j])
+                _bBot := na(_bBot) ? open[j]  : math.min(_bBot, open[j])
+                _hi   := na(_hi)   ? high[j]  : math.max(_hi, high[j])
+                _lo   := na(_lo)   ? low[j]   : math.min(_lo, low[j])
+                _sIdx := bar_index - j
+            else
+                break
 
-    // Shift hours:  B → A ,  start fresh B
-    ob_A_o   := ob_B_o
-    ob_A_c   := hourB_close
-    ob_A_h   := ob_B_h
-    ob_A_l   := ob_B_l
-    ob_A_idx := ob_B_idx
-    ob_A_t   := ob_B_t
-
-    ob_B_o   := open
-    ob_B_h   := high
-    ob_B_l   := low
-    ob_B_idx := bar_index
-    ob_B_t   := time
-
-if timeframe.isintraday and not ob_newHour and ENABLE_ORDER_BLOCKS
-    // Update running high/low for the current hour
-    if not na(ob_B_h)
-        ob_B_h := math.max(ob_B_h, high)
-    if not na(ob_B_l)
-        ob_B_l := math.min(ob_B_l, low)
+        if _cnt > 0 and close < _bBot
+            float _bodyH  = _bTop - _bBot
+            bool  _dispOk = ob_displacement <= 0 or (_bodyH > 0 and (_bBot - close) >= ob_displacement * _bodyH)
+            if _dispOk
+                float _top = ob_zone == "Body" ? _bTop : _hi
+                float _bot = ob_zone == "Body" ? _bBot : _lo
+                box _bx = box.new(_sIdx, _top, bar_index, _bot,
+                     bgcolor      = ob_bearColor,
+                     border_color = color.new(ob_bearColor, 60),
+                     border_style = ob_border,
+                     border_width = 1,
+                     text         = ob_showLabel ? "Bear OB" : na,
+                     text_halign  = text.align_left,
+                     text_valign  = text.align_bottom,
+                     text_size    = size.tiny,
+                     text_color   = color.new(ob_bearColor, 30))
+                float _mt  = (_bTop + _bBot) / 2
+                line  _mtL = ob_showMT ? line.new(_sIdx, _mt, bar_index, _mt,
+                     color = ob_mtColor, style = line.style_dashed, width = 1) : na
+                ob_bears.push(OrderBlock.new(_bx, _mtL, _bTop, _bBot, false, false, 0))
+                ob_bearFormed := true
+                if wh_enable and wh_formations
+                    alert(_wh_json("Bear OB Formed", _top, _bot), alert.freq_once_per_bar_close)
+                while ob_bears.size() > ob_maxBoxes
+                    OrderBlock _del = ob_bears.shift()
+                    box.delete(_del.bx)
+                    if not na(_del.mtLine)
+                        line.delete(_del.mtLine)
 
 // ── Extend, Mitigate & Auto-Prune Bullish OBs ──
 if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
     for i = ob_bulls.size() - 1 to 0 by 1
         OrderBlock _ob = ob_bulls.get(i)
         if not _ob.mitigated
-            if ob_newHour and close[1] < _ob.ob_close
+            if barstate.isconfirmed and close < _ob.bodyBot
                 _ob.mitigated := true
                 _ob.mit_bar   := bar_index
                 ob_bullMit    := true
@@ -355,14 +372,24 @@ if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
                     box.set_bgcolor(_ob.bx, ob_mitColor)
                     box.set_border_color(_ob.bx, ob_mitColor)
                     box.set_text_color(_ob.bx, color.new(color.gray, 70))
+                if not na(_ob.mtLine)
+                    if ob_invert
+                        line.set_color(_ob.mtLine, color.new(ob_invBullColor, 60))
+                    else
+                        line.set_color(_ob.mtLine, color.new(color.gray, 85))
             else if ob_extend
                 box.set_right(_ob.bx, bar_index + 1)
+                if not na(_ob.mtLine)
+                    line.set_x2(_ob.mtLine, bar_index + 1)
         else
-            // Already mitigated — extend if inverted, auto-prune if old
             if ob_invert and ob_extend
                 box.set_right(_ob.bx, bar_index + 1)
+                if not na(_ob.mtLine)
+                    line.set_x2(_ob.mtLine, bar_index + 1)
             if ob_pruneAge > 0 and (bar_index - _ob.mit_bar) > ob_pruneAge
                 box.delete(_ob.bx)
+                if not na(_ob.mtLine)
+                    line.delete(_ob.mtLine)
                 ob_bulls.remove(i)
 
 // ── Extend, Mitigate & Auto-Prune Bearish OBs ──
@@ -370,7 +397,7 @@ if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
     for i = ob_bears.size() - 1 to 0 by 1
         OrderBlock _ob = ob_bears.get(i)
         if not _ob.mitigated
-            if ob_newHour and close[1] > _ob.ob_close
+            if barstate.isconfirmed and close > _ob.bodyTop
                 _ob.mitigated := true
                 _ob.mit_bar   := bar_index
                 ob_bearMit    := true
@@ -385,13 +412,24 @@ if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
                     box.set_bgcolor(_ob.bx, ob_mitColor)
                     box.set_border_color(_ob.bx, ob_mitColor)
                     box.set_text_color(_ob.bx, color.new(color.gray, 70))
+                if not na(_ob.mtLine)
+                    if ob_invert
+                        line.set_color(_ob.mtLine, color.new(ob_invBearColor, 60))
+                    else
+                        line.set_color(_ob.mtLine, color.new(color.gray, 85))
             else if ob_extend
                 box.set_right(_ob.bx, bar_index + 1)
+                if not na(_ob.mtLine)
+                    line.set_x2(_ob.mtLine, bar_index + 1)
         else
             if ob_invert and ob_extend
                 box.set_right(_ob.bx, bar_index + 1)
+                if not na(_ob.mtLine)
+                    line.set_x2(_ob.mtLine, bar_index + 1)
             if ob_pruneAge > 0 and (bar_index - _ob.mit_bar) > ob_pruneAge
                 box.delete(_ob.bx)
+                if not na(_ob.mtLine)
+                    line.delete(_ob.mtLine)
                 ob_bears.remove(i)
 
 
