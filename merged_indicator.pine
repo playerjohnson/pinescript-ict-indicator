@@ -3141,7 +3141,7 @@ f_breakerMitProcess() =>
 			SwingPt _newLo = bm_swLo.last()
 			for i = bm_swLo.size() - 2 to math.max(0, bm_swLo.size() - 6) by 1
 				SwingPt _oldLo = bm_swLo.get(i)
-				if _newLo.price < _oldLo.price
+				if _newLo.price < _oldLo.price and bm_swHi.size() > 0
 					for h = bm_swHi.size() - 1 to 0 by 1
 						SwingPt _hi = bm_swHi.get(h)
 						if _hi.bar > _oldLo.bar and _hi.bar < _newLo.bar
@@ -3155,7 +3155,7 @@ f_breakerMitProcess() =>
 			SwingPt _newHi = bm_swHi.last()
 			for i = bm_swHi.size() - 2 to math.max(0, bm_swHi.size() - 6) by 1
 				SwingPt _oldHi = bm_swHi.get(i)
-				if _newHi.price > _oldHi.price
+				if _newHi.price > _oldHi.price and bm_swLo.size() > 0
 					for l = bm_swLo.size() - 1 to 0 by 1
 						SwingPt _lo = bm_swLo.get(l)
 						if _lo.bar > _oldHi.bar and _lo.bar < _newHi.bar
