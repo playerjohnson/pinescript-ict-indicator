@@ -372,13 +372,14 @@ if barstate.isconfirmed and ENABLE_ORDER_BLOCKS
 
 // ── Extend, Mitigate & Auto-Prune Bullish OBs ──
 f_obManageBulls() =>
+    bool _bullMit = false
     for i = ob_bulls.size() - 1 to 0 by 1
         OrderBlock _ob = ob_bulls.get(i)
         if not _ob.mitigated
             if barstate.isconfirmed and close < _ob.bodyBot
                 _ob.mitigated := true
                 _ob.mit_bar   := bar_index
-                ob_bullMit    := true
+                _bullMit      := true
                 if wh_enable and wh_mitigations
                     alert(_wh_json("Bull OB Mitigated", box.get_top(_ob.bx), box.get_bottom(_ob.bx)), alert.freq_once_per_bar)
                 if ob_invert
@@ -410,19 +411,21 @@ f_obManageBulls() =>
                     line.delete(_ob.mtLine)
                 ob_bulls.remove(i)
         true
+    _bullMit
 
 if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
-    f_obManageBulls()
+    ob_bullMit := f_obManageBulls()
 
 // ── Extend, Mitigate & Auto-Prune Bearish OBs ──
 f_obManageBears() =>
+    bool _bearMit = false
     for i = ob_bears.size() - 1 to 0 by 1
         OrderBlock _ob = ob_bears.get(i)
         if not _ob.mitigated
             if barstate.isconfirmed and close > _ob.bodyTop
                 _ob.mitigated := true
                 _ob.mit_bar   := bar_index
-                ob_bearMit    := true
+                _bearMit      := true
                 if wh_enable and wh_mitigations
                     alert(_wh_json("Bear OB Mitigated", box.get_top(_ob.bx), box.get_bottom(_ob.bx)), alert.freq_once_per_bar)
                 if ob_invert
@@ -454,9 +457,10 @@ f_obManageBears() =>
                     line.delete(_ob.mtLine)
                 ob_bears.remove(i)
         true
+    _bearMit
 
 if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
-    f_obManageBears()
+    ob_bearMit := f_obManageBears()
 
 // ── MTF OB Detection Function ──
 // Runs on HTF bars via request.security(); returns sequence counters + zone data.
@@ -630,18 +634,24 @@ f_mtfObTick() =>
     string _tf1Lbl = f_tfStr(ob_mtf1_tf)
     string _tf2Lbl = f_tfStr(ob_mtf2_tf)
     string _tf3Lbl = f_tfStr(ob_mtf3_tf)
+    int _pm1b = _prevM1b
+    int _pm1s = _prevM1s
+    int _pm2b = _prevM2b
+    int _pm2s = _prevM2s
+    int _pm3b = _prevM3b
+    int _pm3s = _prevM3s
 
     if ob_mtf1_show
-        if mtf1_bSq != _prevM1b
-            _prevM1b := mtf1_bSq
+        if mtf1_bSq != _pm1b
+            _pm1b := mtf1_bSq
             f_mtfObCreate(ob_mtf1, true, mtf1_bBT, mtf1_bBB, mtf1_bHi, mtf1_bLo,
                  ob_mtf1_bullClr, "Bull OB (" + _tf1Lbl + ")", ob_mtf_maxBoxes)
             if wh_enable and wh_formations
                 float _t = ob_zone == "Body" ? mtf1_bBT : mtf1_bHi
                 float _b = ob_zone == "Body" ? mtf1_bBB : mtf1_bLo
                 alert(_wh_json("Bull OB " + _tf1Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
-        if mtf1_sSq != _prevM1s
-            _prevM1s := mtf1_sSq
+        if mtf1_sSq != _pm1s
+            _pm1s := mtf1_sSq
             f_mtfObCreate(ob_mtf1, false, mtf1_sBT, mtf1_sBB, mtf1_sHi, mtf1_sLo,
                  ob_mtf1_bearClr, "Bear OB (" + _tf1Lbl + ")", ob_mtf_maxBoxes)
             if wh_enable and wh_formations
@@ -651,16 +661,16 @@ f_mtfObTick() =>
         f_mtfObManage(ob_mtf1)
 
     if ob_mtf2_show
-        if mtf2_bSq != _prevM2b
-            _prevM2b := mtf2_bSq
+        if mtf2_bSq != _pm2b
+            _pm2b := mtf2_bSq
             f_mtfObCreate(ob_mtf2, true, mtf2_bBT, mtf2_bBB, mtf2_bHi, mtf2_bLo,
                  ob_mtf2_bullClr, "Bull OB (" + _tf2Lbl + ")", ob_mtf_maxBoxes)
             if wh_enable and wh_formations
                 float _t = ob_zone == "Body" ? mtf2_bBT : mtf2_bHi
                 float _b = ob_zone == "Body" ? mtf2_bBB : mtf2_bLo
                 alert(_wh_json("Bull OB " + _tf2Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
-        if mtf2_sSq != _prevM2s
-            _prevM2s := mtf2_sSq
+        if mtf2_sSq != _pm2s
+            _pm2s := mtf2_sSq
             f_mtfObCreate(ob_mtf2, false, mtf2_sBT, mtf2_sBB, mtf2_sHi, mtf2_sLo,
                  ob_mtf2_bearClr, "Bear OB (" + _tf2Lbl + ")", ob_mtf_maxBoxes)
             if wh_enable and wh_formations
@@ -670,16 +680,16 @@ f_mtfObTick() =>
         f_mtfObManage(ob_mtf2)
 
     if ob_mtf3_show
-        if mtf3_bSq != _prevM3b
-            _prevM3b := mtf3_bSq
+        if mtf3_bSq != _pm3b
+            _pm3b := mtf3_bSq
             f_mtfObCreate(ob_mtf3, true, mtf3_bBT, mtf3_bBB, mtf3_bHi, mtf3_bLo,
                  ob_mtf3_bullClr, "Bull OB (" + _tf3Lbl + ")", ob_mtf_maxBoxes)
             if wh_enable and wh_formations
                 float _t = ob_zone == "Body" ? mtf3_bBT : mtf3_bHi
                 float _b = ob_zone == "Body" ? mtf3_bBB : mtf3_bLo
                 alert(_wh_json("Bull OB " + _tf3Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
-        if mtf3_sSq != _prevM3s
-            _prevM3s := mtf3_sSq
+        if mtf3_sSq != _pm3s
+            _pm3s := mtf3_sSq
             f_mtfObCreate(ob_mtf3, false, mtf3_sBT, mtf3_sBB, mtf3_sHi, mtf3_sLo,
                  ob_mtf3_bearClr, "Bear OB (" + _tf3Lbl + ")", ob_mtf_maxBoxes)
             if wh_enable and wh_formations
@@ -687,10 +697,16 @@ f_mtfObTick() =>
                 float _b = ob_zone == "Body" ? mtf3_sBB : mtf3_sLo
                 alert(_wh_json("Bear OB " + _tf3Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
         f_mtfObManage(ob_mtf3)
-    true
+    [_pm1b, _pm1s, _pm2b, _pm2s, _pm3b, _pm3s]
 
 if ENABLE_ORDER_BLOCKS
-    f_mtfObTick()
+    [_m1b, _m1s, _m2b, _m2s, _m3b, _m3s] = f_mtfObTick()
+    _prevM1b := _m1b
+    _prevM1s := _m1s
+    _prevM2b := _m2b
+    _prevM2s := _m2s
+    _prevM3b := _m3b
+    _prevM3s := _m3s
 
 // ════════════════════════════════════════════════════════════════
 //  SECTION B – ICT GAPS / FVG / VI  (© Vulnerable_human_x)
@@ -2997,7 +3013,7 @@ var float sh_nypmH = na,  var float sh_nypmL = na,  var int sh_nypmBar = na,  va
 var bool sh_inAsia = false, var bool sh_inLon = false
 var bool sh_inNYAM = false, var bool sh_inNYPre = false, var bool sh_inNYL = false, var bool sh_inNYPM = false
 
-f_sessionHL() =>
+if ENABLE_SESSION_HL and timeframe.isintraday
     // ── Detect sessions (uses Killzone times from ⑱, except NY Lunch which is hardcoded 12:00-13:30) ──
     bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
     bool _isLon  = f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
@@ -3118,10 +3134,6 @@ f_sessionHL() =>
         _sh_drawCur(sh_showNYPre,   _isNYPre, sh_nypreH, sh_nypreL, sh_nypreHT, sh_nypreLT, sh_nypreBar, sh_nypreHColor, sh_nypreLColor, "NY Pre-AM")
         _sh_drawCur(sh_showNYLunch, _isNYL,  sh_nylH,  sh_nylL,  sh_nylHT,  sh_nylLT,  sh_nylBar,  sh_nylHColor,    sh_nylLColor,    "NY Lunch")
         _sh_drawCur(sh_showNYPM,    _isNYPM, sh_nypmH, sh_nypmL, sh_nypmHT, sh_nypmLT, sh_nypmBar, sh_nypmHColor,   sh_nypmLColor,   "NY PM")
-    true
-
-if ENABLE_SESSION_HL and timeframe.isintraday
-    f_sessionHL()
 
 // ════════════════════════════════════════════════════════════════
 //  SECTION H – PDH/PDL / PWH/PWL / PMH/PML LIQUIDITY LEVELS
@@ -3308,6 +3320,8 @@ float rb_pvtHi = ta.pivothigh(high, rb_swingLen, rb_swingLen)
 float rb_pvtLo = ta.pivotlow(low,   rb_swingLen, rb_swingLen)
 
 f_rbDetect() =>
+    bool _bearFormed = false
+    bool _bullFormed = false
     // ── Bearish Rejection Block (at swing highs) ──
     if rb_showBear and not na(rb_pvtHi)
         int _pvtOff = rb_swingLen   // pivot candle is this many bars back
@@ -3352,7 +3366,7 @@ f_rbDetect() =>
                               style = rb_trigStyle,
                               width = rb_triggerWidth) : na
             rb_blocks.push(RejBlock.new(_bx, _tl, _highestBody, false, false, 0))
-            rb_bearFormed := true
+            _bearFormed := true
             if wh_enable and wh_formations
                 alert(_wh_json("Bear RB Formed", _wickHigh, _highestBody), alert.freq_once_per_bar_close)
             while rb_blocks.size() > rb_maxBoxes * 2
@@ -3401,20 +3415,24 @@ f_rbDetect() =>
                               style = rb_trigStyle,
                               width = rb_triggerWidth) : na
             rb_blocks.push(RejBlock.new(_bx, _tl, _lowestBody, true, false, 0))
-            rb_bullFormed := true
+            _bullFormed := true
             if wh_enable and wh_formations
                 alert(_wh_json("Bull RB Formed", _lowestBody, _wickLow), alert.freq_once_per_bar_close)
             while rb_blocks.size() > rb_maxBoxes * 2
                 RejBlock _del = rb_blocks.shift()
                 box.delete(_del.bx)
                 line.delete(_del.trigLine)
-    true
+    [_bearFormed, _bullFormed]
 
 if ENABLE_REJECTION_BLK
-    f_rbDetect()
+    [_rbBearF, _rbBullF] = f_rbDetect()
+    rb_bearFormed := _rbBearF
+    rb_bullFormed := _rbBullF
 
 // ── Extend, Mitigate & Auto-Prune Rejection Blocks ──
 f_rbManage() =>
+    bool _bullMit = false
+    bool _bearMit = false
     for i = rb_blocks.size() - 1 to 0 by 1
         RejBlock _rb = rb_blocks.get(i)
         if not _rb.mitigated
@@ -3425,11 +3443,11 @@ f_rbManage() =>
                 _rb.mitigated := true
                 _rb.mit_bar   := bar_index
                 if _rb.isBull
-                    rb_bullMit := true
+                    _bullMit := true
                     if wh_enable and wh_mitigations
                         alert(_wh_json("Bull RB Mitigated", box.get_top(_rb.bx), box.get_bottom(_rb.bx)), alert.freq_once_per_bar)
                 else
-                    rb_bearMit := true
+                    _bearMit := true
                     if wh_enable and wh_mitigations
                         alert(_wh_json("Bear RB Mitigated", box.get_top(_rb.bx), box.get_bottom(_rb.bx)), alert.freq_once_per_bar)
                 box.set_bgcolor(_rb.bx, rb_mitColor)
@@ -3448,9 +3466,12 @@ f_rbManage() =>
                 line.delete(_rb.trigLine)
                 rb_blocks.remove(i)
         true
+    [_bullMit, _bearMit]
 
 if ENABLE_REJECTION_BLK and rb_blocks.size() > 0
-    f_rbManage()
+    [_rbBullM, _rbBearM] = f_rbManage()
+    rb_bullMit := _rbBullM
+    rb_bearMit := _rbBearM
 
 // ════════════════════════════════════════════════════════════════
 //  SECTION G – BREAKER & MITIGATION BLOCKS
@@ -3522,6 +3543,14 @@ float bm_pvtHi = ta.pivothigh(high, _bmSwLen, _bmSwLen)
 float bm_pvtLo = ta.pivotlow(low,   _bmSwLen, _bmSwLen)
 
 f_breakerMitProcess() =>
+    bool _mbBearF = false
+    bool _mbBullF = false
+    bool _bkBullF = false
+    bool _bkBearF = false
+    bool _bkBullM = false
+    bool _bkBearM = false
+    bool _mbBullM = false
+    bool _mbBearM = false
     // ──────────────────────────────────────────────────
     //  Record new swing points
     // ──────────────────────────────────────────────────
@@ -3565,7 +3594,7 @@ f_breakerMitProcess() =>
                          color = color.new(mb_bearColor, 60),
                          style = line.style_dashed, width = 1)
                     mb_blocks.push(OrderBlock.new(_bx, _mtL, _sw.bodyTop, _sw.bodyBot, false, false, 0))
-                    mb_bearFormed := true
+                    _mbBearF := true
                     if wh_enable and wh_formations
                         alert(_wh_json("Bear MB Formed", _sw.bodyTop, _sw.bodyBot), alert.freq_once_per_bar_close)
                     bm_swLo.remove(i)
@@ -3596,7 +3625,7 @@ f_breakerMitProcess() =>
                          color = color.new(mb_bullColor, 60),
                          style = line.style_dashed, width = 1)
                     mb_blocks.push(OrderBlock.new(_bx, _mtL, _sw.bodyTop, _sw.bodyBot, true, false, 0))
-                    mb_bullFormed := true
+                    _mbBullF := true
                     if wh_enable and wh_formations
                         alert(_wh_json("Bull MB Formed", _sw.bodyTop, _sw.bodyBot), alert.freq_once_per_bar_close)
                     bm_swHi.remove(i)
@@ -3671,9 +3700,9 @@ f_breakerMitProcess() =>
                      style = line.style_dashed, width = 1)
                 bk_blocks.push(OrderBlock.new(_bx, _mtL, _p.bodyTop, _p.bodyBot, _p.isBull, false, 0))
                 if _p.isBull
-                    bk_bullFormed := true
+                    _bkBullF := true
                 else
-                    bk_bearFormed := true
+                    _bkBearF := true
                 if wh_enable and wh_formations
                     alert(_wh_json(_lbl + " Confirmed", _p.bodyTop, _p.bodyBot), alert.freq_once_per_bar_close)
                 bm_pendBrk.remove(i)
@@ -3710,9 +3739,9 @@ f_breakerMitProcess() =>
                     if not na(_ob.mtLine)
                         line.set_color(_ob.mtLine, color.new(color.gray, 85))
                     if _ob.isBull
-                        bk_bullMit := true
+                        _bkBullM := true
                     else
-                        bk_bearMit := true
+                        _bkBearM := true
                 else if bk_extend
                     box.set_right(_ob.bx, bar_index + 1)
                     if not na(_ob.mtLine)
@@ -3741,9 +3770,9 @@ f_breakerMitProcess() =>
                     if not na(_ob.mtLine)
                         line.set_color(_ob.mtLine, color.new(color.gray, 85))
                     if _ob.isBull
-                        mb_bullMit := true
+                        _mbBullM := true
                     else
-                        mb_bearMit := true
+                        _mbBearM := true
                 else if mb_extend
                     box.set_right(_ob.bx, bar_index + 1)
                     if not na(_ob.mtLine)
@@ -3755,10 +3784,18 @@ f_breakerMitProcess() =>
                     if not na(_ob.mtLine)
                         line.delete(_ob.mtLine)
             true
-    true
+    [_mbBearF, _mbBullF, _bkBullF, _bkBearF, _bkBullM, _bkBearM, _mbBullM, _mbBearM]
 
 if ENABLE_BREAKER_MIT
-    f_breakerMitProcess()
+    [_r1, _r2, _r3, _r4, _r5, _r6, _r7, _r8] = f_breakerMitProcess()
+    mb_bearFormed := _r1
+    mb_bullFormed := _r2
+    bk_bullFormed := _r3
+    bk_bearFormed := _r4
+    bk_bullMit    := _r5
+    bk_bearMit    := _r6
+    mb_bullMit    := _r7
+    mb_bearMit    := _r8
 
 // ── Rejection Block Alerts ──
 alertcondition(rb_bullFormed, title = 'Bull RB Formed', message = 'Bullish Rejection Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
@@ -3856,6 +3893,8 @@ var table      pda_tbl        = na
 
 // ── Main Scanner Logic ──
 f_pdaScanner() =>
+    line  _eqLine = pda_eqLine
+    table _tbl    = pda_tbl
     // ── Equilibrium calculation ──
     float _rangeHi = switch pda_range
         "Previous Day"   => pda_dayHi
@@ -3871,12 +3910,12 @@ f_pdaScanner() =>
 
     // ── Draw EQ line (every bar for real-time update) ──
     if pda_showEQ and not na(_rangeHi)
-        if na(pda_eqLine)
-            pda_eqLine := line.new(bar_index, _eq, bar_index + 1, _eq,
+        if na(_eqLine)
+            _eqLine := line.new(bar_index, _eq, bar_index + 1, _eq,
                  color = pda_eqColor, style = line.style_dashed, width = 1)
         else
-            line.set_xy1(pda_eqLine, bar_index - 50, _eq)
-            line.set_xy2(pda_eqLine, bar_index + 20, _eq)
+            line.set_xy1(_eqLine, bar_index - 50, _eq)
+            line.set_xy2(_eqLine, bar_index + 20, _eq)
 
     // ── Zone collection + overlap + table  (last bar only for performance) ──
     if barstate.islast
@@ -4073,10 +4112,10 @@ f_pdaScanner() =>
             int _totalRows = 3 + _premCount + 1 + _discCount  // header + prem + EQ row + disc
 
             // Create/recreate table
-            if not na(pda_tbl)
-                table.delete(pda_tbl)
+            if not na(_tbl)
+                table.delete(_tbl)
 
-            pda_tbl := table.new(pda_tblPosition(pda_tblPos), 4, _totalRows + 1,
+            _tbl := table.new(pda_tblPosition(pda_tblPos), 4, _totalRows + 1,
                  bgcolor = color.new(#1a1a2e, 5),
                  border_width = 1,
                  border_color = color.new(#333355, 20),
@@ -4092,29 +4131,29 @@ f_pdaScanner() =>
             string _locLabel = close > _eq ? "PREMIUM" : "DISCOUNT"
             color  _locColor = close > _eq ? color.new(#f23645, 40) : color.new(#089981, 40)
 
-            table.cell(pda_tbl, 0, 0, "PD Array Scanner", text_color = color.white,
+            table.cell(_tbl, 0, 0, "PD Array Scanner", text_color = color.white,
                  text_size = size.small, bgcolor = color.new(#16213e, 0))
-            table.merge_cells(pda_tbl, 0, 0, 3, 0)
+            table.merge_cells(_tbl, 0, 0, 3, 0)
 
             // Row 1: Range + EQ info
-            table.cell(pda_tbl, 0, 1, _rangeLabel, text_color = color.new(color.white, 30),
+            table.cell(_tbl, 0, 1, _rangeLabel, text_color = color.new(color.white, 30),
                  text_size = size.tiny, text_halign = text.align_left)
-            table.cell(pda_tbl, 1, 1, "EQ: " + str.tostring(_eq, format.mintick), text_color = pda_eqColor,
+            table.cell(_tbl, 1, 1, "EQ: " + str.tostring(_eq, format.mintick), text_color = pda_eqColor,
                  text_size = size.tiny)
-            table.cell(pda_tbl, 2, 1, _locLabel, text_color = color.white,
+            table.cell(_tbl, 2, 1, _locLabel, text_color = color.white,
                  text_size = size.tiny, bgcolor = _locColor)
-            table.cell(pda_tbl, 3, 1, str.tostring(_zones.size()) + " zones", text_color = color.new(color.white, 40),
+            table.cell(_tbl, 3, 1, str.tostring(_zones.size()) + " zones", text_color = color.new(color.white, 40),
                  text_size = size.tiny)
 
             // Row 2: Premium header
             int _row = 2
-            table.cell(pda_tbl, 0, _row, "PREMIUM", text_color = #f23645,
+            table.cell(_tbl, 0, _row, "PREMIUM", text_color = #f23645,
                  text_size = size.tiny, text_halign = text.align_left)
-            table.cell(pda_tbl, 1, _row, "Zone", text_color = color.new(color.white, 40),
+            table.cell(_tbl, 1, _row, "Zone", text_color = color.new(color.white, 40),
                  text_size = size.tiny)
-            table.cell(pda_tbl, 2, _row, "Conf", text_color = color.new(color.white, 40),
+            table.cell(_tbl, 2, _row, "Conf", text_color = color.new(color.white, 40),
                  text_size = size.tiny)
-            table.cell(pda_tbl, 3, _row, "Gate", text_color = color.new(color.white, 40),
+            table.cell(_tbl, 3, _row, "Gate", text_color = color.new(color.white, 40),
                  text_size = size.tiny)
             _row += 1
 
@@ -4130,20 +4169,20 @@ f_pdaScanner() =>
                 color  _scrClr  = _z.score >= pda_minConfl ? #ffeb3b : color.new(color.white, 40)
                 color  _gateClr = _z.kind == "BRK" ? #ff9800 : (_z.blocked ? #f23645 : color.new(color.white, 60))
 
-                table.cell(pda_tbl, 0, _row, _name, text_color = _nameClr,
+                table.cell(_tbl, 0, _row, _name, text_color = _nameClr,
                      text_size = size.tiny, text_halign = text.align_left)
-                table.cell(pda_tbl, 1, _row, _rng, text_color = color.new(color.white, 30),
+                table.cell(_tbl, 1, _row, _rng, text_color = color.new(color.white, 30),
                      text_size = size.tiny)
-                table.cell(pda_tbl, 2, _row, _scr, text_color = _scrClr,
+                table.cell(_tbl, 2, _row, _scr, text_color = _scrClr,
                      text_size = size.tiny)
-                table.cell(pda_tbl, 3, _row, _gate, text_color = _gateClr,
+                table.cell(_tbl, 3, _row, _gate, text_color = _gateClr,
                      text_size = size.tiny)
                 _row += 1
 
             // EQ divider row
-            table.cell(pda_tbl, 0, _row, "=== EQ " + str.tostring(_eq, format.mintick) + " ===",
+            table.cell(_tbl, 0, _row, "=== EQ " + str.tostring(_eq, format.mintick) + " ===",
                  text_color = pda_eqColor, text_size = size.tiny, text_halign = text.align_center)
-            table.merge_cells(pda_tbl, 0, _row, 3, _row)
+            table.merge_cells(_tbl, 0, _row, 3, _row)
             _row += 1
 
             // Discount zones (bullish arrays below EQ)
@@ -4158,19 +4197,21 @@ f_pdaScanner() =>
                 color  _scrClr  = _z.score >= pda_minConfl ? #ffeb3b : color.new(color.white, 40)
                 color  _gateClr = _z.kind == "BRK" ? #ff9800 : (_z.blocked ? #f23645 : color.new(color.white, 60))
 
-                table.cell(pda_tbl, 0, _row, _name, text_color = _nameClr,
+                table.cell(_tbl, 0, _row, _name, text_color = _nameClr,
                      text_size = size.tiny, text_halign = text.align_left)
-                table.cell(pda_tbl, 1, _row, _rng, text_color = color.new(color.white, 30),
+                table.cell(_tbl, 1, _row, _rng, text_color = color.new(color.white, 30),
                      text_size = size.tiny)
-                table.cell(pda_tbl, 2, _row, _scr, text_color = _scrClr,
+                table.cell(_tbl, 2, _row, _scr, text_color = _scrClr,
                      text_size = size.tiny)
-                table.cell(pda_tbl, 3, _row, _gate, text_color = _gateClr,
+                table.cell(_tbl, 3, _row, _gate, text_color = _gateClr,
                      text_size = size.tiny)
                 _row += 1
-    true
+    [_eqLine, _tbl]
 
 if ENABLE_PDA_SCANNER
-    f_pdaScanner()
+    [_pEq, _pTbl] = f_pdaScanner()
+    pda_eqLine := _pEq
+    pda_tbl    := _pTbl
 
 // ── Timeframe Warning ──
 // Many sections require intraday charts; show a one-time warning on daily+ charts
