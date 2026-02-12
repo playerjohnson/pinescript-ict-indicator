@@ -34,6 +34,7 @@ var bool ENABLE_SESSION_HL    = input.bool(true, "Enable Session Highs/Lows",   
 var bool ENABLE_LIQUIDITY     = input.bool(true, "Enable PDH/PDL/PWH/PWL",          group = "⓪ Section Toggles")
 var bool ENABLE_REJECTION_BLK = input.bool(true, "Enable Rejection Blocks",         group = "⓪ Section Toggles")
 var bool ENABLE_BREAKER_MIT   = input.bool(true, "Enable Breaker / Mitigation",    group = "⓪ Section Toggles")
+var bool ENABLE_PDA_SCANNER   = input.bool(false, "Enable PD Array Scanner",        group = "⓪ Section Toggles")
 
 // ── ㉑ Webhook JSON Alerts ──
 var bool   wh_enable      = input.bool(false, "Enable Webhook Alerts", group = "㉑ Webhook Alerts", tooltip = "Sends JSON payloads via alert() for bot/webhook integration.\nIn TradingView alert dialog, select 'Any alert() function call'.")
@@ -3747,6 +3748,398 @@ alertcondition(mb_bullFormed, title = 'Bull MB Formed',    message = 'Bullish Mi
 alertcondition(mb_bearFormed, title = 'Bear MB Formed',    message = 'Bearish Mitigation Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(mb_bullMit,    title = 'Bull MB Mitigated', message = 'Bullish MB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(mb_bearMit,    title = 'Bear MB Mitigated', message = 'Bearish MB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+
+
+// ════════════════════════════════════════════════════════════════
+//  SECTION I – PD ARRAY CONFLUENCE SCANNER
+//  Equilibrium engine + zone collector + overlap detection + table
+//  ICT hierarchy: MB → BRK → LV → FVG → OB → RB → Old H/L
+// ════════════════════════════════════════════════════════════════
+
+// ── Inputs ──
+var string pda_range     = input.string("Previous Day", "Dealing Range     ", options = ["Previous Day", "Previous Week", "Previous Month"], group = "㉕ PD Array Scanner", tooltip = "Timeframe for the dealing range that defines Equilibrium.\nPremium = above EQ, Discount = below EQ.")
+var bool   pda_showEQ    = input.bool(true, "EQ Line           ", group = "㉕ PD Array Scanner", inline = "pda1")
+var color  pda_eqColor   = input.color(color.new(color.white, 30), "", group = "㉕ PD Array Scanner", inline = "pda1")
+var bool   pda_showTable = input.bool(true, "Table             ", group = "㉕ PD Array Scanner", inline = "pda2")
+var string pda_tblPos    = input.string("Top Right", "", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group = "㉕ PD Array Scanner", inline = "pda2")
+var bool   pda_showConfl = input.bool(true, "Confluence Zones  ", group = "㉕ PD Array Scanner", inline = "pda3")
+var color  pda_conflClr  = input.color(color.new(#ffeb3b, 80), "", group = "㉕ PD Array Scanner", inline = "pda3")
+var int    pda_minConfl  = input.int(2, "Min Overlap Count ", 2, 5, group = "㉕ PD Array Scanner", inline = "pda4", tooltip = "Minimum number of different PD array types overlapping to flag as confluence.")
+
+// ── PDZone: unified envelope for any PD array ──
+type PDZone
+    float   top
+    float   bot
+    string  kind       // "OB", "FVG", "VI", "RB", "BRK", "MB", "GAP", "I.FVG", "Inv.FVG"
+    bool    isBull
+    int     rank       // ICT hierarchy 1-7 (1 = nearest EQ, 7 = deepest)
+    int     score      // confluence count (filled during overlap scan)
+    bool    blocked    // true if a breaker sits between this zone and EQ
+
+// ── Own request.security for EQ (independent of ENABLE_LIQUIDITY) ──
+[pda_dayHi, pda_dayLo]   = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+[pda_weekHi, pda_weekLo] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+[pda_moHi, pda_moLo]     = request.security(syminfo.tickerid, "M", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+// ── Helpers ──
+pda_rankFor(_kind, _isBull, _isPrem) =>
+    // ICT hierarchy — Premium arrays (bearish) rank top→bottom: 7=Old H/L, 6=RB, 5=OB, 4=FVG, 3=LV/VI, 2=BRK, 1=MB
+    // Discount arrays (bullish) rank bottom→top: 7=Old H/L, 6=RB, 5=OB, 4=FVG, 3=LV/VI, 2=BRK, 1=MB
+    switch _kind
+        "MB"      => 1
+        "BRK"     => 2
+        "VI"      => 3
+        "GAP"     => 3
+        "FVG"     => 4
+        "I.FVG"   => 4
+        "Inv.FVG" => 4
+        "OB"      => 5
+        "RB"      => 6
+        => 5  // HTF OB etc.
+
+pda_tblPosition(_pos) =>
+    switch _pos
+        "Top Left"     => position.top_left
+        "Top Right"    => position.top_right
+        "Bottom Left"  => position.bottom_left
+        "Bottom Right" => position.bottom_right
+        => position.top_right
+
+// ── State ──
+var line       pda_eqLine     = na
+var array<box> pda_conflBoxes = array.new<box>()
+var table      pda_tbl        = na
+
+// ── Main Scanner Logic ──
+if ENABLE_PDA_SCANNER
+    // ── Equilibrium calculation ──
+    float _rangeHi = switch pda_range
+        "Previous Day"   => pda_dayHi
+        "Previous Week"  => pda_weekHi
+        "Previous Month" => pda_moHi
+        => pda_dayHi
+    float _rangeLo = switch pda_range
+        "Previous Day"   => pda_dayLo
+        "Previous Week"  => pda_weekLo
+        "Previous Month" => pda_moLo
+        => pda_dayLo
+    float _eq = nz((_rangeHi + _rangeLo) / 2)
+
+    // ── Draw EQ line (every bar for real-time update) ──
+    if pda_showEQ and not na(_rangeHi)
+        if na(pda_eqLine)
+            pda_eqLine := line.new(bar_index, _eq, bar_index + 1, _eq,
+                 color = pda_eqColor, style = line.style_dashed, width = 1)
+        else
+            line.set_xy1(pda_eqLine, bar_index - 50, _eq)
+            line.set_xy2(pda_eqLine, bar_index + 20, _eq)
+
+    // ── Zone collection + overlap + table  (last bar only for performance) ──
+    if barstate.islast
+        // ────── Collect all active PD zones ──────
+        var array<PDZone> _zones = array.new<PDZone>()
+        _zones.clear()
+
+        // Helper closure-like approach: add a zone
+        _addZone(_zones, _top, _bot, _kind, _isBull, _eq) =>
+            if not na(_top) and not na(_bot) and _top > _bot
+                bool _isPrem = (_top + _bot) / 2.0 > _eq
+                _zones.push(PDZone.new(_top, _bot, _kind, _isBull,
+                     pda_rankFor(_kind, _isBull, _isPrem), 0, false))
+
+        // 1. Order Blocks (chart TF)
+        for i = 0 to ob_bulls.size() - 1
+            OrderBlock _ob = ob_bulls.get(i)
+            if not _ob.mitigated
+                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", true, _eq)
+
+        for i = 0 to ob_bears.size() - 1
+            OrderBlock _ob = ob_bears.get(i)
+            if not _ob.mitigated
+                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", false, _eq)
+
+        // 2. HTF Order Blocks (MTF 1)
+        for i = 0 to ob_mtf1.size() - 1
+            OrderBlock _ob = ob_mtf1.get(i)
+            if not _ob.mitigated
+                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
+
+        // HTF Order Blocks (MTF 2)
+        for i = 0 to ob_mtf2.size() - 1
+            OrderBlock _ob = ob_mtf2.get(i)
+            if not _ob.mitigated
+                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
+
+        // HTF Order Blocks (MTF 3)
+        for i = 0 to ob_mtf3.size() - 1
+            OrderBlock _ob = ob_mtf3.get(i)
+            if not _ob.mitigated
+                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
+
+        // 3. Breaker Blocks
+        for i = 0 to bk_blocks.size() - 1
+            OrderBlock _ob = bk_blocks.get(i)
+            if not _ob.mitigated
+                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "BRK", _ob.isBull, _eq)
+
+        // 4. Mitigation Blocks
+        for i = 0 to mb_blocks.size() - 1
+            OrderBlock _ob = mb_blocks.get(i)
+            if not _ob.mitigated
+                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "MB", _ob.isBull, _eq)
+
+        // 5. Rejection Blocks
+        for i = 0 to rb_blocks.size() - 1
+            RejBlock _rb = rb_blocks.get(i)
+            if not _rb.mitigated and not na(_rb.bx)
+                float _t = box.get_top(_rb.bx)
+                float _b = box.get_bottom(_rb.bx)
+                _addZone(_zones, _t, _b, "RB", _rb.isBull, _eq)
+
+        // 6. FVGs (bull + bear)
+        for i = 0 to _bullBoxesFVG.size() - 1
+            box _bx = _bullBoxesFVG.get(i)
+            if not na(_bx)
+                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "FVG", true, _eq)
+
+        for i = 0 to _bearBoxesFVG.size() - 1
+            box _bx = _bearBoxesFVG.get(i)
+            if not na(_bx)
+                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "FVG", false, _eq)
+
+        // 7. Volume Imbalances
+        for i = 0 to _bullishvi.size() - 1
+            box _bx = _bullishvi.get(i)
+            if not na(_bx)
+                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "VI", true, _eq)
+
+        for i = 0 to _bearishvi.size() - 1
+            box _bx = _bearishvi.get(i)
+            if not na(_bx)
+                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "VI", false, _eq)
+
+        // 8. Implied FVGs
+        for i = 0 to _bullishifvg.size() - 1
+            box _bx = _bullishifvg.get(i)
+            if not na(_bx)
+                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "I.FVG", true, _eq)
+
+        for i = 0 to _bearishifvg.size() - 1
+            box _bx = _bearishifvg.get(i)
+            if not na(_bx)
+                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "I.FVG", false, _eq)
+
+        // 9. Inverse FVGs
+        for i = 0 to bullInvFVG.size() - 1
+            box _bx = bullInvFVG.get(i)
+            if not na(_bx)
+                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "Inv.FVG", true, _eq)
+
+        for i = 0 to bearInvFVG.size() - 1
+            box _bx = bearInvFVG.get(i)
+            if not na(_bx)
+                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "Inv.FVG", false, _eq)
+
+        // 10. Gaps (Opening Gaps)
+        for i = 0 to _gapsboxesbu.size() - 1
+            box _bx = _gapsboxesbu.get(i)
+            if not na(_bx)
+                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "GAP", true, _eq)
+
+        for i = 0 to _gapsboxesbe.size() - 1
+            box _bx = _gapsboxesbe.get(i)
+            if not na(_bx)
+                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "GAP", false, _eq)
+
+        // ────── Overlap scan: O(n²) on last bar only ──────
+        for i = 0 to _zones.size() - 1
+            PDZone _z1 = _zones.get(i)
+            int _cnt = 1
+            for j = 0 to _zones.size() - 1
+                if j != i
+                    PDZone _z2 = _zones.get(j)
+                    // Two zones overlap if z1.top >= z2.bot AND z2.top >= z1.bot
+                    if _z1.top >= _z2.bot and _z2.top >= _z1.bot
+                        // Only count different kinds for true confluence
+                        if _z1.kind != _z2.kind
+                            _cnt += 1
+            _z1.score := _cnt
+
+        // ────── Breaker gating ──────
+        // Collect breaker midpoints to check if they sit between a zone and EQ
+        var array<float> _brkMids = array.new<float>()
+        _brkMids.clear()
+        for i = 0 to _zones.size() - 1
+            PDZone _z = _zones.get(i)
+            if _z.kind == "BRK"
+                _brkMids.push((_z.top + _z.bot) / 2.0)
+
+        for i = 0 to _zones.size() - 1
+            PDZone _z = _zones.get(i)
+            if _z.kind != "BRK"
+                float _mid = (_z.top + _z.bot) / 2.0
+                bool _isPrem = _mid > _eq
+                // Check if any breaker sits between this zone and EQ
+                for j = 0 to _brkMids.size() - 1
+                    float _bm = _brkMids.get(j)
+                    if _isPrem
+                        // Premium zone: breaker blocks if breaker is between EQ and zone
+                        if _bm > _eq and _bm < _mid
+                            _z.blocked := true
+                    else
+                        // Discount zone: breaker blocks if breaker is between zone and EQ
+                        if _bm < _eq and _bm > _mid
+                            _z.blocked := true
+
+        // ────── Draw confluence overlay boxes ──────
+        // Clean up old confluence boxes
+        for i = pda_conflBoxes.size() - 1 to 0 by 1
+            box.delete(pda_conflBoxes.get(i))
+        pda_conflBoxes.clear()
+
+        if pda_showConfl
+            for i = 0 to _zones.size() - 1
+                PDZone _z = _zones.get(i)
+                if _z.score >= pda_minConfl
+                    color _clr = switch
+                        _z.score >= 4 => color.new(#ffeb3b, 65)
+                        _z.score >= 3 => color.new(#ffeb3b, 75)
+                        => color.new(#ffeb3b, 82)
+                    box _bx = box.new(bar_index - 3, _z.top, bar_index + 15, _z.bot,
+                         border_color = pda_conflClr, border_width = 2,
+                         border_style = line.style_dotted,
+                         bgcolor = _clr)
+                    pda_conflBoxes.push(_bx)
+
+        // ────── Summary Table ──────
+        if pda_showTable
+            // Sort zones into premium (above EQ) and discount (below EQ)
+            var array<PDZone> _premZones = array.new<PDZone>()
+            var array<PDZone> _discZones = array.new<PDZone>()
+            _premZones.clear()
+            _discZones.clear()
+            for i = 0 to _zones.size() - 1
+                PDZone _z = _zones.get(i)
+                if (_z.top + _z.bot) / 2.0 > _eq
+                    _premZones.push(_z)
+                else
+                    _discZones.push(_z)
+
+            // Sort by rank descending (deepest first for premium = top of table)
+            // Simple insertion sort — small arrays
+            _sortByRankDesc(_arr) =>
+                for i = 1 to _arr.size() - 1
+                    PDZone _key = _arr.get(i)
+                    int j = i - 1
+                    while j >= 0 and _arr.get(j).rank < _key.rank
+                        _arr.set(j + 1, _arr.get(j))
+                        j -= 1
+                    _arr.set(j + 1, _key)
+
+            _sortByRankDesc(_premZones)
+            _sortByRankDesc(_discZones)
+
+            // Limit display to 6 per side
+            int _maxRows = 6
+            int _premCount = math.min(_premZones.size(), _maxRows)
+            int _discCount = math.min(_discZones.size(), _maxRows)
+            int _totalRows = 3 + _premCount + 1 + _discCount  // header + prem + EQ row + disc
+
+            // Create/recreate table
+            if not na(pda_tbl)
+                table.delete(pda_tbl)
+
+            pda_tbl := table.new(pda_tblPosition(pda_tblPos), 4, _totalRows + 1,
+                 bgcolor = color.new(#1a1a2e, 5),
+                 border_width = 1,
+                 border_color = color.new(#333355, 20),
+                 frame_width = 2,
+                 frame_color = color.new(#555577, 10))
+
+            // Row 0: Title
+            string _rangeLabel = switch pda_range
+                "Previous Day"   => "PDH/PDL"
+                "Previous Week"  => "PWH/PWL"
+                "Previous Month" => "PMH/PML"
+                => "PDH/PDL"
+            string _locLabel = close > _eq ? "PREMIUM" : "DISCOUNT"
+            color  _locColor = close > _eq ? color.new(#f23645, 40) : color.new(#089981, 40)
+
+            table.cell(pda_tbl, 0, 0, "PD Array Scanner", text_color = color.white,
+                 text_size = size.small, bgcolor = color.new(#16213e, 0))
+            table.merge_cells(pda_tbl, 0, 0, 3, 0)
+
+            // Row 1: Range + EQ info
+            table.cell(pda_tbl, 0, 1, _rangeLabel, text_color = color.new(color.white, 30),
+                 text_size = size.tiny, text_halign = text.align_left)
+            table.cell(pda_tbl, 1, 1, "EQ: " + str.tostring(_eq, format.mintick), text_color = pda_eqColor,
+                 text_size = size.tiny)
+            table.cell(pda_tbl, 2, 1, _locLabel, text_color = color.white,
+                 text_size = size.tiny, bgcolor = _locColor)
+            table.cell(pda_tbl, 3, 1, str.tostring(_zones.size()) + " zones", text_color = color.new(color.white, 40),
+                 text_size = size.tiny)
+
+            // Row 2: Premium header
+            int _row = 2
+            table.cell(pda_tbl, 0, _row, "PREMIUM", text_color = #f23645,
+                 text_size = size.tiny, text_halign = text.align_left)
+            table.cell(pda_tbl, 1, _row, "Zone", text_color = color.new(color.white, 40),
+                 text_size = size.tiny)
+            table.cell(pda_tbl, 2, _row, "Conf", text_color = color.new(color.white, 40),
+                 text_size = size.tiny)
+            table.cell(pda_tbl, 3, _row, "Gate", text_color = color.new(color.white, 40),
+                 text_size = size.tiny)
+            _row += 1
+
+            // Premium zones (bearish arrays above EQ)
+            for i = 0 to _premCount - 1
+                PDZone _z = _premZones.get(i)
+                string _dir  = _z.isBull ? "+" : "-"
+                string _name = str.tostring(_z.rank) + ". " + _z.kind + _dir
+                string _rng  = str.tostring(_z.bot, format.mintick) + " - " + str.tostring(_z.top, format.mintick)
+                string _scr  = _z.score > 1 ? str.tostring(_z.score) : "-"
+                string _gate = _z.kind == "BRK" ? "GATE" : (_z.blocked ? "X" : "")
+                color  _nameClr = _z.blocked ? color.new(color.gray, 30) : color.white
+                color  _scrClr  = _z.score >= pda_minConfl ? #ffeb3b : color.new(color.white, 40)
+                color  _gateClr = _z.kind == "BRK" ? #ff9800 : (_z.blocked ? #f23645 : color.new(color.white, 60))
+
+                table.cell(pda_tbl, 0, _row, _name, text_color = _nameClr,
+                     text_size = size.tiny, text_halign = text.align_left)
+                table.cell(pda_tbl, 1, _row, _rng, text_color = color.new(color.white, 30),
+                     text_size = size.tiny)
+                table.cell(pda_tbl, 2, _row, _scr, text_color = _scrClr,
+                     text_size = size.tiny)
+                table.cell(pda_tbl, 3, _row, _gate, text_color = _gateClr,
+                     text_size = size.tiny)
+                _row += 1
+
+            // EQ divider row
+            table.cell(pda_tbl, 0, _row, "=== EQ " + str.tostring(_eq, format.mintick) + " ===",
+                 text_color = pda_eqColor, text_size = size.tiny, text_halign = text.align_center)
+            table.merge_cells(pda_tbl, 0, _row, 3, _row)
+            _row += 1
+
+            // Discount zones (bullish arrays below EQ)
+            for i = 0 to _discCount - 1
+                PDZone _z = _discZones.get(i)
+                string _dir  = _z.isBull ? "+" : "-"
+                string _name = str.tostring(_z.rank) + ". " + _z.kind + _dir
+                string _rng  = str.tostring(_z.bot, format.mintick) + " - " + str.tostring(_z.top, format.mintick)
+                string _scr  = _z.score > 1 ? str.tostring(_z.score) : "-"
+                string _gate = _z.kind == "BRK" ? "GATE" : (_z.blocked ? "X" : "")
+                color  _nameClr = _z.blocked ? color.new(color.gray, 30) : color.white
+                color  _scrClr  = _z.score >= pda_minConfl ? #ffeb3b : color.new(color.white, 40)
+                color  _gateClr = _z.kind == "BRK" ? #ff9800 : (_z.blocked ? #f23645 : color.new(color.white, 60))
+
+                table.cell(pda_tbl, 0, _row, _name, text_color = _nameClr,
+                     text_size = size.tiny, text_halign = text.align_left)
+                table.cell(pda_tbl, 1, _row, _rng, text_color = color.new(color.white, 30),
+                     text_size = size.tiny)
+                table.cell(pda_tbl, 2, _row, _scr, text_color = _scrClr,
+                     text_size = size.tiny)
+                table.cell(pda_tbl, 3, _row, _gate, text_color = _gateClr,
+                     text_size = size.tiny)
+                _row += 1
 
 // ── Timeframe Warning ──
 // Many sections require intraday charts; show a one-time warning on daily+ charts
