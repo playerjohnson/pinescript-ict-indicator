@@ -3380,136 +3380,158 @@ f_pdaScanner() =>
 		var array<PDZone> _zones=array.new<PDZone>()
 		_zones.clear()
 
-		for i = 0 to ob_bulls.size() - 1 by 1
-			OrderBlock _ob = ob_bulls.get(i)
-			if not _ob.mitigated
-				pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", true, _eq)
+		if ob_bulls.size() > 0
+			for i = 0 to ob_bulls.size() - 1
+				OrderBlock _ob = ob_bulls.get(i)
+				if not _ob.mitigated
+					pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", true, _eq)
 
-		for i = 0 to ob_bears.size() - 1 by 1
-			OrderBlock _ob = ob_bears.get(i)
-			if not _ob.mitigated
-				pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", false, _eq)
+		if ob_bears.size() > 0
+			for i = 0 to ob_bears.size() - 1
+				OrderBlock _ob = ob_bears.get(i)
+				if not _ob.mitigated
+					pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", false, _eq)
 
-		for i = 0 to ob_mtf1.size() - 1 by 1
-			OrderBlock _ob = ob_mtf1.get(i)
-			if not _ob.mitigated
-				pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
+		if ob_mtf1.size() > 0
+			for i = 0 to ob_mtf1.size() - 1
+				OrderBlock _ob = ob_mtf1.get(i)
+				if not _ob.mitigated
+					pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
 
-		for i = 0 to ob_mtf2.size() - 1 by 1
-			OrderBlock _ob = ob_mtf2.get(i)
-			if not _ob.mitigated
-				pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
+		if ob_mtf2.size() > 0
+			for i = 0 to ob_mtf2.size() - 1
+				OrderBlock _ob = ob_mtf2.get(i)
+				if not _ob.mitigated
+					pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
 
-		for i = 0 to ob_mtf3.size() - 1 by 1
-			OrderBlock _ob = ob_mtf3.get(i)
-			if not _ob.mitigated
-				pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
+		if ob_mtf3.size() > 0
+			for i = 0 to ob_mtf3.size() - 1
+				OrderBlock _ob = ob_mtf3.get(i)
+				if not _ob.mitigated
+					pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
 
-		for i = 0 to bk_blocks.size() - 1 by 1
-			OrderBlock _ob = bk_blocks.get(i)
-			if not _ob.mitigated
-				pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "BRK", _ob.isBull, _eq)
+		if bk_blocks.size() > 0
+			for i = 0 to bk_blocks.size() - 1
+				OrderBlock _ob = bk_blocks.get(i)
+				if not _ob.mitigated
+					pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "BRK", _ob.isBull, _eq)
 
-		for i = 0 to mb_blocks.size() - 1 by 1
-			OrderBlock _ob = mb_blocks.get(i)
-			if not _ob.mitigated
-				pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "MB", _ob.isBull, _eq)
+		if mb_blocks.size() > 0
+			for i = 0 to mb_blocks.size() - 1
+				OrderBlock _ob = mb_blocks.get(i)
+				if not _ob.mitigated
+					pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "MB", _ob.isBull, _eq)
 
-		for i = 0 to rb_blocks.size() - 1 by 1
-			RejBlock _rb = rb_blocks.get(i)
-			if not _rb.mitigated and not na(_rb.bx)
-				float _t = box.get_top(_rb.bx)
-				float _b = box.get_bottom(_rb.bx)
-				pda_addZone(_zones, _t, _b, "RB", _rb.isBull, _eq)
+		if rb_blocks.size() > 0
+			for i = 0 to rb_blocks.size() - 1
+				RejBlock _rb = rb_blocks.get(i)
+				if not _rb.mitigated and not na(_rb.bx)
+					float _t = box.get_top(_rb.bx)
+					float _b = box.get_bottom(_rb.bx)
+					pda_addZone(_zones, _t, _b, "RB", _rb.isBull, _eq)
 
-		for i = 0 to _bullBoxesFVG.size() - 1 by 1
-			box _bx = _bullBoxesFVG.get(i)
-			if not na(_bx)
-				pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "FVG", true, _eq)
+		if _bullBoxesFVG.size() > 0
+			for i = 0 to _bullBoxesFVG.size() - 1
+				box _bx = _bullBoxesFVG.get(i)
+				if not na(_bx)
+					pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "FVG", true, _eq)
 
-		for i = 0 to _bearBoxesFVG.size() - 1 by 1
-			box _bx = _bearBoxesFVG.get(i)
-			if not na(_bx)
-				pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "FVG", false, _eq)
+		if _bearBoxesFVG.size() > 0
+			for i = 0 to _bearBoxesFVG.size() - 1
+				box _bx = _bearBoxesFVG.get(i)
+				if not na(_bx)
+					pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "FVG", false, _eq)
 
-		for i = 0 to _bullishvi.size() - 1 by 1
-			box _bx = _bullishvi.get(i)
-			if not na(_bx)
-				pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "VI", true, _eq)
+		if _bullishvi.size() > 0
+			for i = 0 to _bullishvi.size() - 1
+				box _bx = _bullishvi.get(i)
+				if not na(_bx)
+					pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "VI", true, _eq)
 
-		for i = 0 to _bearishvi.size() - 1 by 1
-			box _bx = _bearishvi.get(i)
-			if not na(_bx)
-				pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "VI", false, _eq)
+		if _bearishvi.size() > 0
+			for i = 0 to _bearishvi.size() - 1
+				box _bx = _bearishvi.get(i)
+				if not na(_bx)
+					pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "VI", false, _eq)
 
-		for i = 0 to _bullishifvg.size() - 1 by 1
-			box _bx = _bullishifvg.get(i)
-			if not na(_bx)
-				pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "I.FVG", true, _eq)
+		if _bullishifvg.size() > 0
+			for i = 0 to _bullishifvg.size() - 1
+				box _bx = _bullishifvg.get(i)
+				if not na(_bx)
+					pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "I.FVG", true, _eq)
 
-		for i = 0 to _bearishifvg.size() - 1 by 1
-			box _bx = _bearishifvg.get(i)
-			if not na(_bx)
-				pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "I.FVG", false, _eq)
+		if _bearishifvg.size() > 0
+			for i = 0 to _bearishifvg.size() - 1
+				box _bx = _bearishifvg.get(i)
+				if not na(_bx)
+					pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "I.FVG", false, _eq)
 
-		for i = 0 to bullInvFVG.size() - 1 by 1
-			box _bx = bullInvFVG.get(i)
-			if not na(_bx)
-				pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "Inv.FVG", true, _eq)
+		if bullInvFVG.size() > 0
+			for i = 0 to bullInvFVG.size() - 1
+				box _bx = bullInvFVG.get(i)
+				if not na(_bx)
+					pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "Inv.FVG", true, _eq)
 
-		for i = 0 to bearInvFVG.size() - 1 by 1
-			box _bx = bearInvFVG.get(i)
-			if not na(_bx)
-				pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "Inv.FVG", false, _eq)
+		if bearInvFVG.size() > 0
+			for i = 0 to bearInvFVG.size() - 1
+				box _bx = bearInvFVG.get(i)
+				if not na(_bx)
+					pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "Inv.FVG", false, _eq)
 
-		for i = 0 to _gapsboxesbu.size() - 1 by 1
-			box _bx = _gapsboxesbu.get(i)
-			if not na(_bx)
-				pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "GAP", true, _eq)
+		if _gapsboxesbu.size() > 0
+			for i = 0 to _gapsboxesbu.size() - 1
+				box _bx = _gapsboxesbu.get(i)
+				if not na(_bx)
+					pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "GAP", true, _eq)
 
-		for i = 0 to _gapsboxesbe.size() - 1 by 1
-			box _bx = _gapsboxesbe.get(i)
-			if not na(_bx)
-				pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "GAP", false, _eq)
+		if _gapsboxesbe.size() > 0
+			for i = 0 to _gapsboxesbe.size() - 1
+				box _bx = _gapsboxesbe.get(i)
+				if not na(_bx)
+					pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "GAP", false, _eq)
 
-		for i = 0 to _zones.size() - 1 by 1
-			PDZone _z1 = _zones.get(i)
-			int _cnt = 1
-			for j = 0 to _zones.size() - 1 by 1
-				if j != i
-					PDZone _z2 = _zones.get(j)
-					if _z1.top >= _z2.bot and _z2.top >= _z1.bot
-						if _z1.kind != _z2.kind
-							_cnt += 1
-			_z1.score := _cnt
+		if _zones.size() > 0
+			for i = 0 to _zones.size() - 1
+				PDZone _z1 = _zones.get(i)
+				int _cnt = 1
+				for j = 0 to _zones.size() - 1
+					if j != i
+						PDZone _z2 = _zones.get(j)
+						if _z1.top >= _z2.bot and _z2.top >= _z1.bot
+							if _z1.kind != _z2.kind
+								_cnt += 1
+				_z1.score := _cnt
 
 		var array<float> _brkMids=array.new<float>()
 		_brkMids.clear()
-		for i = 0 to _zones.size() - 1 by 1
-			PDZone _z = _zones.get(i)
-			if _z.kind == "BRK"
-				_brkMids.push((_z.top + _z.bot) / 2.0)
+		if _zones.size() > 0
+			for i = 0 to _zones.size() - 1
+				PDZone _z = _zones.get(i)
+				if _z.kind == "BRK"
+					_brkMids.push((_z.top + _z.bot) / 2.0)
 
-		for i = 0 to _zones.size() - 1 by 1
-			PDZone _z = _zones.get(i)
-			if _z.kind != "BRK"
-				float _mid = (_z.top + _z.bot) / 2.0
-				bool _isPrem = _mid > _eq
-				for j = 0 to _brkMids.size() - 1 by 1
-					float _bm = _brkMids.get(j)
-					if _isPrem
-						if _bm > _eq and _bm < _mid
-							_z.blocked := true
-					else
-						if _bm < _eq and _bm > _mid
-							_z.blocked := true
+		if _zones.size() > 0
+			for i = 0 to _zones.size() - 1
+				PDZone _z = _zones.get(i)
+				if _z.kind != "BRK"
+					float _mid = (_z.top + _z.bot) / 2.0
+					bool _isPrem = _mid > _eq
+					if _brkMids.size() > 0
+						for j = 0 to _brkMids.size() - 1
+							float _bm = _brkMids.get(j)
+							if _isPrem
+								if _bm > _eq and _bm < _mid
+									_z.blocked := true
+							else
+								if _bm < _eq and _bm > _mid
+									_z.blocked := true
 
 		for i = pda_conflBoxes.size() - 1 to 0 by 1
 			box.delete(pda_conflBoxes.get(i))
 		pda_conflBoxes.clear()
 
-		if pda_showConfl
-			for i = 0 to _zones.size() - 1 by 1
+		if pda_showConfl and _zones.size() > 0
+			for i = 0 to _zones.size() - 1
 				PDZone _z = _zones.get(i)
 				if _z.score >= pda_minConfl
 					color _clr = switch
@@ -3527,12 +3549,13 @@ f_pdaScanner() =>
 			var array<PDZone> _discZones=array.new<PDZone>()
 			_premZones.clear()
 			_discZones.clear()
-			for i = 0 to _zones.size() - 1 by 1
-				PDZone _z = _zones.get(i)
-				if (_z.top + _z.bot) / 2.0 > _eq
-					_premZones.push(_z)
-				else
-					_discZones.push(_z)
+			if _zones.size() > 0
+				for i = 0 to _zones.size() - 1
+					PDZone _z = _zones.get(i)
+					if (_z.top + _z.bot) / 2.0 > _eq
+						_premZones.push(_z)
+					else
+						_discZones.push(_z)
 
 			pda_sortByRankDesc(_premZones)
 			pda_sortByRankDesc(_discZones)
