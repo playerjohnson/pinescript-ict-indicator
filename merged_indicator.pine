@@ -325,31 +325,32 @@ if barstate.isconfirmed and ENABLE_ORDER_BLOCKS
 					if not na(_del.mtLine)
 						line.delete(_del.mtLine)
 
-f_obManageBulls() =>
-	bool _bullMit = false
-	for i = ob_bulls.size() - 1 to 0 by 1
-		OrderBlock _ob = ob_bulls.get(i)
+f_obManage(_arr, _isBull) =>
+	bool _mit = false
+	color _invClr = _isBull ? ob_invBullColor : ob_invBearColor
+	string _invTxt = _isBull ? "Inv Bear OB" : "Inv Bull OB"
+	string _alertTxt = _isBull ? "Bull OB Mitigated" : "Bear OB Mitigated"
+	for i = _arr.size() - 1 to 0 by 1
+		OrderBlock _ob = _arr.get(i)
 		if not _ob.mitigated
-			if barstate.isconfirmed and close < _ob.bodyBot
+			bool _hitMit = _isBull ? (barstate.isconfirmed and close < _ob.bodyBot) : (barstate.isconfirmed and close > _ob.bodyTop)
+			if _hitMit
 				_ob.mitigated := true
 				_ob.mit_bar := bar_index
-				_bullMit := true
+				_mit := true
 				if wh_enable and wh_mitigations
-					alert(_wh_json("Bull OB Mitigated", box.get_top(_ob.bx), box.get_bottom(_ob.bx)), alert.freq_once_per_bar)
+					alert(_wh_json(_alertTxt, box.get_top(_ob.bx), box.get_bottom(_ob.bx)), alert.freq_once_per_bar)
 				if ob_invert
-					box.set_bgcolor(_ob.bx, ob_invBullColor)
-					box.set_border_color(_ob.bx, color.new(ob_invBullColor, 60))
-					box.set_text_color(_ob.bx, color.new(ob_invBullColor, 30))
-					box.set_text(_ob.bx, ob_showLabel ? "Inv Bear OB" : na)
+					box.set_bgcolor(_ob.bx, _invClr)
+					box.set_border_color(_ob.bx, color.new(_invClr, 60))
+					box.set_text_color(_ob.bx, color.new(_invClr, 30))
+					box.set_text(_ob.bx, ob_showLabel ? _invTxt : na)
 				else
 					box.set_bgcolor(_ob.bx, ob_mitColor)
 					box.set_border_color(_ob.bx, ob_mitColor)
 					box.set_text_color(_ob.bx, color.new(color.gray, 70))
 				if not na(_ob.mtLine)
-					if ob_invert
-						line.set_color(_ob.mtLine, color.new(ob_invBullColor, 60))
-					else
-						line.set_color(_ob.mtLine, color.new(color.gray, 85))
+					line.set_color(_ob.mtLine, ob_invert ? color.new(_invClr, 60) : color.new(color.gray, 85))
 			else if ob_extend
 				box.set_right(_ob.bx, bar_index + 1)
 				if not na(_ob.mtLine)
@@ -363,57 +364,14 @@ f_obManageBulls() =>
 				box.delete(_ob.bx)
 				if not na(_ob.mtLine)
 					line.delete(_ob.mtLine)
-				ob_bulls.remove(i)
+				_arr.remove(i)
 		true
-	_bullMit
+	_mit
 
 if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
-	ob_bullMit := f_obManageBulls()
-
-f_obManageBears() =>
-	bool _bearMit = false
-	for i = ob_bears.size() - 1 to 0 by 1
-		OrderBlock _ob = ob_bears.get(i)
-		if not _ob.mitigated
-			if barstate.isconfirmed and close > _ob.bodyTop
-				_ob.mitigated := true
-				_ob.mit_bar := bar_index
-				_bearMit := true
-				if wh_enable and wh_mitigations
-					alert(_wh_json("Bear OB Mitigated", box.get_top(_ob.bx), box.get_bottom(_ob.bx)), alert.freq_once_per_bar)
-				if ob_invert
-					box.set_bgcolor(_ob.bx, ob_invBearColor)
-					box.set_border_color(_ob.bx, color.new(ob_invBearColor, 60))
-					box.set_text_color(_ob.bx, color.new(ob_invBearColor, 30))
-					box.set_text(_ob.bx, ob_showLabel ? "Inv Bull OB" : na)
-				else
-					box.set_bgcolor(_ob.bx, ob_mitColor)
-					box.set_border_color(_ob.bx, ob_mitColor)
-					box.set_text_color(_ob.bx, color.new(color.gray, 70))
-				if not na(_ob.mtLine)
-					if ob_invert
-						line.set_color(_ob.mtLine, color.new(ob_invBearColor, 60))
-					else
-						line.set_color(_ob.mtLine, color.new(color.gray, 85))
-			else if ob_extend
-				box.set_right(_ob.bx, bar_index + 1)
-				if not na(_ob.mtLine)
-					line.set_x2(_ob.mtLine, bar_index + 1)
-		else
-			if ob_invert and ob_extend
-				box.set_right(_ob.bx, bar_index + 1)
-				if not na(_ob.mtLine)
-					line.set_x2(_ob.mtLine, bar_index + 1)
-			if ob_pruneAge > 0 and (bar_index - _ob.mit_bar) > ob_pruneAge
-				box.delete(_ob.bx)
-				if not na(_ob.mtLine)
-					line.delete(_ob.mtLine)
-				ob_bears.remove(i)
-		true
-	_bearMit
-
+	ob_bullMit := f_obManage(ob_bulls, true)
 if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
-	ob_bearMit := f_obManageBears()
+	ob_bearMit := f_obManage(ob_bears, false)
 
 f_obScan(int _blend, float _disp) =>
 	var int _bullSeq=0
@@ -2071,6 +2029,8 @@ htf6.csettings := SettingsHTF6
 htf6.candles := candles_6
 htf6.imbalances := imbalances_6
 
+var array<CandleSet> htfSets = array.from(htf1, htf2, htf3, htf4, htf5, htf6)
+
 string group_htfc_style              = "⑬ HTF Candle Styling"
 string group_htfc_label              = "⑭ HTF Candle Labels"
 string group_htfc_imbalance          = "⑮ HTF Candle Imbalance"
@@ -2166,7 +2126,6 @@ var Trace htfTrace=Trace.new()
 color htfc_color_transparent = #ffffff00
 
 method LineStyle(Helper helper, string style) =>
-	helper.name := style
 	out = switch style
 		'----' => line.style_dashed
 		'····' => line.style_dotted
@@ -2174,7 +2133,6 @@ method LineStyle(Helper helper, string style) =>
 	out
 
 method DayofWeek(Helper helper, int index) =>
-	helper.name := 'DOW'
 	switch
 		index == 1 => 'M'
 		index == 2 => 'T'
@@ -2186,7 +2144,6 @@ method DayofWeek(Helper helper, int index) =>
 		na(index) => ''
 
 method ValidTimeframe(Helper helper, string HTF) =>
-	helper.name := HTF
 	if timeframe.in_seconds(HTF) >= timeframe.in_seconds('D') and timeframe.in_seconds(HTF) > timeframe.in_seconds()
 		true
 	else
@@ -2196,7 +2153,6 @@ method ValidTimeframe(Helper helper, string HTF) =>
 		n1 < n2 and math.round(n2 / n1) == n2 / n1
 
 method RemainingTime(Helper helper, string HTF) =>
-	helper.name := HTF
 	if barstate.isrealtime
 		timeRemaining = (time_close(HTF) - timenow) / 1000
 		days = math.floor(timeRemaining / 86400)
@@ -2219,7 +2175,6 @@ method RemainingTime(Helper helper, string HTF) =>
 		'n/a'
 
 method HTFName(Helper helper, string HTF) =>
-	helper.name := 'HTFName'
 	formatted = HTF
 
 	seconds = timeframe.in_seconds(HTF)
@@ -2235,20 +2190,13 @@ method HTFName(Helper helper, string HTF) =>
 	formatted
 
 method HTFEnabled(Helper helper) =>
-	helper.name := 'HTFEnabled'
 	int enabled = 0
-	enabled := enabled + (htf1.csettings.show ? 1 : 0)
-	enabled := enabled + (htf2.csettings.show ? 1 : 0)
-	enabled := enabled + (htf3.csettings.show ? 1 : 0)
-	enabled := enabled + (htf4.csettings.show ? 1 : 0)
-	enabled := enabled + (htf5.csettings.show ? 1 : 0)
-	enabled := enabled + (htf6.csettings.show ? 1 : 0)
-	int last = math.min(enabled, htfSettings.max_sets)
-
-	last
+	for i = 0 to htfSets.size() - 1
+		if htfSets.get(i).csettings.show
+			enabled += 1
+	math.min(enabled, htfSettings.max_sets)
 
 method CandleSetHigh(Helper helper, array<Candle> candles, float h) =>
-	helper.name := 'CandlesSetHigh'
 	float _h = h
 	if array.size(candles) > 0
 		for i = 0 to array.size(candles) - 1 by 1
@@ -2259,7 +2207,6 @@ method CandleSetHigh(Helper helper, array<Candle> candles, float h) =>
 	_h
 
 method CandleSetLow(Helper helper, array<Candle> candles, float l) =>
-	helper.name := 'CandlesSetLow'
 	float _l = l
 	if array.size(candles) > 0
 		for i = 0 to array.size(candles) - 1 by 1
@@ -2270,62 +2217,32 @@ method CandleSetLow(Helper helper, array<Candle> candles, float l) =>
 	_l
 
 method CandlesHigh(Helper helper, array<Candle> candles) =>
-	helper.name := 'CandlesHigh'
 	h = 0.0
 	int cnt = 0
 	int last = helper.HTFEnabled()
-
-	if htf1.csettings.show and helper.ValidTimeframe(htf1.csettings.htf)
-		h := helper.CandleSetHigh(htf1.candles, h)
-		cnt := cnt + 1
-	if htf2.csettings.show and helper.ValidTimeframe(htf2.csettings.htf) and cnt < last
-		h := helper.CandleSetHigh(htf2.candles, h)
-		cnt := cnt + 1
-	if htf3.csettings.show and helper.ValidTimeframe(htf3.csettings.htf) and cnt < last
-		h := helper.CandleSetHigh(htf3.candles, h)
-		cnt := cnt + 1
-	if htf4.csettings.show and helper.ValidTimeframe(htf4.csettings.htf) and cnt < last
-		h := helper.CandleSetHigh(htf4.candles, h)
-		cnt := cnt + 1
-	if htf5.csettings.show and helper.ValidTimeframe(htf5.csettings.htf) and cnt < last
-		h := helper.CandleSetHigh(htf5.candles, h)
-		cnt := cnt + 1
-	if htf6.csettings.show and helper.ValidTimeframe(htf6.csettings.htf) and cnt < last
-		h := helper.CandleSetHigh(htf6.candles, h)
-
+	for i = 0 to htfSets.size() - 1
+		CandleSet _cs = htfSets.get(i)
+		if _cs.csettings.show and helper.ValidTimeframe(_cs.csettings.htf) and cnt < last
+			h := helper.CandleSetHigh(_cs.candles, h)
+			cnt += 1
 	if array.size(candles) > 0
-		for i = 0 to array.size(candles) - 1 by 1
+		for i = 0 to array.size(candles) - 1
 			Candle c = array.get(candles, i)
 			if c.h > h
 				h := c.h
 	h
 
 method CandlesLow(Helper helper, array<Candle> candles, float h) =>
-	helper.name := 'CandlesLow'
 	l = h
 	int cnt = 0
 	int last = helper.HTFEnabled()
-
-	if htf1.csettings.show and helper.ValidTimeframe(htf1.csettings.htf)
-		l := helper.CandleSetLow(htf1.candles, l)
-		cnt := cnt + 1
-	if htf2.csettings.show and helper.ValidTimeframe(htf2.csettings.htf) and cnt < last
-		l := helper.CandleSetLow(htf2.candles, l)
-		cnt := cnt + 1
-	if htf3.csettings.show and helper.ValidTimeframe(htf3.csettings.htf) and cnt < last
-		l := helper.CandleSetLow(htf3.candles, l)
-		cnt := cnt + 1
-	if htf4.csettings.show and helper.ValidTimeframe(htf4.csettings.htf) and cnt < last
-		l := helper.CandleSetLow(htf4.candles, l)
-		cnt := cnt + 1
-	if htf5.csettings.show and helper.ValidTimeframe(htf5.csettings.htf) and cnt < last
-		l := helper.CandleSetLow(htf5.candles, l)
-		cnt := cnt + 1
-	if htf6.csettings.show and helper.ValidTimeframe(htf6.csettings.htf) and cnt < last
-		l := helper.CandleSetLow(htf6.candles, l)
-
+	for i = 0 to htfSets.size() - 1
+		CandleSet _cs = htfSets.get(i)
+		if _cs.csettings.show and helper.ValidTimeframe(_cs.csettings.htf) and cnt < last
+			l := helper.CandleSetLow(_cs.candles, l)
+			cnt += 1
 	if array.size(candles) > 0
-		for i = 0 to array.size(candles) - 1 by 1
+		for i = 0 to array.size(candles) - 1
 			Candle c = array.get(candles, i)
 			if c.l < l
 				l := c.l
@@ -2601,83 +2518,16 @@ method Update(CandleSet candleSet, int offset, bool showTrace) =>
 
 int htfCnt = 0
 int htfLast = htfHelper.HTFEnabled()
-
 int htfOffset = htfSettings.offset
-if ENABLE_HTF_CANDLES and htf1.csettings.show and htfHelper.ValidTimeframe(htf1.csettings.htf)
-	bool showTrace = false
-	if htfSettings.trace_anchor == 'First Timeframe'
-		showTrace := true
-		showTrace
-	if htfSettings.trace_anchor == 'Last Timeframe' and htfSettings.max_sets == 1
-		showTrace := true
-		showTrace
-	htf1.UpdateTime(htfOffset)
-	htf1.Monitor().Update(htfOffset, showTrace).FindImbalance()
-	htfCnt := htfCnt + 1
-	htfOffset := htfOffset + (htfCnt > 0 ? htf1.candles.size() * htfSettings.width + (htf1.candles.size() > 0 ? (htf1.candles.size() - 1) * htfSettings.buffer : 0) + htfSettings.htf_buffer : 0)
-	htfOffset
-if ENABLE_HTF_CANDLES and htf2.csettings.show and htfHelper.ValidTimeframe(htf2.csettings.htf) and htfCnt < htfLast
-	bool showTrace = false
-	if htfSettings.trace_anchor == 'First Timeframe' and htfCnt == 0
-		showTrace := true
-		showTrace
-	if htfSettings.trace_anchor == 'Last Timeframe' and htfCnt == htfLast - 1
-		showTrace := true
-		showTrace
-	htf2.UpdateTime(htfOffset)
-	htf2.Monitor().Update(htfOffset, showTrace).FindImbalance()
-	htfCnt := htfCnt + 1
-	htfOffset := htfOffset + (htfCnt > 0 ? htf2.candles.size() * htfSettings.width + (htf2.candles.size() > 0 ? (htf2.candles.size() - 1) * htfSettings.buffer : 0) + htfSettings.htf_buffer : 0)
-	htfOffset
-if ENABLE_HTF_CANDLES and htf3.csettings.show and htfHelper.ValidTimeframe(htf3.csettings.htf) and htfCnt < htfLast
-	bool showTrace = false
-	if htfSettings.trace_anchor == 'First Timeframe' and htfCnt == 0
-		showTrace := true
-		showTrace
-	if htfSettings.trace_anchor == 'Last Timeframe' and htfCnt == htfLast - 1
-		showTrace := true
-		showTrace
-	htf3.UpdateTime(htfOffset)
-	htf3.Monitor().Update(htfOffset, showTrace).FindImbalance()
-	htfCnt := htfCnt + 1
-	htfOffset := htfOffset + (htfCnt > 0 ? htf3.candles.size() * htfSettings.width + (htf3.candles.size() > 0 ? (htf3.candles.size() - 1) * htfSettings.buffer : 0) + htfSettings.htf_buffer : 0)
-	htfOffset
-if ENABLE_HTF_CANDLES and htf4.csettings.show and htfHelper.ValidTimeframe(htf4.csettings.htf) and htfCnt < htfLast
-	bool showTrace = false
-	if htfSettings.trace_anchor == 'First Timeframe' and htfCnt == 0
-		showTrace := true
-		showTrace
-	if htfSettings.trace_anchor == 'Last Timeframe' and htfCnt == htfLast - 1
-		showTrace := true
-		showTrace
-	htf4.UpdateTime(htfOffset)
-	htf4.Monitor().Update(htfOffset, showTrace).FindImbalance()
-	htfCnt := htfCnt + 1
-	htfOffset := htfOffset + (htfCnt > 0 ? htf4.candles.size() * htfSettings.width + (htf4.candles.size() > 0 ? (htf4.candles.size() - 1) * htfSettings.buffer : 0) + htfSettings.htf_buffer : 0)
-	htfOffset
-if ENABLE_HTF_CANDLES and htf5.csettings.show and htfHelper.ValidTimeframe(htf5.csettings.htf) and htfCnt < htfLast
-	bool showTrace = false
-	if htfSettings.trace_anchor == 'First Timeframe' and htfCnt == 0
-		showTrace := true
-		showTrace
-	if htfSettings.trace_anchor == 'Last Timeframe' and htfCnt == htfLast - 1
-		showTrace := true
-		showTrace
-	htf5.UpdateTime(htfOffset)
-	htf5.Monitor().Update(htfOffset, showTrace).FindImbalance()
-	htfCnt := htfCnt + 1
-	htfOffset := htfOffset + (htfCnt > 0 ? htf5.candles.size() * htfSettings.width + (htf5.candles.size() > 0 ? (htf5.candles.size() - 1) * htfSettings.buffer : 0) + htfSettings.htf_buffer : 0)
-	htfOffset
-if ENABLE_HTF_CANDLES and htf6.csettings.show and htfHelper.ValidTimeframe(htf6.csettings.htf) and htfCnt < htfLast
-	bool showTrace = false
-	if htfSettings.trace_anchor == 'First Timeframe' and htfCnt == 0
-		showTrace := true
-		showTrace
-	if htfSettings.trace_anchor == 'Last Timeframe'
-		showTrace := true
-		showTrace
-	htf6.UpdateTime(htfOffset)
-	htf6.Monitor().Update(htfOffset, showTrace).FindImbalance()
+if ENABLE_HTF_CANDLES
+	for i = 0 to htfSets.size() - 1
+		CandleSet _cs = htfSets.get(i)
+		if _cs.csettings.show and htfHelper.ValidTimeframe(_cs.csettings.htf) and htfCnt < htfLast
+			bool showTrace = (htfSettings.trace_anchor == 'First Timeframe' and htfCnt == 0) or (htfSettings.trace_anchor == 'Last Timeframe' and htfCnt == htfLast - 1)
+			_cs.UpdateTime(htfOffset)
+			_cs.Monitor().Update(htfOffset, showTrace).FindImbalance()
+			htfCnt += 1
+			htfOffset += _cs.candles.size() * htfSettings.width + (_cs.candles.size() > 0 ? (_cs.candles.size() - 1) * htfSettings.buffer : 0) + htfSettings.htf_buffer
 
 f_inSession(_h, _m, _startH, _startM, _endH, _endM) =>
 	int _startTotal = _startH * 60 + _startM
@@ -2948,97 +2798,33 @@ if ENABLE_SESSION_HL and timeframe.isintraday
 		_sh_drawCur(sh_showNYLunch, _isNYL,  sh_nylH,  sh_nylL,  sh_nylHT,  sh_nylLT,  sh_nylBar,  sh_nylHColor,    sh_nylLColor,    "NY Lunch")
 		_sh_drawCur(sh_showNYPM,    _isNYPM, sh_nypmH, sh_nypmL, sh_nypmHT, sh_nypmLT, sh_nypmBar, sh_nypmHColor,   sh_nypmLColor,   "NY PM")
 
-var line lq_linePDH=na, var line lq_linePDL=na
-var line lq_linePWH=na, var line lq_linePWL=na
-var line lq_linePMH=na, var line lq_linePML=na
-var label lq_lblPDH=na, var label lq_lblPDL=na
-var label lq_lblPWH=na, var label lq_lblPWL=na
-var label lq_lblPMH=na, var label lq_lblPML=na
+_lq_draw(_show, _hi, _lo, _hClr, _lClr, _style, _hName, _lName) =>
+	var line _lnH = na, var line _lnL = na
+	var label _lbH = na, var label _lbL = na
+	if _show and not na(_hi)
+		if na(_lnH)
+			_lnH := line.new(bar_index - 1, _hi, bar_index + 30, _hi, color=_hClr, style=f_get_line_style(_style), width=lq_lineWidth)
+			_lnL := line.new(bar_index - 1, _lo, bar_index + 30, _lo, color=_lClr, style=f_get_line_style(_style), width=lq_lineWidth)
+		else
+			line.set_x1(_lnH, bar_index - 1), line.set_y1(_lnH, _hi), line.set_x2(_lnH, bar_index + 30), line.set_y2(_lnH, _hi)
+			line.set_x1(_lnL, bar_index - 1), line.set_y1(_lnL, _lo), line.set_x2(_lnL, bar_index + 30), line.set_y2(_lnL, _lo)
+		if lq_showLabels
+			string _hTxt = _hName + " " + str.tostring(_hi, format.mintick)
+			string _lTxt = _lName + " " + str.tostring(_lo, format.mintick)
+			if na(_lbH)
+				_lbH := label.new(bar_index + 30, _hi, _hTxt, style=label.style_label_left, color=color.new(color.white, 100), textcolor=_hClr, size=size.small)
+				_lbL := label.new(bar_index + 30, _lo, _lTxt, style=label.style_label_left, color=color.new(color.white, 100), textcolor=_lClr, size=size.small)
+			else
+				label.set_x(_lbH, bar_index + 30), label.set_y(_lbH, _hi), label.set_text(_lbH, _hTxt)
+				label.set_x(_lbL, bar_index + 30), label.set_y(_lbL, _lo), label.set_text(_lbL, _lTxt)
 
 if ENABLE_LIQUIDITY
-	[lq_dayHigh, lq_dayLow]     = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
-	[lq_weekHigh, lq_weekLow]   = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
-	[lq_monthHigh, lq_monthLow] = request.security(syminfo.tickerid, "M", [high[1], low[1]], lookahead = barmerge.lookahead_on)
-	if lq_showPDH and not na(lq_dayHigh)
-		if na(lq_linePDH)
-			lq_linePDH := line.new(bar_index - 1, lq_dayHigh, bar_index + 30, lq_dayHigh, color = lq_pdhColor, style = f_get_line_style(lq_pdStyle), width = lq_lineWidth)
-			lq_linePDL := line.new(bar_index - 1, lq_dayLow, bar_index + 30, lq_dayLow, color = lq_pdlColor, style = f_get_line_style(lq_pdStyle), width = lq_lineWidth)
-		else
-			line.set_x1(lq_linePDH, bar_index - 1)
-			line.set_y1(lq_linePDH, lq_dayHigh)
-			line.set_x2(lq_linePDH, bar_index + 30)
-			line.set_y2(lq_linePDH, lq_dayHigh)
-			line.set_x1(lq_linePDL, bar_index - 1)
-			line.set_y1(lq_linePDL, lq_dayLow)
-			line.set_x2(lq_linePDL, bar_index + 30)
-			line.set_y2(lq_linePDL, lq_dayLow)
-		if lq_showLabels
-			string _pdhTxt = "PDH " + str.tostring(lq_dayHigh, format.mintick)
-			string _pdlTxt = "PDL " + str.tostring(lq_dayLow, format.mintick)
-			if na(lq_lblPDH)
-				lq_lblPDH := label.new(bar_index + 30, lq_dayHigh, _pdhTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pdhColor, size = size.small)
-				lq_lblPDL := label.new(bar_index + 30, lq_dayLow, _pdlTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pdlColor, size = size.small)
-			else
-				label.set_x(lq_lblPDH, bar_index + 30)
-				label.set_y(lq_lblPDH, lq_dayHigh)
-				label.set_text(lq_lblPDH, _pdhTxt)
-				label.set_x(lq_lblPDL, bar_index + 30)
-				label.set_y(lq_lblPDL, lq_dayLow)
-				label.set_text(lq_lblPDL, _pdlTxt)
-
-	if lq_showPWH and not na(lq_weekHigh)
-		if na(lq_linePWH)
-			lq_linePWH := line.new(bar_index - 1, lq_weekHigh, bar_index + 30, lq_weekHigh, color = lq_pwhColor, style = f_get_line_style(lq_pwStyle), width = lq_lineWidth)
-			lq_linePWL := line.new(bar_index - 1, lq_weekLow, bar_index + 30, lq_weekLow, color = lq_pwlColor, style = f_get_line_style(lq_pwStyle), width = lq_lineWidth)
-		else
-			line.set_x1(lq_linePWH, bar_index - 1)
-			line.set_y1(lq_linePWH, lq_weekHigh)
-			line.set_x2(lq_linePWH, bar_index + 30)
-			line.set_y2(lq_linePWH, lq_weekHigh)
-			line.set_x1(lq_linePWL, bar_index - 1)
-			line.set_y1(lq_linePWL, lq_weekLow)
-			line.set_x2(lq_linePWL, bar_index + 30)
-			line.set_y2(lq_linePWL, lq_weekLow)
-		if lq_showLabels
-			string _pwhTxt = "PWH " + str.tostring(lq_weekHigh, format.mintick)
-			string _pwlTxt = "PWL " + str.tostring(lq_weekLow, format.mintick)
-			if na(lq_lblPWH)
-				lq_lblPWH := label.new(bar_index + 30, lq_weekHigh, _pwhTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pwhColor, size = size.small)
-				lq_lblPWL := label.new(bar_index + 30, lq_weekLow, _pwlTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pwlColor, size = size.small)
-			else
-				label.set_x(lq_lblPWH, bar_index + 30)
-				label.set_y(lq_lblPWH, lq_weekHigh)
-				label.set_text(lq_lblPWH, _pwhTxt)
-				label.set_x(lq_lblPWL, bar_index + 30)
-				label.set_y(lq_lblPWL, lq_weekLow)
-				label.set_text(lq_lblPWL, _pwlTxt)
-
-	if lq_showPMH and not na(lq_monthHigh)
-		if na(lq_linePMH)
-			lq_linePMH := line.new(bar_index - 1, lq_monthHigh, bar_index + 30, lq_monthHigh, color = lq_pmhColor, style = f_get_line_style(lq_pmStyle), width = lq_lineWidth)
-			lq_linePML := line.new(bar_index - 1, lq_monthLow, bar_index + 30, lq_monthLow, color = lq_pmlColor, style = f_get_line_style(lq_pmStyle), width = lq_lineWidth)
-		else
-			line.set_x1(lq_linePMH, bar_index - 1)
-			line.set_y1(lq_linePMH, lq_monthHigh)
-			line.set_x2(lq_linePMH, bar_index + 30)
-			line.set_y2(lq_linePMH, lq_monthHigh)
-			line.set_x1(lq_linePML, bar_index - 1)
-			line.set_y1(lq_linePML, lq_monthLow)
-			line.set_x2(lq_linePML, bar_index + 30)
-			line.set_y2(lq_linePML, lq_monthLow)
-		if lq_showLabels
-			string _pmhTxt = "PMH " + str.tostring(lq_monthHigh, format.mintick)
-			string _pmlTxt = "PML " + str.tostring(lq_monthLow, format.mintick)
-			if na(lq_lblPMH)
-				lq_lblPMH := label.new(bar_index + 30, lq_monthHigh, _pmhTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pmhColor, size = size.small)
-				lq_lblPML := label.new(bar_index + 30, lq_monthLow, _pmlTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = lq_pmlColor, size = size.small)
-			else
-				label.set_x(lq_lblPMH, bar_index + 30)
-				label.set_y(lq_lblPMH, lq_monthHigh)
-				label.set_text(lq_lblPMH, _pmhTxt)
-				label.set_x(lq_lblPML, bar_index + 30)
-				label.set_y(lq_lblPML, lq_monthLow)
-				label.set_text(lq_lblPML, _pmlTxt)
+	[lq_dayHigh, lq_dayLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+	[lq_weekHigh, lq_weekLow] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+	[lq_monthHigh, lq_monthLow] = request.security(syminfo.tickerid, "M", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+	_lq_draw(lq_showPDH, lq_dayHigh, lq_dayLow, lq_pdhColor, lq_pdlColor, lq_pdStyle, "PDH", "PDL")
+	_lq_draw(lq_showPWH, lq_weekHigh, lq_weekLow, lq_pwhColor, lq_pwlColor, lq_pwStyle, "PWH", "PWL")
+	_lq_draw(lq_showPMH, lq_monthHigh, lq_monthLow, lq_pmhColor, lq_pmlColor, lq_pmStyle, "PMH", "PML")
 
 var bool rb_showBull=input.bool(true, "Bullish RB", group="㉒ Rejection Blocks", inline="rb1")
 var color rb_bullColor=input.color(color.new(#089981, 75), "", group="㉒ Rejection Blocks", inline="rb1")
