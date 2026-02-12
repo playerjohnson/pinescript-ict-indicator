@@ -33,6 +33,7 @@ var bool ENABLE_KILLZONES     = input.bool(true, "Enable Killzones",            
 var bool ENABLE_SESSION_HL    = input.bool(true, "Enable Session Highs/Lows",       group = "⓪ Section Toggles")
 var bool ENABLE_LIQUIDITY     = input.bool(true, "Enable PDH/PDL/PWH/PWL",          group = "⓪ Section Toggles")
 var bool ENABLE_REJECTION_BLK = input.bool(true, "Enable Rejection Blocks",         group = "⓪ Section Toggles")
+var bool ENABLE_BREAKER_MIT   = input.bool(true, "Enable Breaker / Mitigation",    group = "⓪ Section Toggles")
 
 // ── ㉑ Webhook JSON Alerts ──
 var bool   wh_enable      = input.bool(false, "Enable Webhook Alerts", group = "㉑ Webhook Alerts", tooltip = "Sends JSON payloads via alert() for bot/webhook integration.\nIn TradingView alert dialog, select 'Any alert() function call'.")
@@ -3236,6 +3237,28 @@ var color  rb_mitColor     = input.color(color.new(color.gray, 92), "Mitigated  
 var int    rb_maxBoxes     = input.int(10, "Max Boxes", 1, 50, group = "㉒ Rejection Blocks", inline = "rb6")
 var int    rb_pruneAge     = input.int(500, "Prune After", 0, 5000, group = "㉒ Rejection Blocks", inline = "rb6", tooltip = "Auto-delete mitigated RBs older than N bars. 0 = never.")
 
+// ── ㉓ Breaker Block Inputs ──
+var bool   bk_show         = input.bool(true, "Show Breakers     ", group = "㉓ Breaker Blocks", inline = "bk0")
+var int    bk_swingLen     = input.int(5, "Swing Lookback    ", 1, 50, group = "㉓ Breaker Blocks", inline = "bk1", tooltip = "Pivot lookback/forward for swing detection. Higher = larger swings.")
+var color  bk_bullColor    = input.color(color.new(#089981, 70), "Bull", group = "㉓ Breaker Blocks", inline = "bk2")
+var color  bk_bearColor    = input.color(color.new(#f23645, 70), "Bear", group = "㉓ Breaker Blocks", inline = "bk2")
+var bool   bk_showLabel    = input.bool(true, "Labels", group = "㉓ Breaker Blocks", inline = "bk3")
+var bool   bk_extend       = input.bool(true, "Extend", group = "㉓ Breaker Blocks", inline = "bk3")
+var int    bk_maxBoxes     = input.int(10, "Max Boxes         ", 1, 30, group = "㉓ Breaker Blocks", inline = "bk4")
+var color  bk_mitColor     = input.color(color.new(color.gray, 92), "Mitigated", group = "㉓ Breaker Blocks", inline = "bk4")
+var int    bk_pruneAge     = input.int(500, "Prune After       ", 0, 5000, group = "㉓ Breaker Blocks", inline = "bk5", tooltip = "Auto-delete mitigated breakers older than N bars. 0 = never.")
+
+// ── ㉔ Mitigation Block Inputs ──
+var bool   mb_show         = input.bool(true, "Show Mit Blocks   ", group = "㉔ Mitigation Blocks", inline = "mb0")
+var int    mb_swingLen     = input.int(5, "Swing Lookback    ", 1, 50, group = "㉔ Mitigation Blocks", inline = "mb1", tooltip = "Pivot lookback/forward for swing detection.")
+var color  mb_bullColor    = input.color(color.new(#089981, 75), "Bull", group = "㉔ Mitigation Blocks", inline = "mb2")
+var color  mb_bearColor    = input.color(color.new(#f23645, 75), "Bear", group = "㉔ Mitigation Blocks", inline = "mb2")
+var bool   mb_showLabel    = input.bool(true, "Labels", group = "㉔ Mitigation Blocks", inline = "mb3")
+var bool   mb_extend       = input.bool(true, "Extend", group = "㉔ Mitigation Blocks", inline = "mb3")
+var int    mb_maxBoxes     = input.int(10, "Max Boxes         ", 1, 30, group = "㉔ Mitigation Blocks", inline = "mb4")
+var color  mb_mitColor     = input.color(color.new(color.gray, 92), "Mitigated", group = "㉔ Mitigation Blocks", inline = "mb4")
+var int    mb_pruneAge     = input.int(500, "Prune After       ", 0, 5000, group = "㉔ Mitigation Blocks", inline = "mb5", tooltip = "Auto-delete mitigated blocks older than N bars. 0 = never.")
+
 // ── Rejection Block UDT ──
 type RejBlock
     box     bx
@@ -3406,12 +3429,324 @@ if ENABLE_REJECTION_BLK and rb_blocks.size() > 0
                 line.delete(_rb.trigLine)
                 rb_blocks.remove(i)
 
+// ════════════════════════════════════════════════════════════════
+//  SECTION G – BREAKER & MITIGATION BLOCKS
+// ════════════════════════════════════════════════════════════════
+
+// ── Swing-point UDT (shared by both block types) ──
+type SwingPt
+    float   price       // the high or low value
+    int     bar         // bar_index of the pivot
+    float   bodyTop     // max(open, close) of last directional candle
+    float   bodyBot     // min(open, close) of last directional candle
+    float   wickHi      // high of that candle
+    float   wickLo      // low of that candle
+
+// ── Pending breaker (waiting for MSS confirmation) ──
+type PendingBrk
+    float   trigPrice   // price that must be broken for MSS confirmation
+    float   bodyTop
+    float   bodyBot
+    float   wickHi
+    float   wickLo
+    int     zoneBar     // bar_index of the zone candle
+    bool    isBull      // true = bullish breaker setup
+
+// ── Block arrays (reusing OrderBlock UDT) ──
+var array<OrderBlock>  bk_blocks  = array.new<OrderBlock>()
+var array<OrderBlock>  mb_blocks  = array.new<OrderBlock>()
+
+// ── Swing history for pattern tracking ──
+var array<SwingPt> bm_swHi = array.new<SwingPt>()
+var array<SwingPt> bm_swLo = array.new<SwingPt>()
+var array<PendingBrk> bm_pendBrk = array.new<PendingBrk>()
+
+// Alert flags
+bool bk_bullFormed = false
+bool bk_bearFormed = false
+bool bk_bullMit    = false
+bool bk_bearMit    = false
+bool mb_bullFormed = false
+bool mb_bearFormed = false
+bool mb_bullMit    = false
+bool mb_bearMit    = false
+
+// ── Helper: find last directional candle at/near a pivot ──
+// _dir: +1 = bullish (close > open), -1 = bearish (close < open)
+f_lastDirCandle(int _pvtOffset, int _dir) =>
+    float _bTop = na
+    float _bBot = na
+    float _wH   = na
+    float _wL   = na
+    for k = _pvtOffset to _pvtOffset + 3
+        bool _match = _dir > 0 ? close[k] > open[k] : close[k] < open[k]
+        if _match
+            _bTop := math.max(open[k], close[k])
+            _bBot := math.min(open[k], close[k])
+            _wH   := high[k]
+            _wL   := low[k]
+            break
+    if na(_bTop)
+        _bTop := math.max(open[_pvtOffset], close[_pvtOffset])
+        _bBot := math.min(open[_pvtOffset], close[_pvtOffset])
+        _wH   := high[_pvtOffset]
+        _wL   := low[_pvtOffset]
+    [_bTop, _bBot, _wH, _wL]
+
+// ── Swing detection (shared lookback: max of the two settings) ──
+int _bmSwLen = math.max(bk_swingLen, mb_swingLen)
+float bm_pvtHi = ta.pivothigh(high, _bmSwLen, _bmSwLen)
+float bm_pvtLo = ta.pivotlow(low,   _bmSwLen, _bmSwLen)
+
+if ENABLE_BREAKER_MIT
+    // ──────────────────────────────────────────────────
+    //  Record new swing points
+    // ──────────────────────────────────────────────────
+    if not na(bm_pvtHi)
+        int _off = _bmSwLen
+        [_bTop, _bBot, _wH, _wL] = f_lastDirCandle(_off, 1)
+        bm_swHi.push(SwingPt.new(bm_pvtHi, bar_index - _off, _bTop, _bBot, _wH, _wL))
+        if bm_swHi.size() > 30
+            bm_swHi.shift()
+
+    if not na(bm_pvtLo)
+        int _off = _bmSwLen
+        [_bTop, _bBot, _wH, _wL] = f_lastDirCandle(_off, -1)
+        bm_swLo.push(SwingPt.new(bm_pvtLo, bar_index - _off, _bTop, _bBot, _wH, _wL))
+        if bm_swLo.size() > 30
+            bm_swLo.shift()
+
+    // ──────────────────────────────────────────────────
+    //  MITIGATION BLOCK DETECTION
+    //  Bearish: swing low broken → last down candle at that low = sell zone
+    //  Bullish: swing high broken → last up candle at that high = buy zone
+    // ──────────────────────────────────────────────────
+    if mb_show and barstate.isconfirmed
+        // Bearish mitigation blocks — check for broken swing lows
+        if bm_swLo.size() > 0
+            for i = bm_swLo.size() - 1 to 0 by 1
+                SwingPt _sw = bm_swLo.get(i)
+                if close < _sw.price
+                    box _bx = box.new(_sw.bar, _sw.bodyTop, bar_index, _sw.bodyBot,
+                         bgcolor      = mb_bearColor,
+                         border_color = color.new(mb_bearColor, 60),
+                         border_style = line.style_dashed,
+                         border_width = 1,
+                         text         = mb_showLabel ? "Bear MB" : na,
+                         text_halign  = text.align_left,
+                         text_valign  = text.align_bottom,
+                         text_size    = size.tiny,
+                         text_color   = color.new(mb_bearColor, 30))
+                    float _mt = (_sw.bodyTop + _sw.bodyBot) / 2
+                    line _mtL = line.new(_sw.bar, _mt, bar_index, _mt,
+                         color = color.new(mb_bearColor, 60),
+                         style = line.style_dashed, width = 1)
+                    mb_blocks.push(OrderBlock.new(_bx, _mtL, _sw.bodyTop, _sw.bodyBot, false, false, 0))
+                    mb_bearFormed := true
+                    if wh_enable and wh_formations
+                        alert(_wh_json("Bear MB Formed", _sw.bodyTop, _sw.bodyBot), alert.freq_once_per_bar_close)
+                    bm_swLo.remove(i)
+                    while mb_blocks.size() > mb_maxBoxes * 2
+                        OrderBlock _del = mb_blocks.shift()
+                        box.delete(_del.bx)
+                        if not na(_del.mtLine)
+                            line.delete(_del.mtLine)
+                    break
+
+        // Bullish mitigation blocks — check for broken swing highs
+        if bm_swHi.size() > 0
+            for i = bm_swHi.size() - 1 to 0 by 1
+                SwingPt _sw = bm_swHi.get(i)
+                if close > _sw.price
+                    box _bx = box.new(_sw.bar, _sw.bodyTop, bar_index, _sw.bodyBot,
+                         bgcolor      = mb_bullColor,
+                         border_color = color.new(mb_bullColor, 60),
+                         border_style = line.style_dashed,
+                         border_width = 1,
+                         text         = mb_showLabel ? "Bull MB" : na,
+                         text_halign  = text.align_left,
+                         text_valign  = text.align_top,
+                         text_size    = size.tiny,
+                         text_color   = color.new(mb_bullColor, 30))
+                    float _mt = (_sw.bodyTop + _sw.bodyBot) / 2
+                    line _mtL = line.new(_sw.bar, _mt, bar_index, _mt,
+                         color = color.new(mb_bullColor, 60),
+                         style = line.style_dashed, width = 1)
+                    mb_blocks.push(OrderBlock.new(_bx, _mtL, _sw.bodyTop, _sw.bodyBot, true, false, 0))
+                    mb_bullFormed := true
+                    if wh_enable and wh_formations
+                        alert(_wh_json("Bull MB Formed", _sw.bodyTop, _sw.bodyBot), alert.freq_once_per_bar_close)
+                    bm_swHi.remove(i)
+                    while mb_blocks.size() > mb_maxBoxes * 2
+                        OrderBlock _del = mb_blocks.shift()
+                        box.delete(_del.bx)
+                        if not na(_del.mtLine)
+                            line.delete(_del.mtLine)
+                    break
+
+    // ──────────────────────────────────────────────────
+    //  BREAKER BLOCK DETECTION
+    //  Bullish: Low1 → High → Low2 (< Low1) → price breaks above High
+    //  Bearish: High1 → Low → High2 (> High1) → price breaks below Low
+    // ──────────────────────────────────────────────────
+
+    // ── Detect new breaker setups when a stop-run swing forms ──
+    if bk_show
+        // Bullish breaker setup: new swing low that is LOWER than a prior swing low
+        if not na(bm_pvtLo) and bm_swLo.size() >= 2
+            SwingPt _newLo = bm_swLo.last()
+            for i = bm_swLo.size() - 2 to math.max(0, bm_swLo.size() - 6) by 1
+                SwingPt _oldLo = bm_swLo.get(i)
+                if _newLo.price < _oldLo.price
+                    // Find the swing high between the two lows
+                    for h = bm_swHi.size() - 1 to 0 by 1
+                        SwingPt _hi = bm_swHi.get(h)
+                        if _hi.bar > _oldLo.bar and _hi.bar < _newLo.bar
+                            bm_pendBrk.push(PendingBrk.new(
+                                 _hi.price, _hi.bodyTop, _hi.bodyBot,
+                                 _hi.wickHi, _hi.wickLo, _hi.bar, true))
+                            break
+                    break
+
+        // Bearish breaker setup: new swing high that is HIGHER than a prior swing high
+        if not na(bm_pvtHi) and bm_swHi.size() >= 2
+            SwingPt _newHi = bm_swHi.last()
+            for i = bm_swHi.size() - 2 to math.max(0, bm_swHi.size() - 6) by 1
+                SwingPt _oldHi = bm_swHi.get(i)
+                if _newHi.price > _oldHi.price
+                    // Find the swing low between the two highs
+                    for l = bm_swLo.size() - 1 to 0 by 1
+                        SwingPt _lo = bm_swLo.get(l)
+                        if _lo.bar > _oldHi.bar and _lo.bar < _newHi.bar
+                            bm_pendBrk.push(PendingBrk.new(
+                                 _lo.price, _lo.bodyTop, _lo.bodyBot,
+                                 _lo.wickHi, _lo.wickLo, _lo.bar, false))
+                            break
+                    break
+
+    // ── Confirm pending breakers on MSS ──
+    if bk_show and barstate.isconfirmed and bm_pendBrk.size() > 0
+        for i = bm_pendBrk.size() - 1 to 0 by 1
+            PendingBrk _p = bm_pendBrk.get(i)
+            bool _confirmed = _p.isBull ? close > _p.trigPrice : close < _p.trigPrice
+            if _confirmed
+                color _clr = _p.isBull ? bk_bullColor : bk_bearColor
+                string _lbl = _p.isBull ? "Bull BRK" : "Bear BRK"
+                box _bx = box.new(_p.zoneBar, _p.bodyTop, bar_index, _p.bodyBot,
+                     bgcolor      = _clr,
+                     border_color = color.new(_clr, 60),
+                     border_style = line.style_solid,
+                     border_width = 1,
+                     text         = bk_showLabel ? _lbl : na,
+                     text_halign  = text.align_left,
+                     text_valign  = _p.isBull ? text.align_top : text.align_bottom,
+                     text_size    = size.tiny,
+                     text_color   = color.new(_clr, 30))
+                float _mt = (_p.bodyTop + _p.bodyBot) / 2
+                line _mtL = line.new(_p.zoneBar, _mt, bar_index, _mt,
+                     color = color.new(_clr, 60),
+                     style = line.style_dashed, width = 1)
+                bk_blocks.push(OrderBlock.new(_bx, _mtL, _p.bodyTop, _p.bodyBot, _p.isBull, false, 0))
+                if _p.isBull
+                    bk_bullFormed := true
+                else
+                    bk_bearFormed := true
+                if wh_enable and wh_formations
+                    alert(_wh_json(_lbl + " Confirmed", _p.bodyTop, _p.bodyBot), alert.freq_once_per_bar_close)
+                bm_pendBrk.remove(i)
+                while bk_blocks.size() > bk_maxBoxes * 2
+                    OrderBlock _del = bk_blocks.shift()
+                    box.delete(_del.bx)
+                    if not na(_del.mtLine)
+                        line.delete(_del.mtLine)
+
+    // Expire stale pending breakers (older than 200 bars)
+    if bm_pendBrk.size() > 0
+        for i = bm_pendBrk.size() - 1 to 0 by 1
+            if bar_index - bm_pendBrk.get(i).zoneBar > 200
+                bm_pendBrk.remove(i)
+
+    // ──────────────────────────────────────────────────
+    //  MANAGEMENT: extend, mitigate, prune (both types)
+    // ──────────────────────────────────────────────────
+
+    // ── Breaker Block management ──
+    if bk_blocks.size() > 0
+        for i = bk_blocks.size() - 1 to 0 by 1
+            OrderBlock _ob = bk_blocks.get(i)
+            if not _ob.mitigated
+                // Bullish breaker mitigated when close < bodyBot; bearish when close > bodyTop
+                bool _hit = _ob.isBull ? close < _ob.bodyBot : close > _ob.bodyTop
+                if _hit and barstate.isconfirmed
+                    _ob.mitigated := true
+                    _ob.mit_bar   := bar_index
+                    box.set_bgcolor(_ob.bx, bk_mitColor)
+                    box.set_border_color(_ob.bx, bk_mitColor)
+                    box.set_text_color(_ob.bx, color.new(color.gray, 70))
+                    if not na(_ob.mtLine)
+                        line.set_color(_ob.mtLine, color.new(color.gray, 85))
+                    if _ob.isBull
+                        bk_bullMit := true
+                    else
+                        bk_bearMit := true
+                else if bk_extend
+                    box.set_right(_ob.bx, bar_index + 1)
+                    if not na(_ob.mtLine)
+                        line.set_x2(_ob.mtLine, bar_index + 1)
+            else
+                if bk_pruneAge > 0 and (bar_index - _ob.mit_bar) > bk_pruneAge
+                    bk_blocks.remove(i)
+                    box.delete(_ob.bx)
+                    if not na(_ob.mtLine)
+                        line.delete(_ob.mtLine)
+
+    // ── Mitigation Block management ──
+    if mb_blocks.size() > 0
+        for i = mb_blocks.size() - 1 to 0 by 1
+            OrderBlock _ob = mb_blocks.get(i)
+            if not _ob.mitigated
+                // Bull MB mitigated when close < bodyBot; bear MB when close > bodyTop
+                bool _hit = _ob.isBull ? close < _ob.bodyBot : close > _ob.bodyTop
+                if _hit and barstate.isconfirmed
+                    _ob.mitigated := true
+                    _ob.mit_bar   := bar_index
+                    box.set_bgcolor(_ob.bx, mb_mitColor)
+                    box.set_border_color(_ob.bx, mb_mitColor)
+                    box.set_text_color(_ob.bx, color.new(color.gray, 70))
+                    if not na(_ob.mtLine)
+                        line.set_color(_ob.mtLine, color.new(color.gray, 85))
+                    if _ob.isBull
+                        mb_bullMit := true
+                    else
+                        mb_bearMit := true
+                else if mb_extend
+                    box.set_right(_ob.bx, bar_index + 1)
+                    if not na(_ob.mtLine)
+                        line.set_x2(_ob.mtLine, bar_index + 1)
+            else
+                if mb_pruneAge > 0 and (bar_index - _ob.mit_bar) > mb_pruneAge
+                    mb_blocks.remove(i)
+                    box.delete(_ob.bx)
+                    if not na(_ob.mtLine)
+                        line.delete(_ob.mtLine)
+
 // ── Rejection Block Alerts ──
 alertcondition(rb_bullFormed, title = 'Bull RB Formed', message = 'Bullish Rejection Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(rb_bearFormed, title = 'Bear RB Formed', message = 'Bearish Rejection Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(rb_bullMit,    title = 'Bull RB Mitigated', message = 'Bullish RB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(rb_bearMit,    title = 'Bear RB Mitigated', message = 'Bearish RB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 
+// ── Breaker Block Alerts ──
+alertcondition(bk_bullFormed, title = 'Bull Breaker Formed',    message = 'Bullish Breaker confirmed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(bk_bearFormed, title = 'Bear Breaker Formed',    message = 'Bearish Breaker confirmed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(bk_bullMit,    title = 'Bull Breaker Mitigated', message = 'Bullish Breaker mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(bk_bearMit,    title = 'Bear Breaker Mitigated', message = 'Bearish Breaker mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+
+// ── Mitigation Block Alerts ──
+alertcondition(mb_bullFormed, title = 'Bull MB Formed',    message = 'Bullish Mitigation Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(mb_bearFormed, title = 'Bear MB Formed',    message = 'Bearish Mitigation Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(mb_bullMit,    title = 'Bull MB Mitigated', message = 'Bullish MB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
+alertcondition(mb_bearMit,    title = 'Bear MB Mitigated', message = 'Bearish MB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 
 // ── Timeframe Warning ──
 // Many sections require intraday charts; show a one-time warning on daily+ charts
