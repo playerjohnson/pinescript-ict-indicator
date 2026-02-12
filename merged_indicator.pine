@@ -3313,22 +3313,22 @@ pda_addZone(_zones, _top, _bot, _kind, _isBull) =>
 		_zones.push(PDZone.new(_top, _bot, _kind, _isBull, pda_rankFor(_kind), 0))
 
 pda_scanOBArr(_zones, _arr, _kind) =>
-	for i = 0 to math.max(_arr.size() - 1, 0)
-		if i < _arr.size()
+	if _arr.size() > 0
+		for i = 0 to _arr.size() - 1
 			OrderBlock _ob = _arr.get(i)
 			if not _ob.mitigated
 				pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, _kind, _ob.isBull)
 
 pda_scanBoxArr(_zones, _arr, _kind, bool _isBull) =>
-	for i = 0 to math.max(_arr.size() - 1, 0)
-		if i < _arr.size()
+	if _arr.size() > 0
+		for i = 0 to _arr.size() - 1
 			box _bx = _arr.get(i)
 			if not na(_bx)
 				pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), _kind, _isBull)
 
 pda_sortByRankDesc(_arr) =>
-	for i = 1 to math.max(_arr.size() - 1, 0)
-		if i < _arr.size()
+	if _arr.size() > 1
+		for i = 1 to _arr.size() - 1
 			PDZone _key = _arr.get(i)
 			int j = i - 1
 			while j >= 0 and _arr.get(j).rank < _key.rank
@@ -3414,10 +3414,8 @@ f_pdaScanner() =>
 							_cnt += 1
 				_z1.score := _cnt
 
-		if pda_conflBoxes.size() > 0
-			for i = pda_conflBoxes.size() - 1 to 0 by 1
-				box.delete(pda_conflBoxes.get(i))
-		pda_conflBoxes.clear()
+		while pda_conflBoxes.size() > 0
+			box.delete(pda_conflBoxes.pop())
 
 		if pda_showConfl and _zones.size() > 0
 			for i = 0 to _zones.size() - 1
