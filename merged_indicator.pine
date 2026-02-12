@@ -2808,6 +2808,7 @@ _lq_draw(_show, _hi, _lo, _hClr, _lClr, _style, _hName, _lName) =>
 		else
 			line.set_x1(_lnH, bar_index - 1), line.set_y1(_lnH, _hi), line.set_x2(_lnH, bar_index + 30), line.set_y2(_lnH, _hi)
 			line.set_x1(_lnL, bar_index - 1), line.set_y1(_lnL, _lo), line.set_x2(_lnL, bar_index + 30), line.set_y2(_lnL, _lo)
+			_lnL
 		if lq_showLabels
 			string _hTxt = _hName + " " + str.tostring(_hi, format.mintick)
 			string _lTxt = _lName + " " + str.tostring(_lo, format.mintick)
@@ -2817,6 +2818,7 @@ _lq_draw(_show, _hi, _lo, _hClr, _lClr, _style, _hName, _lName) =>
 			else
 				label.set_x(_lbH, bar_index + 30), label.set_y(_lbH, _hi), label.set_text(_lbH, _hTxt)
 				label.set_x(_lbL, bar_index + 30), label.set_y(_lbL, _lo), label.set_text(_lbL, _lTxt)
+				_lbL
 
 if ENABLE_LIQUIDITY
 	[lq_dayHigh, lq_dayLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_on)
