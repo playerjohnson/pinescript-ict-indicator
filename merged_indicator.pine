@@ -3805,6 +3805,21 @@ pda_tblPosition(_pos) =>
         "Bottom Right" => position.bottom_right
         => position.top_right
 
+pda_addZone(_zones, _top, _bot, _kind, _isBull, _eq) =>
+    if not na(_top) and not na(_bot) and _top > _bot
+        bool _isPrem = (_top + _bot) / 2.0 > _eq
+        _zones.push(PDZone.new(_top, _bot, _kind, _isBull,
+             pda_rankFor(_kind, _isBull, _isPrem), 0, false))
+
+pda_sortByRankDesc(_arr) =>
+    for i = 1 to _arr.size() - 1
+        PDZone _key = _arr.get(i)
+        int j = i - 1
+        while j >= 0 and _arr.get(j).rank < _key.rank
+            _arr.set(j + 1, _arr.get(j))
+            j -= 1
+        _arr.set(j + 1, _key)
+
 // ── State ──
 var line       pda_eqLine     = na
 var array<box> pda_conflBoxes = array.new<box>()
@@ -3840,53 +3855,46 @@ if ENABLE_PDA_SCANNER
         var array<PDZone> _zones = array.new<PDZone>()
         _zones.clear()
 
-        // Helper closure-like approach: add a zone
-        _addZone(_zones, _top, _bot, _kind, _isBull, _eq) =>
-            if not na(_top) and not na(_bot) and _top > _bot
-                bool _isPrem = (_top + _bot) / 2.0 > _eq
-                _zones.push(PDZone.new(_top, _bot, _kind, _isBull,
-                     pda_rankFor(_kind, _isBull, _isPrem), 0, false))
-
         // 1. Order Blocks (chart TF)
         for i = 0 to ob_bulls.size() - 1
             OrderBlock _ob = ob_bulls.get(i)
             if not _ob.mitigated
-                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", true, _eq)
+                pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", true, _eq)
 
         for i = 0 to ob_bears.size() - 1
             OrderBlock _ob = ob_bears.get(i)
             if not _ob.mitigated
-                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", false, _eq)
+                pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", false, _eq)
 
         // 2. HTF Order Blocks (MTF 1)
         for i = 0 to ob_mtf1.size() - 1
             OrderBlock _ob = ob_mtf1.get(i)
             if not _ob.mitigated
-                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
+                pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
 
         // HTF Order Blocks (MTF 2)
         for i = 0 to ob_mtf2.size() - 1
             OrderBlock _ob = ob_mtf2.get(i)
             if not _ob.mitigated
-                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
+                pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
 
         // HTF Order Blocks (MTF 3)
         for i = 0 to ob_mtf3.size() - 1
             OrderBlock _ob = ob_mtf3.get(i)
             if not _ob.mitigated
-                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
+                pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
 
         // 3. Breaker Blocks
         for i = 0 to bk_blocks.size() - 1
             OrderBlock _ob = bk_blocks.get(i)
             if not _ob.mitigated
-                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "BRK", _ob.isBull, _eq)
+                pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "BRK", _ob.isBull, _eq)
 
         // 4. Mitigation Blocks
         for i = 0 to mb_blocks.size() - 1
             OrderBlock _ob = mb_blocks.get(i)
             if not _ob.mitigated
-                _addZone(_zones, _ob.bodyTop, _ob.bodyBot, "MB", _ob.isBull, _eq)
+                pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "MB", _ob.isBull, _eq)
 
         // 5. Rejection Blocks
         for i = 0 to rb_blocks.size() - 1
@@ -3894,62 +3902,62 @@ if ENABLE_PDA_SCANNER
             if not _rb.mitigated and not na(_rb.bx)
                 float _t = box.get_top(_rb.bx)
                 float _b = box.get_bottom(_rb.bx)
-                _addZone(_zones, _t, _b, "RB", _rb.isBull, _eq)
+                pda_addZone(_zones, _t, _b, "RB", _rb.isBull, _eq)
 
         // 6. FVGs (bull + bear)
         for i = 0 to _bullBoxesFVG.size() - 1
             box _bx = _bullBoxesFVG.get(i)
             if not na(_bx)
-                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "FVG", true, _eq)
+                pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "FVG", true, _eq)
 
         for i = 0 to _bearBoxesFVG.size() - 1
             box _bx = _bearBoxesFVG.get(i)
             if not na(_bx)
-                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "FVG", false, _eq)
+                pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "FVG", false, _eq)
 
         // 7. Volume Imbalances
         for i = 0 to _bullishvi.size() - 1
             box _bx = _bullishvi.get(i)
             if not na(_bx)
-                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "VI", true, _eq)
+                pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "VI", true, _eq)
 
         for i = 0 to _bearishvi.size() - 1
             box _bx = _bearishvi.get(i)
             if not na(_bx)
-                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "VI", false, _eq)
+                pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "VI", false, _eq)
 
         // 8. Implied FVGs
         for i = 0 to _bullishifvg.size() - 1
             box _bx = _bullishifvg.get(i)
             if not na(_bx)
-                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "I.FVG", true, _eq)
+                pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "I.FVG", true, _eq)
 
         for i = 0 to _bearishifvg.size() - 1
             box _bx = _bearishifvg.get(i)
             if not na(_bx)
-                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "I.FVG", false, _eq)
+                pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "I.FVG", false, _eq)
 
         // 9. Inverse FVGs
         for i = 0 to bullInvFVG.size() - 1
             box _bx = bullInvFVG.get(i)
             if not na(_bx)
-                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "Inv.FVG", true, _eq)
+                pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "Inv.FVG", true, _eq)
 
         for i = 0 to bearInvFVG.size() - 1
             box _bx = bearInvFVG.get(i)
             if not na(_bx)
-                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "Inv.FVG", false, _eq)
+                pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "Inv.FVG", false, _eq)
 
         // 10. Gaps (Opening Gaps)
         for i = 0 to _gapsboxesbu.size() - 1
             box _bx = _gapsboxesbu.get(i)
             if not na(_bx)
-                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "GAP", true, _eq)
+                pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "GAP", true, _eq)
 
         for i = 0 to _gapsboxesbe.size() - 1
             box _bx = _gapsboxesbe.get(i)
             if not na(_bx)
-                _addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "GAP", false, _eq)
+                pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "GAP", false, _eq)
 
         // ────── Overlap scan: O(n²) on last bar only ──────
         for i = 0 to _zones.size() - 1
@@ -4026,18 +4034,8 @@ if ENABLE_PDA_SCANNER
                     _discZones.push(_z)
 
             // Sort by rank descending (deepest first for premium = top of table)
-            // Simple insertion sort — small arrays
-            _sortByRankDesc(_arr) =>
-                for i = 1 to _arr.size() - 1
-                    PDZone _key = _arr.get(i)
-                    int j = i - 1
-                    while j >= 0 and _arr.get(j).rank < _key.rank
-                        _arr.set(j + 1, _arr.get(j))
-                        j -= 1
-                    _arr.set(j + 1, _key)
-
-            _sortByRankDesc(_premZones)
-            _sortByRankDesc(_discZones)
+            pda_sortByRankDesc(_premZones)
+            pda_sortByRankDesc(_discZones)
 
             // Limit display to 6 per side
             int _maxRows = 6
