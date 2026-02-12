@@ -1973,9 +1973,6 @@ type CandleSet
 	label tfTimerTop
 	label tfTimerBottom
 
-type Helper
-	string name = 'Helper'
-
 HTFSettings htfSettings = HTFSettings.new()
 
 var CandleSettings SettingsHTF1=CandleSettings.new()
@@ -2121,18 +2118,17 @@ htfSettings.label_show             := input.bool(false, 'Price Label           '
 htfSettings.label_color            := input.color(color.new(color.black, 10), '', inline='label', group=group_htfc_trace)
 htfSettings.label_size             := input.string(size.small, '', [size.tiny, size.small, size.normal, size.large, size.huge], inline='label', group=group_htfc_trace)
 
-Helper htfHelper = Helper.new()
 var Trace htfTrace=Trace.new()
 color htfc_color_transparent = #ffffff00
 
-method LineStyle(Helper helper, string style) =>
+_htf_LineStyle(string style) =>
 	out = switch style
 		'----' => line.style_dashed
 		'····' => line.style_dotted
 		=> line.style_solid
 	out
 
-method DayofWeek(Helper helper, int index) =>
+_htf_DayofWeek(int index) =>
 	switch
 		index == 1 => 'M'
 		index == 2 => 'T'
@@ -2143,7 +2139,7 @@ method DayofWeek(Helper helper, int index) =>
 		index == 7 => 'S'
 		na(index) => ''
 
-method ValidTimeframe(Helper helper, string HTF) =>
+_htf_ValidTimeframe(string HTF) =>
 	if timeframe.in_seconds(HTF) >= timeframe.in_seconds('D') and timeframe.in_seconds(HTF) > timeframe.in_seconds()
 		true
 	else
@@ -2152,7 +2148,7 @@ method ValidTimeframe(Helper helper, string HTF) =>
 		n3 = n1 % n2
 		n1 < n2 and math.round(n2 / n1) == n2 / n1
 
-method RemainingTime(Helper helper, string HTF) =>
+_htf_RemainingTime(string HTF) =>
 	if barstate.isrealtime
 		timeRemaining = (time_close(HTF) - timenow) / 1000
 		days = math.floor(timeRemaining / 86400)
@@ -2174,7 +2170,7 @@ method RemainingTime(Helper helper, string HTF) =>
 	else
 		'n/a'
 
-method HTFName(Helper helper, string HTF) =>
+_htf_HTFName(string HTF) =>
 	formatted = HTF
 
 	seconds = timeframe.in_seconds(HTF)
@@ -2189,14 +2185,14 @@ method HTFName(Helper helper, string HTF) =>
 		formatted
 	formatted
 
-method HTFEnabled(Helper helper) =>
+_htf_Enabled() =>
 	int enabled = 0
 	for i = 0 to htfSets.size() - 1
 		if htfSets.get(i).csettings.show
 			enabled += 1
 	math.min(enabled, htfSettings.max_sets)
 
-method CandleSetHigh(Helper helper, array<Candle> candles, float h) =>
+_htf_CandleSetHigh(array<Candle> candles, float h) =>
 	float _h = h
 	if array.size(candles) > 0
 		for i = 0 to array.size(candles) - 1 by 1
@@ -2206,7 +2202,7 @@ method CandleSetHigh(Helper helper, array<Candle> candles, float h) =>
 				_h
 	_h
 
-method CandleSetLow(Helper helper, array<Candle> candles, float l) =>
+_htf_CandleSetLow(array<Candle> candles, float l) =>
 	float _l = l
 	if array.size(candles) > 0
 		for i = 0 to array.size(candles) - 1 by 1
@@ -2216,14 +2212,14 @@ method CandleSetLow(Helper helper, array<Candle> candles, float l) =>
 				_l
 	_l
 
-method CandlesHigh(Helper helper, array<Candle> candles) =>
+_htf_CandlesHigh(array<Candle> candles) =>
 	h = 0.0
 	int cnt = 0
-	int last = helper.HTFEnabled()
+	int last = _htf_Enabled()
 	for i = 0 to htfSets.size() - 1
 		CandleSet _cs = htfSets.get(i)
-		if _cs.csettings.show and helper.ValidTimeframe(_cs.csettings.htf) and cnt < last
-			h := helper.CandleSetHigh(_cs.candles, h)
+		if _cs.csettings.show and _htf_ValidTimeframe(_cs.csettings.htf) and cnt < last
+			h := _htf_CandleSetHigh(_cs.candles, h)
 			cnt += 1
 	if array.size(candles) > 0
 		for i = 0 to array.size(candles) - 1
@@ -2232,14 +2228,14 @@ method CandlesHigh(Helper helper, array<Candle> candles) =>
 				h := c.h
 	h
 
-method CandlesLow(Helper helper, array<Candle> candles, float h) =>
+_htf_CandlesLow(array<Candle> candles, float h) =>
 	l = h
 	int cnt = 0
-	int last = helper.HTFEnabled()
+	int last = _htf_Enabled()
 	for i = 0 to htfSets.size() - 1
 		CandleSet _cs = htfSets.get(i)
-		if _cs.csettings.show and helper.ValidTimeframe(_cs.csettings.htf) and cnt < last
-			l := helper.CandleSetLow(_cs.candles, l)
+		if _cs.csettings.show and _htf_ValidTimeframe(_cs.csettings.htf) and cnt < last
+			l := _htf_CandleSetLow(_cs.candles, l)
 			cnt += 1
 	if array.size(candles) > 0
 		for i = 0 to array.size(candles) - 1
@@ -2250,7 +2246,7 @@ method CandlesLow(Helper helper, array<Candle> candles, float h) =>
 
 method UpdateTime(CandleSet candleSet, int offset) =>
 	if htfSettings.htf_timer_show and (barstate.isrealtime or barstate.islast)
-		string tmr = '(' + htfHelper.RemainingTime(candleSet.csettings.htf) + ')'
+		string tmr = '(' + _htf_RemainingTime(candleSet.csettings.htf) + ')'
 
 		if not na(candleSet.tfTimerTop)
 			candleSet.tfTimerTop.set_text(tmr)
@@ -2285,16 +2281,16 @@ method Reorder(CandleSet candleSet, int offset) =>
 	bottom = 0.0
 
 	if htfSettings.label_alignment == 'Align'
-		top := htfHelper.CandlesHigh(candleSet.candles)
-		bottom := htfHelper.CandlesLow(candleSet.candles, top)
+		top := _htf_CandlesHigh(candleSet.candles)
+		bottom := _htf_CandlesLow(candleSet.candles, top)
 	if htfSettings.label_alignment == 'Follow Candles'
-		top := htfHelper.CandleSetHigh(candleSet.candles, 0)
-		bottom := htfHelper.CandleSetLow(candleSet.candles, top)
+		top := _htf_CandleSetHigh(candleSet.candles, 0)
+		bottom := _htf_CandleSetLow(candleSet.candles, top)
 
 	left = bar_index + offset + (htfSettings.width + htfSettings.buffer) * (size - 1) / 2
 
 	if htfSettings.htf_label_show
-		string lblt = htfHelper.HTFName(candleSet.csettings.htf)
+		string lblt = _htf_HTFName(candleSet.csettings.htf)
 		string lbll = lblt
 		if htfSettings.htf_timer_show
 			lblt := lblt + '\n'
@@ -2302,7 +2298,7 @@ method Reorder(CandleSet candleSet, int offset) =>
 		if htfSettings.daily_name
 			lblt := lblt + '\n'
 
-		string tmr = '(' + htfHelper.RemainingTime(candleSet.csettings.htf) + ')' + (htfSettings.daily_name ? '\n' : '')
+		string tmr = '(' + _htf_RemainingTime(candleSet.csettings.htf) + ')' + (htfSettings.daily_name ? '\n' : '')
 		if htfSettings.label_position == 'Both' or htfSettings.label_position == 'Top'
 
 			if not na(candleSet.tfNameTop)
@@ -2398,7 +2394,7 @@ method Monitor(CandleSet candleSet) =>
 		candle.l_idx := bar_index
 		candle.dow := switch
 			candleSet.csettings.htf == '1D' =>
-				htfHelper.DayofWeek(dayofweek(time_tradingday, "America/New_York"))
+				_htf_DayofWeek(dayofweek(time_tradingday, "America/New_York"))
 			str.tonumber(candleSet.csettings.htf) < 60 =>
 				str.format_time(candle.o_time, 'm', 'America/New_York')
 			str.tonumber(candleSet.csettings.htf) >= 60 =>
@@ -2453,7 +2449,7 @@ method Update(CandleSet candleSet, int offset, bool showTrace) =>
 			if htfSettings.trace_show and showTrace
 				if bar_index - candle.o_idx < 5000
 					if na(htfTrace.o)
-						htfTrace.o := line.new(candle.o_idx, candle.o, box.get_left(candle.body), candle.o, xloc = xloc.bar_index, color = htfSettings.trace_o_color, style = htfHelper.LineStyle(htfSettings.trace_o_style), width = htfSettings.trace_o_size)
+						htfTrace.o := line.new(candle.o_idx, candle.o, box.get_left(candle.body), candle.o, xloc = xloc.bar_index, color = htfSettings.trace_o_color, style = _htf_LineStyle(htfSettings.trace_o_style), width = htfSettings.trace_o_size)
 						htfTrace.o
 					else
 						line.set_xy1(htfTrace.o, candle.o_idx, candle.o)
@@ -2469,7 +2465,7 @@ method Update(CandleSet candleSet, int offset, bool showTrace) =>
 
 				if bar_index - candle.c_idx < 5000
 					if na(htfTrace.c)
-						htfTrace.c := line.new(candle.c_idx, candle.c, box.get_left(candle.body), candle.c, xloc = xloc.bar_index, color = htfSettings.trace_c_color, style = htfHelper.LineStyle(htfSettings.trace_c_style), width = htfSettings.trace_c_size)
+						htfTrace.c := line.new(candle.c_idx, candle.c, box.get_left(candle.body), candle.c, xloc = xloc.bar_index, color = htfSettings.trace_c_color, style = _htf_LineStyle(htfSettings.trace_c_style), width = htfSettings.trace_c_size)
 						htfTrace.c
 					else
 						line.set_xy1(htfTrace.c, candle.c_idx, candle.c)
@@ -2485,7 +2481,7 @@ method Update(CandleSet candleSet, int offset, bool showTrace) =>
 
 				if bar_index - candle.h_idx < 5000
 					if na(htfTrace.h)
-						htfTrace.h := line.new(candle.h_idx, candle.h, line.get_x1(candle.wick_up), candle.h, xloc = xloc.bar_index, color = htfSettings.trace_h_color, style = htfHelper.LineStyle(htfSettings.trace_h_style), width = htfSettings.trace_h_size)
+						htfTrace.h := line.new(candle.h_idx, candle.h, line.get_x1(candle.wick_up), candle.h, xloc = xloc.bar_index, color = htfSettings.trace_h_color, style = _htf_LineStyle(htfSettings.trace_h_style), width = htfSettings.trace_h_size)
 						htfTrace.h
 					else
 						line.set_xy1(htfTrace.h, candle.h_idx, candle.h)
@@ -2501,7 +2497,7 @@ method Update(CandleSet candleSet, int offset, bool showTrace) =>
 
 				if bar_index - candle.l_idx < 5000
 					if na(htfTrace.l)
-						htfTrace.l := line.new(candle.l_idx, candle.l, line.get_x1(candle.wick_down), candle.l, xloc = xloc.bar_index, color = htfSettings.trace_l_color, style = htfHelper.LineStyle(htfSettings.trace_l_style), width = htfSettings.trace_l_size)
+						htfTrace.l := line.new(candle.l_idx, candle.l, line.get_x1(candle.wick_down), candle.l, xloc = xloc.bar_index, color = htfSettings.trace_l_color, style = _htf_LineStyle(htfSettings.trace_l_style), width = htfSettings.trace_l_size)
 						htfTrace.l
 					else
 						line.set_xy1(htfTrace.l, candle.l_idx, candle.l)
@@ -2517,12 +2513,12 @@ method Update(CandleSet candleSet, int offset, bool showTrace) =>
 	candleSet
 
 int htfCnt = 0
-int htfLast = htfHelper.HTFEnabled()
+int htfLast = _htf_Enabled()
 int htfOffset = htfSettings.offset
 if ENABLE_HTF_CANDLES
 	for i = 0 to htfSets.size() - 1
 		CandleSet _cs = htfSets.get(i)
-		if _cs.csettings.show and htfHelper.ValidTimeframe(_cs.csettings.htf) and htfCnt < htfLast
+		if _cs.csettings.show and _htf_ValidTimeframe(_cs.csettings.htf) and htfCnt < htfLast
 			bool showTrace = (htfSettings.trace_anchor == 'First Timeframe' and htfCnt == 0) or (htfSettings.trace_anchor == 'Last Timeframe' and htfCnt == htfLast - 1)
 			_cs.UpdateTime(htfOffset)
 			_cs.Monitor().Update(htfOffset, showTrace).FindImbalance()
