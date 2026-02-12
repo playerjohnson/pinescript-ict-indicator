@@ -1,4 +1,3 @@
-//  ────────────────────────────────────────────────────────────────
 //  MERGED SCRIPT : Hourly Open + ICT Imbalances + NWOG/NDOG + HTF Candles
 //  Combines:
 //    1. "Hourly Open & Separator"                (original author unknown)
@@ -6,7 +5,6 @@
 //    3. "ICT NWOG/NDOG (fadi)"                   © fadizeidan
 //    4. "ICT HTF Candles (fadi)"                 © fadizeidan
 //  Licence: Mozilla Public License 2.0
-//  ────────────────────────────────────────────────────────────────
 
 //@version=6
 indicator(
@@ -20,63 +18,51 @@ indicator(
      behind_chart     = true,
      dynamic_requests = true)
 
+var bool ENABLE_HOURLY_OPEN = input.bool(true, "Enable Hourly Open & Separator", group = "⓪ Section Toggles")
+var bool ENABLE_ORDER_BLOCKS = input.bool(true, "Enable Order Blocks", group = "⓪ Section Toggles")
+var bool ENABLE_IMBALANCES = input.bool(true, "Enable ICT Imbalances (FVG/VI/GAP)", group = "⓪ Section Toggles")
+var bool ENABLE_NWOG_NDOG = input.bool(true, "Enable NWOG / NDOG", group = "⓪ Section Toggles")
+var bool ENABLE_HTF_CANDLES = input.bool(true, "Enable HTF Candles", group = "⓪ Section Toggles")
+var bool ENABLE_KILLZONES = input.bool(true, "Enable Killzones", group = "⓪ Section Toggles")
+var bool ENABLE_SESSION_HL = input.bool(true, "Enable Session Highs/Lows", group = "⓪ Section Toggles")
+var bool ENABLE_LIQUIDITY = input.bool(true, "Enable PDH/PDL/PWH/PWL", group = "⓪ Section Toggles")
+var bool ENABLE_REJECTION_BLK = input.bool(true, "Enable Rejection Blocks", group = "⓪ Section Toggles")
+var bool ENABLE_BREAKER_MIT = input.bool(true, "Enable Breaker / Mitigation", group = "⓪ Section Toggles")
+var bool ENABLE_PDA_SCANNER = input.bool(false, "Enable PD Array Scanner", group = "⓪ Section Toggles")
 
-// ════════════════════════════════════════════════════════════════
-//  MASTER SECTION TOGGLES  (disable a section = zero runtime cost)
-// ════════════════════════════════════════════════════════════════
-var bool ENABLE_HOURLY_OPEN   = input.bool(true, "Enable Hourly Open & Separator",  group = "⓪ Section Toggles")
-var bool ENABLE_ORDER_BLOCKS  = input.bool(true, "Enable Order Blocks",             group = "⓪ Section Toggles")
-var bool ENABLE_IMBALANCES    = input.bool(true, "Enable ICT Imbalances (FVG/VI/GAP)", group = "⓪ Section Toggles")
-var bool ENABLE_NWOG_NDOG     = input.bool(true, "Enable NWOG / NDOG",              group = "⓪ Section Toggles")
-var bool ENABLE_HTF_CANDLES   = input.bool(true, "Enable HTF Candles",              group = "⓪ Section Toggles")
-var bool ENABLE_KILLZONES     = input.bool(true, "Enable Killzones",                group = "⓪ Section Toggles")
-var bool ENABLE_SESSION_HL    = input.bool(true, "Enable Session Highs/Lows",       group = "⓪ Section Toggles")
-var bool ENABLE_LIQUIDITY     = input.bool(true, "Enable PDH/PDL/PWH/PWL",          group = "⓪ Section Toggles")
-var bool ENABLE_REJECTION_BLK = input.bool(true, "Enable Rejection Blocks",         group = "⓪ Section Toggles")
-var bool ENABLE_BREAKER_MIT   = input.bool(true, "Enable Breaker / Mitigation",    group = "⓪ Section Toggles")
-var bool ENABLE_PDA_SCANNER   = input.bool(false, "Enable PD Array Scanner",        group = "⓪ Section Toggles")
-
-// ── ㉑ Webhook JSON Alerts ──
-var bool   wh_enable      = input.bool(false, "Enable Webhook Alerts", group = "㉑ Webhook Alerts", tooltip = "Sends JSON payloads via alert() for bot/webhook integration.\nIn TradingView alert dialog, select 'Any alert() function call'.")
-var bool   wh_formations  = input.bool(true,  "Formation Alerts  ", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "OB, FVG, I.FVG, VI, GAP, Inverse FVG, LV formations")
-var bool   wh_mitigations = input.bool(true,  "Mitigation Alerts", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "All mitigation/highlight events")
+var bool wh_enable = input.bool(false, "Enable Webhook Alerts", group = "㉑ Webhook Alerts", tooltip = "JSON alerts via alert(). In TV alert dialog, select 'Any alert() function call'.")
+var bool wh_formations = input.bool(true, "Formation Alerts", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "OB, FVG, I.FVG, VI, GAP, Inverse FVG, LV formations")
+var bool wh_mitigations = input.bool(true, "Mitigation Alerts", group = "㉑ Webhook Alerts", inline = "wh1", tooltip = "All mitigation/highlight events")
 
 _wh_json(string _event, float _high, float _low) =>
     '{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '"}'
 
+// SECTION A – HOURLY OPEN & SEPARATOR
 
-// ════════════════════════════════════════════════════════════════
-//  SECTION A – HOURLY OPEN & SEPARATOR
-// ════════════════════════════════════════════════════════════════
+var color ho_lineColor = input.color(color.black , "Hourly Line" , group="① Hourly Open", inline="ho1")
+var string ho_styleInput = input.string("Solid" , "", options=["Solid","Dotted","Dashed","Arrow Left","Arrow Right","Arrow Both"], group="① Hourly Open", inline="ho1")
+var int ho_width = input.int(1 , "", 1, 4, group="① Hourly Open", inline="ho1")
+var bool ho_extendMidnight = input.bool(true , "Extend Midnight" , group="① Hourly Open", inline="ho2")
+var bool ho_showMidnightLbl = input.bool(true , "Show Label", group="① Hourly Open", inline="ho2")
+var color ho_midColor = input.color(color.purple , "Midnight Line", group="① Hourly Open", inline="ho3")
+var string ho_midStyleInput = input.string("Solid" , "", options=["Solid","Dotted","Dashed","Arrow Left","Arrow Right","Arrow Both"], group="① Hourly Open", inline="ho3")
+var int ho_midWidth = input.int(1 , "", 1, 4, group="① Hourly Open", inline="ho3")
+var int ho_midDays = input.int(5, "Midnight Days", 1, 20, group="① Hourly Open", inline="ho3b", tooltip = "Previous midnight opens to display (1-20).")
+var color ho_midLblColor = input.color(color.purple, "Label", group="① Hourly Open", inline="ho3b")
+var string ho_midLblSize = input.string("Small", "", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="① Hourly Open", inline="ho3b")
+var int ho_maxLines = input.int(50, "Max Lines", 1, 100, group="① Hourly Open")
 
-// ⬩ Inputs – Hourly Open
-var color  ho_lineColor         = input.color(color.black , "Hourly Line       " ,  group="① Hourly Open", inline="ho1")
-var string ho_styleInput        = input.string("Solid"     , "", options=["Solid","Dotted","Dashed","Arrow Left","Arrow Right","Arrow Both"], group="① Hourly Open", inline="ho1")
-var int    ho_width             = input.int(1 , "", 1, 4, group="① Hourly Open", inline="ho1")
-var bool   ho_extendMidnight    = input.bool(true , "Extend Midnight  " , group="① Hourly Open", inline="ho2")
-var bool   ho_showMidnightLbl   = input.bool(true , "Show Label", group="① Hourly Open", inline="ho2")
-var color  ho_midColor          = input.color(color.purple , "Midnight Line     ", group="① Hourly Open", inline="ho3")
-var string ho_midStyleInput     = input.string("Solid" , "", options=["Solid","Dotted","Dashed","Arrow Left","Arrow Right","Arrow Both"], group="① Hourly Open", inline="ho3")
-var int    ho_midWidth          = input.int(1 , "", 1, 4, group="① Hourly Open", inline="ho3")
-var int    ho_midDays           = input.int(5, "Midnight Days     ", 1, 20, group="① Hourly Open", inline="ho3b", tooltip = "Number of previous midnight opening prices to display (1-20).")
-var color  ho_midLblColor       = input.color(color.purple, "Label", group="① Hourly Open", inline="ho3b")
-var string ho_midLblSize        = input.string("Small", "", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="① Hourly Open", inline="ho3b")
-var int    ho_maxLines          = input.int(50, "Max Lines", 1, 100, group="① Hourly Open")
+var bool ho_highlightFirst10 = input.bool(false , "First 10 Min", group="① Hourly Open", inline="ho4")
+var color ho_firstClr = input.color(color.red , "", group="① Hourly Open", inline="ho4")
+var bool ho_highlightLast10 = input.bool(false , "Last 10 Min" , group="① Hourly Open", inline="ho5")
+var color ho_lastClr = input.color(color.red , "" , group="① Hourly Open", inline="ho5")
+var int ho_highlightWidth = input.int(2 , "", 1, 4, group="① Hourly Open", inline="ho5")
 
-// ⬩ Highlight first / last 10 min
-var bool   ho_highlightFirst10  = input.bool(false , "First 10 Min      ", group="① Hourly Open", inline="ho4")
-var color  ho_firstClr          = input.color(color.red , "",  group="① Hourly Open", inline="ho4")
-var bool   ho_highlightLast10   = input.bool(false , "Last 10 Min       " , group="① Hourly Open", inline="ho5")
-var color  ho_lastClr           = input.color(color.red , "" , group="① Hourly Open", inline="ho5")
-var int    ho_highlightWidth    = input.int(2 , "", 1, 4, group="① Hourly Open", inline="ho5")
+var color hs_lineColor = input.color(color.new(color.red,0),"Separator Line", group="② Hourly Separator", inline="hs1")
+var string hs_lineStyleOpt = input.string("Dotted","", options=["Solid","Dashed","Dotted"], group="② Hourly Separator", inline="hs1")
+var string hs_lineWidthOpt = input.string("1","", options=["1","2","3"], group="② Hourly Separator", inline="hs1")
+var int hs_maxLines = input.int(50,"Max Lines", 1,100, group="② Hourly Separator")
 
-// ⬩ Inputs – Hourly Separator
-var color  hs_lineColor         = input.color(color.new(color.red,0),"Separator Line    ", group="② Hourly Separator", inline="hs1")
-var string hs_lineStyleOpt      = input.string("Dotted","", options=["Solid","Dashed","Dotted"], group="② Hourly Separator", inline="hs1")
-var string hs_lineWidthOpt      = input.string("1","", options=["1","2","3"], group="② Hourly Separator", inline="hs1")
-var int    hs_maxLines          = input.int(50,"Max Lines", 1,100, group="② Hourly Separator")
-
-// ⬩ Enums → line.style
 line_style(_opt) =>
     switch _opt
         "Solid"       => line.style_solid
@@ -87,7 +73,6 @@ line_style(_opt) =>
         "Arrow Both"  => line.style_arrow_both
         =>              line.style_solid
 
-// ⬩ Unicode line‑style helper (used by NWOG/NDOG, Sessions, Liquidity)
 f_get_line_style(style) =>
     out = switch style
         '⎯⎯⎯'  => line.style_solid
@@ -97,7 +82,6 @@ f_get_line_style(style) =>
 var line[] ho_lines      = array.new_line()
 var line[] hs_lines      = array.new_line()
 
-// ── Midnight open multi-day state ──
 var float[] ho_midPrices  = array.new_float()
 var int[]   ho_midBars    = array.new_int()
 var int[]   ho_midTimes   = array.new_int()
@@ -105,7 +89,6 @@ var line[]  ho_midLines   = array.new_line()
 var label[] ho_midLabels  = array.new_label()
 var bool    ho_wasMidnight = false
 
-// ── Size string → size constant helper ──
 _ho_getSize(_s) =>
     _s == "Auto" ? size.auto : _s == "Small" ? size.small : _s == "Normal" ? size.normal : _s == "Large" ? size.large : _s == "Huge" ? size.huge : size.tiny
 
@@ -113,14 +96,12 @@ int _midnHour = syminfo.timezone == "America/Chicago" ? 23 : 0
 
 if timeframe.isintraday and ENABLE_HOURLY_OPEN
     bool _isMidnight = hour == _midnHour and minute == 0
-    // ── Archive new midnight open ──
     if _isMidnight and not ho_wasMidnight
         array.unshift(ho_midPrices, open)
         array.unshift(ho_midBars, bar_index)
         array.unshift(ho_midTimes, time)
         array.unshift(ho_midLines, line(na))
         array.unshift(ho_midLabels, label(na))
-        // Trim to max days
         while array.size(ho_midPrices) > ho_midDays
             array.pop(ho_midPrices)
             array.pop(ho_midBars)
@@ -129,7 +110,6 @@ if timeframe.isintraday and ENABLE_HOURLY_OPEN
             label.delete(array.pop(ho_midLabels))
     ho_wasMidnight := _isMidnight
 
-    // ── Draw / extend all midnight open lines ──
     if ho_extendMidnight and array.size(ho_midPrices) > 0
         string _midSz = _ho_getSize(ho_midLblSize)
         for i = 0 to array.size(ho_midPrices) - 1
@@ -157,7 +137,6 @@ if timeframe.isintraday and ENABLE_HOURLY_OPEN
                 label.set_textcolor(_lbl, ho_midLblColor)
                 label.set_size(_lbl, _midSz)
 
-    // ── Regular hourly open lines (non-midnight) ──
     if minute == 0 and second == 0 and hour != _midnHour
         int   segStart      = time
         int   segFirstEnd   = time + 10*60*1000
@@ -179,11 +158,9 @@ if timeframe.isintraday and ENABLE_HOURLY_OPEN
                        line.new(segLastStart, open, segEnd, open, xloc.bar_time,
                                 color=ho_lastClr , style=line_style(ho_styleInput), width=ho_highlightWidth))
 
-// purge old hourly‑open lines
 while array.size(ho_lines) > ho_maxLines
     line.delete(array.shift(ho_lines))
 
-// ── Hour‑separator each new hour
 bool hs_newHour = minute == 0 and minute[1] > 0
 if hs_newHour and ENABLE_HOURLY_OPEN
     line _sep = line.new(bar_index, low - ta.tr, bar_index, high + ta.tr,
@@ -196,66 +173,55 @@ if hs_newHour and ENABLE_HOURLY_OPEN
 while array.size(hs_lines) > hs_maxLines
     line.delete(array.shift(hs_lines))
 
+// SECTION A2 – ICT ORDER BLOCKS
 
-// ════════════════════════════════════════════════════════════════
-//  SECTION A2 – ICT ORDER BLOCKS
-//  A bullish OB: consecutive bearish candle(s) displaced above by a
-//  confirming candle.  Zone = blended body of the OB candle(s).
-//  Bearish OB is the mirror.  Works on any chart timeframe.
-//  Based on ICT Mentorship Teaching 3 of 8.
-// ════════════════════════════════════════════════════════════════
+var bool ob_showBull = input.bool(true, "Bullish OB", group = "③ Order Blocks", inline = "ob1")
+var color ob_bullColor = input.color(color.new(#00e640, 80), "", group = "③ Order Blocks", inline = "ob1")
+var bool ob_showBear = input.bool(true, "Bearish OB", group = "③ Order Blocks", inline = "ob2")
+var color ob_bearColor = input.color(color.new(#e30000, 80), "", group = "③ Order Blocks", inline = "ob2")
+var string ob_zone = input.string("Body", "Zone / Border", options = ["Body", "Full Range"], group = "③ Order Blocks", inline = "ob3", tooltip = "Body = open-to-close. Full Range = high-to-low.")
+var string ob_borderStyle = input.string("Solid", "", options = ["Solid", "Dashed", "Dotted"], group = "③ Order Blocks", inline = "ob3")
 
-// ── Order Block Inputs ──
-var bool   ob_showBull     = input.bool(true,  "Bullish OB        ",  group = "③ Order Blocks", inline = "ob1")
-var color  ob_bullColor    = input.color(color.new(#00e640, 80), "", group = "③ Order Blocks", inline = "ob1")
-var bool   ob_showBear     = input.bool(true,  "Bearish OB        ",  group = "③ Order Blocks", inline = "ob2")
-var color  ob_bearColor    = input.color(color.new(#e30000, 80), "", group = "③ Order Blocks", inline = "ob2")
-var string ob_zone         = input.string("Body", "Zone / Border     ", options = ["Body", "Full Range"], group = "③ Order Blocks", inline = "ob3", tooltip = "Body = open‑to‑close (ICT default).  Full Range = high‑to‑low.")
-var string ob_borderStyle  = input.string("Solid", "", options = ["Solid", "Dashed", "Dotted"], group = "③ Order Blocks", inline = "ob3")
+var bool ob_extend = input.bool(true, "Extend", group = "③ Order Blocks", inline = "ob4")
+var bool ob_showLabel = input.bool(true, "Label", group = "③ Order Blocks", inline = "ob4")
+var color ob_mitColor = input.color(color.new(color.gray, 92), "Mit.", group = "③ Order Blocks", inline = "ob4")
+var bool ob_showMT = input.bool(true, "Mean Threshold", group = "③ Order Blocks", inline = "ob4b", tooltip = "50% OB midpoint. Key entry/stop level.")
+var color ob_mtColor = input.color(color.new(color.white, 60), "", group = "③ Order Blocks", inline = "ob4b")
+var bool ob_invert = input.bool(false, "Invert Mitigated", group = "③ Order Blocks", inline = "ob5", tooltip = "Mitigated OB becomes opposite direction zone.")
+var color ob_invBullColor = input.color(color.new(#e30000, 75), "", group = "③ Order Blocks", inline = "ob5")
+var color ob_invBearColor = input.color(color.new(#00e640, 75), "", group = "③ Order Blocks", inline = "ob5")
+var int ob_maxBoxes = input.int(20, "Max Boxes", 1, 50, group = "③ Order Blocks", inline = "ob6")
+var int ob_pruneAge = input.int(500, "Prune After", 0, 5000, group = "③ Order Blocks", inline = "ob6", tooltip = "Auto-delete mitigated OBs after N bars. 0=never.")
+var int ob_maxBlend = input.int(3, "Max Blend", 1, 5, group = "③ Order Blocks", inline = "ob7", tooltip = "Max same-direction candles to blend into one OB.")
+var float ob_displacement = input.float(0, "Min Displacement", 0, 10, step = 0.5, group = "③ Order Blocks", inline = "ob7b", tooltip = "Min displacement as multiple of OB body. 0=no filter.")
 
-var bool   ob_extend       = input.bool(true,  "Extend            ", group = "③ Order Blocks", inline = "ob4")
-var bool   ob_showLabel    = input.bool(true,  "Label",              group = "③ Order Blocks", inline = "ob4")
-var color  ob_mitColor     = input.color(color.new(color.gray, 92), "Mit.", group = "③ Order Blocks", inline = "ob4")
-var bool   ob_showMT       = input.bool(true,  "Mean Threshold    ", group = "③ Order Blocks", inline = "ob4b", tooltip = "50% of OB body (open‑to‑close midpoint). ICT's key level for entry refinement and stop management.")
-var color  ob_mtColor      = input.color(color.new(color.white, 60), "", group = "③ Order Blocks", inline = "ob4b")
-var bool   ob_invert       = input.bool(false, "Invert Mitigated  ", group = "③ Order Blocks", inline = "ob5", tooltip = "When mitigated, a Bullish OB becomes a Bearish zone and vice versa.")
-var color  ob_invBullColor = input.color(color.new(#e30000, 75), "", group = "③ Order Blocks", inline = "ob5")
-var color  ob_invBearColor = input.color(color.new(#00e640, 75), "", group = "③ Order Blocks", inline = "ob5")
-var int    ob_maxBoxes     = input.int(20, "Max Boxes         ", 1, 50, group = "③ Order Blocks", inline = "ob6")
-var int    ob_pruneAge     = input.int(500, "Prune After", 0, 5000, group = "③ Order Blocks", inline = "ob6", tooltip = "Auto-delete mitigated OBs older than N bars. 0 = never.")
-var int    ob_maxBlend     = input.int(3, "Max Blend         ", 1, 5, group = "③ Order Blocks", inline = "ob7", tooltip = "Max consecutive same-direction candles to blend into one OB. ICT typically blends 2 consecutive candles.")
-var float  ob_displacement = input.float(0, "Min Displacement  ", 0, 10, step = 0.5, group = "③ Order Blocks", inline = "ob7b", tooltip = "Minimum confirming-candle displacement as a multiple of OB body height. 0 = no filter. ICT recommends 2–3× displacement before expecting a retrace.")
-
-// ── MTF Order Block Inputs ──
 var string OB_MTF_GRP      = "③ᵇ MTF Order Blocks"
-var bool   ob_mtf1_show    = input.bool(false, "HTF 1             ", group = OB_MTF_GRP, inline = "mtf1")
-var string ob_mtf1_tf      = input.timeframe("60", "", group = OB_MTF_GRP, inline = "mtf1", tooltip = "Higher-timeframe layer 1. Shares Blend / Displacement settings from ③.")
-var color  ob_mtf1_bullClr = input.color(color.new(#00e640, 65), "", group = OB_MTF_GRP, inline = "mtf1")
-var color  ob_mtf1_bearClr = input.color(color.new(#e30000, 65), "", group = OB_MTF_GRP, inline = "mtf1")
-var bool   ob_mtf2_show    = input.bool(false, "HTF 2             ", group = OB_MTF_GRP, inline = "mtf2")
-var string ob_mtf2_tf      = input.timeframe("240", "", group = OB_MTF_GRP, inline = "mtf2", tooltip = "Higher-timeframe layer 2.")
-var color  ob_mtf2_bullClr = input.color(color.new(#00e640, 55), "", group = OB_MTF_GRP, inline = "mtf2")
-var color  ob_mtf2_bearClr = input.color(color.new(#e30000, 55), "", group = OB_MTF_GRP, inline = "mtf2")
-var bool   ob_mtf3_show    = input.bool(false, "HTF 3             ", group = OB_MTF_GRP, inline = "mtf3")
-var string ob_mtf3_tf      = input.timeframe("D", "", group = OB_MTF_GRP, inline = "mtf3", tooltip = "Higher-timeframe layer 3.")
-var color  ob_mtf3_bullClr = input.color(color.new(#00e640, 45), "", group = OB_MTF_GRP, inline = "mtf3")
-var color  ob_mtf3_bearClr = input.color(color.new(#e30000, 45), "", group = OB_MTF_GRP, inline = "mtf3")
-var int    ob_mtf_maxBoxes = input.int(10, "Max Boxes / Layer ", 1, 30, group = OB_MTF_GRP, inline = "mtf_cfg", tooltip = "Maximum boxes per HTF layer (bull + bear combined).")
+var bool ob_mtf1_show = input.bool(false, "HTF 1", group = OB_MTF_GRP, inline = "mtf1")
+var string ob_mtf1_tf = input.timeframe("60", "", group = OB_MTF_GRP, inline = "mtf1", tooltip = "HTF layer 1. Uses ③ settings.")
+var color ob_mtf1_bullClr = input.color(color.new(#00e640, 65), "", group = OB_MTF_GRP, inline = "mtf1")
+var color ob_mtf1_bearClr = input.color(color.new(#e30000, 65), "", group = OB_MTF_GRP, inline = "mtf1")
+var bool ob_mtf2_show = input.bool(false, "HTF 2", group = OB_MTF_GRP, inline = "mtf2")
+var string ob_mtf2_tf = input.timeframe("240", "", group = OB_MTF_GRP, inline = "mtf2", tooltip = "HTF layer 2.")
+var color ob_mtf2_bullClr = input.color(color.new(#00e640, 55), "", group = OB_MTF_GRP, inline = "mtf2")
+var color ob_mtf2_bearClr = input.color(color.new(#e30000, 55), "", group = OB_MTF_GRP, inline = "mtf2")
+var bool ob_mtf3_show = input.bool(false, "HTF 3", group = OB_MTF_GRP, inline = "mtf3")
+var string ob_mtf3_tf = input.timeframe("D", "", group = OB_MTF_GRP, inline = "mtf3", tooltip = "HTF layer 3.")
+var color ob_mtf3_bullClr = input.color(color.new(#00e640, 45), "", group = OB_MTF_GRP, inline = "mtf3")
+var color ob_mtf3_bearClr = input.color(color.new(#e30000, 45), "", group = OB_MTF_GRP, inline = "mtf3")
+var int ob_mtf_maxBoxes = input.int(10, "Max Boxes / Layer ", 1, 30, group = OB_MTF_GRP, inline = "mtf_cfg", tooltip = "Max boxes per HTF layer.")
 
-// ── Order Block UDT ──
 type OrderBlock
-    box     bx              // the drawn box
-    line    mtLine          // mean threshold line (50% of body)
-    float   bodyTop         // top of body zone (mitigation / entry level)
-    float   bodyBot         // bottom of body zone (mitigation level)
-    bool    isBull          // true = bullish OB, false = bearish OB
-    bool    mitigated       // has it been mitigated?
-    int     mit_bar         // bar_index when mitigated (for auto-prune)
+    box     bx
+    line    mtLine
+    float   bodyTop
+    float   bodyBot
+    bool    isBull
+    bool    mitigated
+    int     mit_bar
 
 var array<OrderBlock> ob_bulls = array.new<OrderBlock>()
 var array<OrderBlock> ob_bears = array.new<OrderBlock>()
 
-// OB alert flags (reset each bar)
 bool ob_bullFormed = false
 bool ob_bearFormed = false
 bool ob_bullMit    = false
@@ -267,19 +233,15 @@ ob_border = switch ob_borderStyle
     "Dotted" => line.style_dotted
     =>          line.style_solid
 
-// ── Order Block Detection (any timeframe, on confirmed bars) ──
 if barstate.isconfirmed and ENABLE_ORDER_BLOCKS
 
-    // === Bullish OB ===
-    // Scan backward for consecutive bearish candle(s); current bar is
-    // the bullish confirming candle that closes above their highest open.
     if ob_showBull and close > open
         int   _cnt  = 0
-        float _bTop = na        // highest open  among bearish candles (body top)
-        float _bBot = na        // lowest close   among bearish candles (body bot)
-        float _hi   = na        // highest high  (for Full Range zone)
-        float _lo   = na        // lowest low    (for Full Range zone)
-        int   _sIdx = na        // bar_index of earliest OB candle
+        float _bTop = na
+        float _bBot = na
+        float _hi   = na
+        float _lo   = na
+        int   _sIdx = na
         for j = 1 to ob_maxBlend
             if close[j] < open[j]
                 _cnt  += 1
@@ -320,13 +282,10 @@ if barstate.isconfirmed and ENABLE_ORDER_BLOCKS
                     if not na(_del.mtLine)
                         line.delete(_del.mtLine)
 
-    // === Bearish OB ===
-    // Scan backward for consecutive bullish candle(s); current bar is
-    // the bearish confirming candle that closes below their lowest open.
     if ob_showBear and close < open
         int   _cnt  = 0
-        float _bTop = na        // highest close among bullish candles (body top)
-        float _bBot = na        // lowest open   among bullish candles (body bot)
+        float _bTop = na
+        float _bBot = na
         float _hi   = na
         float _lo   = na
         int   _sIdx = na
@@ -370,7 +329,6 @@ if barstate.isconfirmed and ENABLE_ORDER_BLOCKS
                     if not na(_del.mtLine)
                         line.delete(_del.mtLine)
 
-// ── Extend, Mitigate & Auto-Prune Bullish OBs ──
 f_obManageBulls() =>
     bool _bullMit = false
     for i = ob_bulls.size() - 1 to 0 by 1
@@ -416,7 +374,6 @@ f_obManageBulls() =>
 if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
     ob_bullMit := f_obManageBulls()
 
-// ── Extend, Mitigate & Auto-Prune Bearish OBs ──
 f_obManageBears() =>
     bool _bearMit = false
     for i = ob_bears.size() - 1 to 0 by 1
@@ -462,8 +419,6 @@ f_obManageBears() =>
 if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
     ob_bearMit := f_obManageBears()
 
-// ── MTF OB Detection Function ──
-// Runs on HTF bars via request.security(); returns sequence counters + zone data.
 f_obScan(int _blend, float _disp) =>
     var int   _bullSeq = 0
     var float _bullBT  = na
@@ -527,7 +482,6 @@ f_obScan(int _blend, float _disp) =>
     [_bullSeq, _bullBT, _bullBB, _bullHi, _bullLo,
      _bearSeq, _bearBT, _bearBB, _bearHi, _bearLo]
 
-// ── TF display helper ──
 f_tfStr(string _tf) =>
     float _n = str.tonumber(_tf)
     if not na(_n)
@@ -538,7 +492,6 @@ f_tfStr(string _tf) =>
     else
         _tf
 
-// ── request.security() – one call per HTF layer ──
 [mtf1_bSq, mtf1_bBT, mtf1_bBB, mtf1_bHi, mtf1_bLo,
  mtf1_sSq, mtf1_sBT, mtf1_sBB, mtf1_sHi, mtf1_sLo] =
      request.security(syminfo.tickerid, ob_mtf1_tf, f_obScan(ob_maxBlend, ob_displacement))
@@ -551,12 +504,10 @@ f_tfStr(string _tf) =>
  mtf3_sSq, mtf3_sBT, mtf3_sBB, mtf3_sHi, mtf3_sLo] =
      request.security(syminfo.tickerid, ob_mtf3_tf, f_obScan(ob_maxBlend, ob_displacement))
 
-// ── HTF OB state arrays ──
 var array<OrderBlock> ob_mtf1 = array.new<OrderBlock>()
 var array<OrderBlock> ob_mtf2 = array.new<OrderBlock>()
 var array<OrderBlock> ob_mtf3 = array.new<OrderBlock>()
 
-// Previous sequence counters (detect new OBs when counter changes)
 var int _prevM1b = 0
 var int _prevM1s = 0
 var int _prevM2b = 0
@@ -564,7 +515,6 @@ var int _prevM2s = 0
 var int _prevM3b = 0
 var int _prevM3s = 0
 
-// ── Helper: create an MTF OB box ──
 f_mtfObCreate(array<OrderBlock> _arr, bool _isBull, float _bodyTop, float _bodyBot,
               float _hi, float _lo, color _clr, string _label, int _maxBox) =>
     float _top = ob_zone == "Body" ? _bodyTop : _hi
@@ -589,7 +539,6 @@ f_mtfObCreate(array<OrderBlock> _arr, bool _isBull, float _bodyTop, float _bodyB
         if not na(_del.mtLine)
             line.delete(_del.mtLine)
 
-// ── Helper: extend / mitigate / prune an MTF OB array ──
 f_mtfObManage(array<OrderBlock> _arr) =>
     if _arr.size() > 0
         for i = _arr.size() - 1 to 0 by 1
@@ -629,7 +578,6 @@ f_mtfObManage(array<OrderBlock> _arr) =>
                     if not na(_ob.mtLine)
                         line.delete(_ob.mtLine)
 
-// ── Create new MTF OB boxes when sequence counters tick ──
 f_mtfObTick() =>
     string _tf1Lbl = f_tfStr(ob_mtf1_tf)
     string _tf2Lbl = f_tfStr(ob_mtf2_tf)
@@ -708,12 +656,9 @@ if ENABLE_ORDER_BLOCKS
     _prevM3b := _m3b
     _prevM3s := _m3s
 
-// ════════════════════════════════════════════════════════════════
-//  SECTION B – ICT GAPS / FVG / VI  (© Vulnerable_human_x)
-// ════════════════════════════════════════════════════════════════
+// SECTION B – ICT GAPS / FVG / VI  (© Vulnerable_human_x)
 
-// ── Volume Imbalance Inputs ──
-vitype = input.string('Classic', 'Type              ', options = ['None', 'Classic', 'Advanced'], group = '④ Volume Imbalance', inline = 'vi0', tooltip = 'Classic = single body gap type. Advanced = all body gap variants.')
+vitype = input.string('Classic', 'Type              ', options = ['None', 'Classic', 'Advanced'], group = '④ Volume Imbalance', inline = 'vi0', tooltip = 'Classic = single gap. Advanced = all variants.')
 bullimbalance = input.color(color.new(#00e640, 90), '', group = '④ Volume Imbalance', inline = 'vi0')
 bearimbalance = input.color(color.new(#e30000, 90), '', group = '④ Volume Imbalance', inline = 'vi0')
 
@@ -721,27 +666,25 @@ bool classicvi  = vitype == 'Classic'
 bool advancedvi = vitype == 'Advanced'
 
 viMaxBoxSet = input.int(defval = 8, title = 'Max Boxes         ', minval = 1, maxval = 100, group = '④ Volume Imbalance', inline = 'vi1')
-vimitigationtype = input.string(defval = 'Engulf', title = '', options = ['Engulf', 'Mitigate'], group = '④ Volume Imbalance', inline = 'vi1', tooltip = 'Engulf = body close through VI required.')
+vimitigationtype = input.string(defval = 'Engulf', title = '', options = ['Engulf', 'Mitigate'], group = '④ Volume Imbalance', inline = 'vi1', tooltip = 'Engulf = body close through required.')
 extendvibox = input.bool(true, title = 'Extend Unmit.     ', group = '④ Volume Imbalance', inline = 'vi2')
 extendallvis = input.bool(false, title = 'Extend All', group = '④ Volume Imbalance', inline = 'vi2')
 
-// ── GAP Inputs ──
-gaptype = input.string('True GAP', 'Type              ', options = ['None', 'True GAP', 'GAP + Inefficiency'], group = '⑤ GAP', inline = 'gp0', tooltip = 'True GAPs = no buyside/sellside delivery. GAP + Inefficiency = includes one-sided price action gaps.')
+gaptype = input.string('True GAP', 'Type              ', options = ['None', 'True GAP', 'GAP + Inefficiency'], group = '⑤ GAP', inline = 'gp0', tooltip = 'True GAP = no delivery. GAP+Inefficiency = one-sided gaps.')
 gapcolor = input.color(color.new(#4ec1f7, 90), '', group = '⑤ GAP', inline = 'gp0')
 
 bool truegap    = gaptype == 'True GAP'
 bool gapwithimb = gaptype == 'GAP + Inefficiency'
 
 gapsMaxBoxSet = input.int(defval = 7, title = 'Max Boxes         ', minval = 1, maxval = 100, group = '⑤ GAP', inline = 'gp1')
-gapmitigationtype = input.string(defval = 'Engulf', title = '', options = ['Engulf', 'Rebalance'], group = '⑤ GAP', inline = 'gp1', tooltip = 'Engulf = body close through GAP. Rebalance = delivered ranges erased.')
+gapmitigationtype = input.string(defval = 'Engulf', title = '', options = ['Engulf', 'Rebalance'], group = '⑤ GAP', inline = 'gp1', tooltip = 'Engulf = body close through. Rebalance = ranges erased.')
 cegap = input.bool(true, title = 'C.E. Line         ', group = '⑤ GAP', inline = 'gp2')
 cegaplinetype = input.string(line.style_dashed, '', options = [line.style_dashed, line.style_dotted, line.style_solid], group = '⑤ GAP', inline = 'gp2')
 extendgapbox = input.bool(true, title = 'Extend Unmit.', group = '⑤ GAP', inline = 'gp2')
 
-// ── FVG Inputs ──
-fvgtype = input.string('Normal', 'FVG Type          ', options = ['None', 'Normal', 'Liquidity Void'], group = '⑥ FVG', inline = 'fv0', tooltip = 'Consecutively formed FVGs = Liquidity Void.')
+fvgtype = input.string('Normal', 'FVG Type          ', options = ['None', 'Normal', 'Liquidity Void'], group = '⑥ FVG', inline = 'fv0', tooltip = 'Consecutive FVGs = Liquidity Void.')
 showifvg = input.bool(false, 'Implied', group = '⑥ FVG', inline = 'fv0')
-Inversefvgmode = input.bool(false, 'Inverse', group = '⑥ FVG', inline = 'fv0', tooltip = 'Mitigation must be ENGULF for Inverse FVG.')
+Inversefvgmode = input.bool(false, 'Inverse', group = '⑥ FVG', inline = 'fv0', tooltip = 'Requires ENGULF mitigation.')
 
 bool plotFVG           = fvgtype == 'Normal'
 bool liquidityvoidmode = fvgtype == 'Liquidity Void'
@@ -764,10 +707,9 @@ celinetype = input.string(line.style_dashed, '', options = [line.style_dashed, l
 cetransparency = input.int(50, title = 'Transp.', group = '⑥ FVG', inline = 'fv6')
 extendfvgbox = input.bool(true, title = 'Extend Unmit.', group = '⑥ FVG', inline = 'fv6')
 
-// ── Box Styling ──
-BoxBorder = input.string(defval = line.style_solid, title = 'Border            ', options = [line.style_dashed, line.style_dotted, line.style_solid], group = '⑦ Box Style', inline = 'bx1', tooltip = 'Applies to FVG/VI/GAP boxes')
+BoxBorder = input.string(defval = line.style_solid, title = 'Border            ', options = [line.style_dashed, line.style_dotted, line.style_solid], group = '⑦ Box Style', inline = 'bx1', tooltip = 'For FVG/VI/GAP boxes')
 BorderTransparency = input.int(defval = 85, title = 'Transp.', minval = 0, maxval = 100, group = '⑦ Box Style', inline = 'bx1')
-HighlightBox = input.bool(defval = true, title = 'Highlight         ', group = '⑦ Box Style', inline = 'bx2', tooltip = 'Highlight box when price is inside it')
+HighlightBox = input.bool(defval = true, title = 'Highlight         ', group = '⑦ Box Style', inline = 'bx2', tooltip = 'Highlight when price inside box')
 Highlightboxtransparency = input.int(80, 'BG', group = '⑦ Box Style', inline = 'bx2')
 Highlightboxbordertransparency = input.int(67, 'Border', group = '⑦ Box Style', inline = 'bx2')
 plotBoxLabel = input.bool(defval = true, title = 'Label             ', group = '⑦ Box Style', inline = 'bx3')
@@ -780,86 +722,83 @@ filterMitBOX = input.bool(defval = true, title = 'Mitigated Color   ', group = '
 mitBOXColor = input.color(defval = color.new(color.gray, 92), title = '', group = '⑦ Box Style', inline = 'bx4')
 MitBoxLabelColor = input.color(defval = color.rgb(161, 163, 171, 88), title = 'Lbl', group = '⑦ Box Style', inline = 'bx4')
 
-// ── Killzone Inputs ──
-var bool   kz_showAsian   = input.bool(true,  "Asian             ", group = "⑱ Killzones", inline = "kz1")
-var color  kz_asianColor  = input.color(color.new(#2962ff, 90), "", group = "⑱ Killzones", inline = "kz1")
-var int    kz_asianStart  = input.int(20, "Start", 0, 23, group = "⑱ Killzones", inline = "kz1", tooltip = "NY time hours (24h format)")
-var int    kz_asianEnd    = input.int(0, "End", 0, 23, group = "⑱ Killzones", inline = "kz1")
-var bool   kz_showLondon  = input.bool(true,  "London            ", group = "⑱ Killzones", inline = "kz2")
-var color  kz_londonColor = input.color(color.new(#00bcd4, 90), "", group = "⑱ Killzones", inline = "kz2")
-var int    kz_londonStart = input.int(2, "Start", 0, 23, group = "⑱ Killzones", inline = "kz2")
-var int    kz_londonEnd   = input.int(5, "End", 0, 23, group = "⑱ Killzones", inline = "kz2")
-var bool   kz_showNYAM    = input.bool(true,  "New York AM       ", group = "⑱ Killzones", inline = "kz3")
-var color  kz_nyamColor   = input.color(color.new(#ff9800, 90), "", group = "⑱ Killzones", inline = "kz3")
-var int    kz_nyamStart   = input.int(9, "Start", 0, 23, group = "⑱ Killzones", inline = "kz3")
-var int    kz_nyamStartM  = input.int(30, ":", 0, 59, group = "⑱ Killzones", inline = "kz3")
-var int    kz_nyamEnd     = input.int(12, "End", 0, 23, group = "⑱ Killzones", inline = "kz3")
-var bool   kz_showNYPM    = input.bool(true,  "New York PM       ", group = "⑱ Killzones", inline = "kz4")
-var color  kz_nypmColor   = input.color(color.new(#e91e63, 90), "", group = "⑱ Killzones", inline = "kz4")
-var int    kz_nypmStart   = input.int(13, "Start", 0, 23, group = "⑱ Killzones", inline = "kz4")
-var int    kz_nypmStartM  = input.int(30, ":", 0, 59, group = "⑱ Killzones", inline = "kz4")
-var int    kz_nypmEnd     = input.int(16, "End", 0, 23, group = "⑱ Killzones", inline = "kz4")
-var bool   kz_showSBAM    = input.bool(false, "Silver Bullet AM  ", group = "⑱ Killzones", inline = "kz5")
-var color  kz_sbamColor   = input.color(color.new(#c0ca33, 88), "", group = "⑱ Killzones", inline = "kz5")
-var int    kz_sbamStart   = input.int(10, "Start", 0, 23, group = "⑱ Killzones", inline = "kz5")
-var int    kz_sbamEnd     = input.int(11, "End", 0, 23, group = "⑱ Killzones", inline = "kz5")
-var bool   kz_showSBPM    = input.bool(false, "Silver Bullet PM  ", group = "⑱ Killzones", inline = "kz6")
-var color  kz_sbpmColor   = input.color(color.new(#c0ca33, 88), "", group = "⑱ Killzones", inline = "kz6")
-var int    kz_sbpmStart   = input.int(14, "Start", 0, 23, group = "⑱ Killzones", inline = "kz6")
-var int    kz_sbpmEnd     = input.int(15, "End", 0, 23, group = "⑱ Killzones", inline = "kz6")
+var bool kz_showAsian = input.bool(true, "Asian", group = "⑱ Killzones", inline = "kz1")
+var color kz_asianColor = input.color(color.new(#2962ff, 90), "", group = "⑱ Killzones", inline = "kz1")
+var int kz_asianStart = input.int(20, "Start", 0, 23, group = "⑱ Killzones", inline = "kz1", tooltip = "NY time (24h)")
+var int kz_asianEnd = input.int(0, "End", 0, 23, group = "⑱ Killzones", inline = "kz1")
+var bool kz_showLondon = input.bool(true, "London", group = "⑱ Killzones", inline = "kz2")
+var color kz_londonColor = input.color(color.new(#00bcd4, 90), "", group = "⑱ Killzones", inline = "kz2")
+var int kz_londonStart = input.int(2, "Start", 0, 23, group = "⑱ Killzones", inline = "kz2")
+var int kz_londonEnd = input.int(5, "End", 0, 23, group = "⑱ Killzones", inline = "kz2")
+var bool kz_showNYAM = input.bool(true, "New York AM", group = "⑱ Killzones", inline = "kz3")
+var color kz_nyamColor = input.color(color.new(#ff9800, 90), "", group = "⑱ Killzones", inline = "kz3")
+var int kz_nyamStart = input.int(9, "Start", 0, 23, group = "⑱ Killzones", inline = "kz3")
+var int kz_nyamStartM = input.int(30, ":", 0, 59, group = "⑱ Killzones", inline = "kz3")
+var int kz_nyamEnd = input.int(12, "End", 0, 23, group = "⑱ Killzones", inline = "kz3")
+var bool kz_showNYPM = input.bool(true, "New York PM", group = "⑱ Killzones", inline = "kz4")
+var color kz_nypmColor = input.color(color.new(#e91e63, 90), "", group = "⑱ Killzones", inline = "kz4")
+var int kz_nypmStart = input.int(13, "Start", 0, 23, group = "⑱ Killzones", inline = "kz4")
+var int kz_nypmStartM = input.int(30, ":", 0, 59, group = "⑱ Killzones", inline = "kz4")
+var int kz_nypmEnd = input.int(16, "End", 0, 23, group = "⑱ Killzones", inline = "kz4")
+var bool kz_showSBAM = input.bool(false, "Silver Bullet AM", group = "⑱ Killzones", inline = "kz5")
+var color kz_sbamColor = input.color(color.new(#c0ca33, 88), "", group = "⑱ Killzones", inline = "kz5")
+var int kz_sbamStart = input.int(10, "Start", 0, 23, group = "⑱ Killzones", inline = "kz5")
+var int kz_sbamEnd = input.int(11, "End", 0, 23, group = "⑱ Killzones", inline = "kz5")
+var bool kz_showSBPM = input.bool(false, "Silver Bullet PM", group = "⑱ Killzones", inline = "kz6")
+var color kz_sbpmColor = input.color(color.new(#c0ca33, 88), "", group = "⑱ Killzones", inline = "kz6")
+var int kz_sbpmStart = input.int(14, "Start", 0, 23, group = "⑱ Killzones", inline = "kz6")
+var int kz_sbpmEnd = input.int(15, "End", 0, 23, group = "⑱ Killzones", inline = "kz6")
 
-// ── Session Highs/Lows Inputs ──
-var bool   sh_showAsian    = input.bool(true,  "Asia H/L          ", group = "⑲ Session Highs/Lows", inline = "sh1")
-var color  sh_asianHColor  = input.color(color.new(#ff9800, 20), "", group = "⑲ Session Highs/Lows", inline = "sh1")
-var color  sh_asianLColor  = input.color(color.new(#ff9800, 20), "", group = "⑲ Session Highs/Lows", inline = "sh1")
-var string sh_asianStyle   = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh1")
-var bool   sh_showLondon   = input.bool(true,  "London H/L        ", group = "⑲ Session Highs/Lows", inline = "sh2")
-var color  sh_londonHColor = input.color(color.new(#00bcd4, 20), "", group = "⑲ Session Highs/Lows", inline = "sh2")
-var color  sh_londonLColor = input.color(color.new(#00bcd4, 20), "", group = "⑲ Session Highs/Lows", inline = "sh2")
-var string sh_londonStyle  = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh2")
-var bool   sh_showNYAM     = input.bool(true,  "NY AM H/L         ", group = "⑲ Session Highs/Lows", inline = "sh3")
-var color  sh_nyamHColor   = input.color(color.new(#ef5350, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3")
-var color  sh_nyamLColor   = input.color(color.new(#ef5350, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3")
-var string sh_nyamStyle    = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3")
-var bool   sh_showNYPre    = input.bool(true,  "NY Pre-AM H/L     ", group = "⑲ Session Highs/Lows", inline = "sh3a")
-var color  sh_nypreHColor  = input.color(color.new(#ffeb3b, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3a")
-var color  sh_nypreLColor  = input.color(color.new(#ffeb3b, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3a")
-var string sh_nypreStyle   = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3a")
-var bool   sh_showNYLunch  = input.bool(true,  "NY Lunch H/L      ", group = "⑲ Session Highs/Lows", inline = "sh3b")
-var color  sh_nylHColor    = input.color(color.new(#ab47bc, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3b")
-var color  sh_nylLColor    = input.color(color.new(#ab47bc, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3b")
-var string sh_nylStyle     = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3b")
-var bool   sh_showNYPM     = input.bool(true,  "NY PM H/L         ", group = "⑲ Session Highs/Lows", inline = "sh3c")
-var color  sh_nypmHColor   = input.color(color.new(#4caf50, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3c")
-var color  sh_nypmLColor   = input.color(color.new(#4caf50, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3c")
-var string sh_nypmStyle    = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3c")
-var bool   sh_showLabels   = input.bool(true,  "Show Labels       ", group = "⑲ Session Highs/Lows", inline = "sh4")
-var int    sh_lineWidth    = input.int(1, "Width", 1, 4, group = "⑲ Session Highs/Lows", inline = "sh4")
-var string sh_labelSize    = input.string("Tiny", "Label Size", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group = "⑲ Session Highs/Lows", inline = "sh4b")
-var bool   sh_showCurrent  = input.bool(false, "Show Current Session H/L", group = "⑲ Session Highs/Lows", tooltip = "Display in-progress session highs/lows in addition to previous.")
-var int    sh_lineExtend   = input.int(50, "Line Extend Bars  ", 10, 200, group = "⑲ Session Highs/Lows", inline = "sh10")
-var int    sh_historyCount = input.int(5, "Sessions to Show  ", 1, 20, group = "⑲ Session Highs/Lows", inline = "sh11", tooltip = "Number of previous sessions to display per session type (1-20). Uses same times as Killzone settings in ⑱.")
-var bool   sh_showMit      = input.bool(true, "Show Mitigated    ", group = "⑲ Session Highs/Lows", inline = "sh12")
-var color  sh_mitColor     = input.color(color.new(color.gray, 60), "Line", group = "⑲ Session Highs/Lows", inline = "sh12")
-var color  sh_mitLblColor  = input.color(color.new(color.gray, 70), "Lbl", group = "⑲ Session Highs/Lows", inline = "sh12")
-var int    sh_mitLineWidth = input.int(1, "Width", 1, 4, group = "⑲ Session Highs/Lows", inline = "sh12", tooltip = "Mitigated level styling: line color, label color, and line width.")
+var bool sh_showAsian = input.bool(true, "Asia H/L", group = "⑲ Session Highs/Lows", inline = "sh1")
+var color sh_asianHColor = input.color(color.new(#ff9800, 20), "", group = "⑲ Session Highs/Lows", inline = "sh1")
+var color sh_asianLColor = input.color(color.new(#ff9800, 20), "", group = "⑲ Session Highs/Lows", inline = "sh1")
+var string sh_asianStyle = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh1")
+var bool sh_showLondon = input.bool(true, "London H/L", group = "⑲ Session Highs/Lows", inline = "sh2")
+var color sh_londonHColor = input.color(color.new(#00bcd4, 20), "", group = "⑲ Session Highs/Lows", inline = "sh2")
+var color sh_londonLColor = input.color(color.new(#00bcd4, 20), "", group = "⑲ Session Highs/Lows", inline = "sh2")
+var string sh_londonStyle = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh2")
+var bool sh_showNYAM = input.bool(true, "NY AM H/L", group = "⑲ Session Highs/Lows", inline = "sh3")
+var color sh_nyamHColor = input.color(color.new(#ef5350, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3")
+var color sh_nyamLColor = input.color(color.new(#ef5350, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3")
+var string sh_nyamStyle = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3")
+var bool sh_showNYPre = input.bool(true, "NY Pre-AM H/L", group = "⑲ Session Highs/Lows", inline = "sh3a")
+var color sh_nypreHColor = input.color(color.new(#ffeb3b, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3a")
+var color sh_nypreLColor = input.color(color.new(#ffeb3b, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3a")
+var string sh_nypreStyle = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3a")
+var bool sh_showNYLunch = input.bool(true, "NY Lunch H/L", group = "⑲ Session Highs/Lows", inline = "sh3b")
+var color sh_nylHColor = input.color(color.new(#ab47bc, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3b")
+var color sh_nylLColor = input.color(color.new(#ab47bc, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3b")
+var string sh_nylStyle = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3b")
+var bool sh_showNYPM = input.bool(true, "NY PM H/L", group = "⑲ Session Highs/Lows", inline = "sh3c")
+var color sh_nypmHColor = input.color(color.new(#4caf50, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3c")
+var color sh_nypmLColor = input.color(color.new(#4caf50, 20), "", group = "⑲ Session Highs/Lows", inline = "sh3c")
+var string sh_nypmStyle = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑲ Session Highs/Lows", inline = "sh3c")
+var bool sh_showLabels = input.bool(true, "Show Labels", group = "⑲ Session Highs/Lows", inline = "sh4")
+var int sh_lineWidth = input.int(1, "Width", 1, 4, group = "⑲ Session Highs/Lows", inline = "sh4")
+var string sh_labelSize = input.string("Tiny", "Label Size", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group = "⑲ Session Highs/Lows", inline = "sh4b")
+var bool sh_showCurrent = input.bool(false, "Show Current Session H/L", group = "⑲ Session Highs/Lows", tooltip = "Show current session H/L too.")
+var int sh_lineExtend = input.int(50, "Line Extend Bars", 10, 200, group = "⑲ Session Highs/Lows", inline = "sh10")
+var int sh_historyCount = input.int(5, "Sessions to Show", 1, 20, group = "⑲ Session Highs/Lows", inline = "sh11", tooltip = "Previous sessions to show (1-20). Uses ⑱ times.")
+var bool sh_showMit = input.bool(true, "Show Mitigated", group = "⑲ Session Highs/Lows", inline = "sh12")
+var color sh_mitColor = input.color(color.new(color.gray, 60), "Line", group = "⑲ Session Highs/Lows", inline = "sh12")
+var color sh_mitLblColor = input.color(color.new(color.gray, 70), "Lbl", group = "⑲ Session Highs/Lows", inline = "sh12")
+var int sh_mitLineWidth = input.int(1, "Width", 1, 4, group = "⑲ Session Highs/Lows", inline = "sh12", tooltip = "Mitigated line/label styling.")
 var string sh_mitLabelSize = input.string("Tiny", "Mit Label Size", options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group = "⑲ Session Highs/Lows", inline = "sh12b")
 
-// ── Liquidity Levels Inputs ──
-var bool   lq_showPDH     = input.bool(true,  "PDH / PDL         ", group = "⑳ Liquidity Levels", inline = "lq1")
-var color  lq_pdhColor    = input.color(color.new(#26a69a, 20), "", group = "⑳ Liquidity Levels", inline = "lq1")
-var color  lq_pdlColor    = input.color(color.new(#ef5350, 20), "", group = "⑳ Liquidity Levels", inline = "lq1")
-var string lq_pdStyle     = input.string("----", "", options = ['⎯⎯⎯', '----', '····'], group = "⑳ Liquidity Levels", inline = "lq1")
-var bool   lq_showPWH     = input.bool(true,  "PWH / PWL         ", group = "⑳ Liquidity Levels", inline = "lq2")
-var color  lq_pwhColor    = input.color(color.new(#26a69a, 10), "", group = "⑳ Liquidity Levels", inline = "lq2")
-var color  lq_pwlColor    = input.color(color.new(#ef5350, 10), "", group = "⑳ Liquidity Levels", inline = "lq2")
-var string lq_pwStyle     = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑳ Liquidity Levels", inline = "lq2")
-var bool   lq_showPMH     = input.bool(false, "PMH / PML         ", group = "⑳ Liquidity Levels", inline = "lq3")
-var color  lq_pmhColor    = input.color(color.new(#26a69a, 0), "", group = "⑳ Liquidity Levels", inline = "lq3")
-var color  lq_pmlColor    = input.color(color.new(#ef5350, 0), "", group = "⑳ Liquidity Levels", inline = "lq3")
-var string lq_pmStyle     = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑳ Liquidity Levels", inline = "lq3")
-var bool   lq_showLabels  = input.bool(true,  "Show Labels       ", group = "⑳ Liquidity Levels", inline = "lq4")
-var int    lq_lineWidth   = input.int(1, "Width", 1, 4, group = "⑳ Liquidity Levels", inline = "lq4")
+var bool lq_showPDH = input.bool(true, "PDH / PDL", group = "⑳ Liquidity Levels", inline = "lq1")
+var color lq_pdhColor = input.color(color.new(#26a69a, 20), "", group = "⑳ Liquidity Levels", inline = "lq1")
+var color lq_pdlColor = input.color(color.new(#ef5350, 20), "", group = "⑳ Liquidity Levels", inline = "lq1")
+var string lq_pdStyle = input.string("----", "", options = ['⎯⎯⎯', '----', '····'], group = "⑳ Liquidity Levels", inline = "lq1")
+var bool lq_showPWH = input.bool(true, "PWH / PWL", group = "⑳ Liquidity Levels", inline = "lq2")
+var color lq_pwhColor = input.color(color.new(#26a69a, 10), "", group = "⑳ Liquidity Levels", inline = "lq2")
+var color lq_pwlColor = input.color(color.new(#ef5350, 10), "", group = "⑳ Liquidity Levels", inline = "lq2")
+var string lq_pwStyle = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑳ Liquidity Levels", inline = "lq2")
+var bool lq_showPMH = input.bool(false, "PMH / PML", group = "⑳ Liquidity Levels", inline = "lq3")
+var color lq_pmhColor = input.color(color.new(#26a69a, 0), "", group = "⑳ Liquidity Levels", inline = "lq3")
+var color lq_pmlColor = input.color(color.new(#ef5350, 0), "", group = "⑳ Liquidity Levels", inline = "lq3")
+var string lq_pmStyle = input.string("⎯⎯⎯", "", options = ['⎯⎯⎯', '----', '····'], group = "⑳ Liquidity Levels", inline = "lq3")
+var bool lq_showLabels = input.bool(true, "Show Labels", group = "⑳ Liquidity Levels", inline = "lq4")
+var int lq_lineWidth = input.int(1, "Width", 1, 4, group = "⑳ Liquidity Levels", inline = "lq4")
 
 var bool buimpfvgtouch = false
 var bool beimpfvgtouch = false
@@ -895,7 +834,6 @@ var array<line> beinvfvgce = array.new_line()
 var array<line> bugapce = array.new_line()
 var array<line> begapce = array.new_line()
 
-// ── Extend all VIs function ──
 _controlBox2(_boxes, _high, _low) =>
     if array.size(_boxes) > 0
         for i = array.size(_boxes) - 1 to 0 by 1
@@ -906,7 +844,6 @@ _controlBox2(_boxes, _high, _low) =>
             if extendallvis
                 box.set_right(_box, bar_index + 1)
 
-// ── Volume Imbalance Detection ──
 isBuVItype1(index) =>
     open[index] > close[index + 1] and low[index] <= high[index + 1] and close[index] > open[index] and close[index + 1] > open[index + 1]
 
@@ -925,7 +862,6 @@ isBuVItype3(index) =>
 isBeVItype3(index) =>
     open[index] != close[index + 1] and close[index] < open[index] and close[index + 1] > open[index + 1] and low[index] <= high[index + 1] and high[index] >= low[index + 1]
 
-// Bullish Volume Imbalance
 if isBuVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
     box _bullboxVI = na
     _bullboxVI := box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
@@ -935,7 +871,6 @@ if isBuVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
     if wh_enable and wh_formations and barstate.isconfirmed
         alert(_wh_json("VI+", open, close[1]), alert.freq_once_per_bar_close)
 
-// Bearish Volume Imbalance
 if isBeVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
     box _bearboxVI = na
     _bearboxVI := box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
@@ -945,7 +880,6 @@ if isBeVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES
     if wh_enable and wh_formations and barstate.isconfirmed
         alert(_wh_json("VI-", close[1], open), alert.freq_once_per_bar_close)
 
-// Bullish Volume Imbalance Type 2
 if isBuVItype2(0) and advancedvi and ENABLE_IMBALANCES
     box _bullboxVI = na
     _bullboxVI := box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
@@ -955,7 +889,6 @@ if isBuVItype2(0) and advancedvi and ENABLE_IMBALANCES
     if wh_enable and wh_formations and barstate.isconfirmed
         alert(_wh_json("VI+", close[1], open), alert.freq_once_per_bar_close)
 
-// Bearish Volume Imbalance Type 2
 if isBeVItype2(0) and advancedvi and ENABLE_IMBALANCES
     box _bearboxVI = na
     _bearboxVI := box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
@@ -965,7 +898,6 @@ if isBeVItype2(0) and advancedvi and ENABLE_IMBALANCES
     if wh_enable and wh_formations and barstate.isconfirmed
         alert(_wh_json("VI-", open, close[1]), alert.freq_once_per_bar_close)
 
-// Bullish Volume Imbalance Type 3
 if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES
     box _bullboxVI = na
     _bullboxVI := box.new(left = bar_index - 1, top = math.max(open, close[1]), right = bar_index + 1, bottom = math.min(open, close[1]), bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
@@ -975,7 +907,6 @@ if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES
     if wh_enable and wh_formations and barstate.isconfirmed
         alert(_wh_json("VI+", math.max(open, close[1]), math.min(open, close[1])), alert.freq_once_per_bar_close)
 
-// Bearish Volume Imbalance Type 3
 if isBeVItype3(0) and advancedvi and ENABLE_IMBALANCES
     box _bearboxVI = na
     _bearboxVI := box.new(left = bar_index - 1, top = math.min(open, close[1]), right = bar_index + 1, bottom = math.max(open, close[1]), bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
@@ -989,7 +920,6 @@ if extendallvis
     _controlBox2(_bullishvi, high, low)
     _controlBox2(_bearishvi, high, low)
 
-// ── GAP Detection ──
 if (high[1] < low or low[1] > high) and truegap and ENABLE_IMBALANCES
     box _gapsbu = na
     box _gapsbe = na
@@ -1041,19 +971,16 @@ else if (high[1] < low or low[1] > high) and gapwithimb and ENABLE_IMBALANCES
     array.push(_gapsboxesbe, _gapsbe)
     array.push(begapce, begapceline)
 
-// ── FVG Detection ──
 isFvgUp(index) =>
     low[index] > high[index + 2] and low[index + 1] <= high[index + 2] and high[index + 1] >= low[index]
 
 isFvgDown(index) =>
     high[index] < low[index + 2] and high[index] >= low[index + 1] and high[index + 1] >= low[index + 2]
 
-// Bullish FVG
 if isFvgUp(0) and not liquidityvoidmode and ENABLE_IMBALANCES
     box _bullboxFVG = na
     line _buline = na
     if plotFVG or Inversefvgmode
-        // In inverse-only mode, create hidden (transparent) — avoids per-bar hiding in unified loops
         color _fvgBg   = (not plotFVG and Inversefvgmode) ? color.new(fvgBullColor, 100) : fvgBullColor
         color _fvgBdr  = (not plotFVG and Inversefvgmode) ? color.new(fvgBullColor, 100) : color.new(fvgBullColor, BorderTransparency)
         color _fvgTxt  = (not plotFVG and Inversefvgmode) ? color.new(BoxLabelColor, 100) : BoxLabelColor
@@ -1069,12 +996,10 @@ if isFvgUp(0) and not liquidityvoidmode and ENABLE_IMBALANCES
     if wh_enable and wh_formations and barstate.isconfirmed
         alert(_wh_json("FVG+", low, high[2]), alert.freq_once_per_bar_close)
 
-// Bearish FVG
 if isFvgDown(0) and not liquidityvoidmode and ENABLE_IMBALANCES
     box _bearboxFVG = na
     line _beline = na
     if plotFVG or Inversefvgmode
-        // In inverse-only mode, create hidden (transparent) — avoids per-bar hiding in unified loops
         color _fvgBeBg   = (not plotFVG and Inversefvgmode) ? color.new(fvgBearColor, 100) : fvgBearColor
         color _fvgBeBdr  = (not plotFVG and Inversefvgmode) ? color.new(fvgBearColor, 100) : color.new(fvgBearColor, BorderTransparency)
         color _fvgBeTxt  = (not plotFVG and Inversefvgmode) ? color.new(BoxLabelColor, 100) : BoxLabelColor
@@ -1090,11 +1015,9 @@ if isFvgDown(0) and not liquidityvoidmode and ENABLE_IMBALANCES
     if wh_enable and wh_formations and barstate.isconfirmed
         alert(_wh_json("FVG-", low[2], high), alert.freq_once_per_bar_close)
 
-// ── Liquidity Void Mode ──
 bool bulv = false
 bool belv = false
 
-// Bullish Liquidity Void  (i=0 only; original loop always broke after first iteration)
 if isFvgUp(0) and isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and array.size(_bullBoxesFVG) > 0 and not plotFVG
     bulv := true
     box _bullboxFVG = na
@@ -1125,7 +1048,6 @@ else if isFvgUp(0) and not isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) 
     array.push(_bullBoxesFVG, _bullboxFVG)
     array.push(_bufvgce, _buline)
 
-// Bearish Liquidity Void  (i=0 only; original loop always broke after first iteration)
 if isFvgDown(0) and isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and array.size(_bearBoxesFVG) > 0 and not plotFVG
     belv := true
     box _bearboxFVG = na
@@ -1156,7 +1078,6 @@ else if isFvgDown(0) and not isFvgDown(1) and (liquidityvoidmode or Inversefvgmo
     array.push(_bearBoxesFVG, _bearboxFVG)
     array.push(_befvgce, _beline)
 
-// ── Implied FVG Detection ──
 isBuIFvg(index) =>
     high[index] > high[index + 2] and low[index + 2] < low[index] and low[index] <= high[index + 2] and high[index + 2] - math.max(open[index + 2], close[index + 2]) > (math.max(open[index + 2], close[index + 2]) - math.min(open[index + 2], close[index + 2])) / 2 and math.min(open[index], close[index]) - low[index] > (math.max(open[index], close[index]) - math.min(open[index], close[index])) / 2 and low[index] > low[index + 1] and (high[index + 2] + math.max(open[index + 2], close[index + 2])) / 2 < (math.min(open[index], close[index]) + low[index]) / 2 and high[index] > high[index + 1] and close[index + 1] > open[index + 1]
 
@@ -1181,13 +1102,8 @@ if isBeIFvg(0) and showifvg and ENABLE_IMBALANCES
     if wh_enable and wh_formations and barstate.isconfirmed
         alert(_wh_json("I.FVG-", (math.min(open[2], close[2]) + low[2]) / 2, (math.max(open, close) + high) / 2), alert.freq_once_per_bar_close)
 
-// ══════════════════════════════════════════════════════════════
-//  SECTION B – UNIFIED IMBALANCE LOOPS  (perf: 39 → 12 loops)
-//  Each array is iterated exactly once per bar.  Extend, highlight
-//  and hide logic are combined in a single pass.
-// ══════════════════════════════════════════════════════════════
+// SECTION B – UNIFIED IMBALANCE LOOPS  (perf: 39 → 12 loops)
 
-// ── Shared styling helpers (reduces repeated 3-4 line blocks) ──
 _applyMitStyle(_bx, _ln, bool _hasLine) =>
     box.set_bgcolor(_bx, mitBOXColor)
     box.set_border_color(_bx, mitBOXColor)
@@ -1199,7 +1115,6 @@ _applyHighlight(_bx, color _baseColor) =>
     box.set_bgcolor(_bx, color.new(_baseColor, Highlightboxtransparency))
     box.set_border_color(_bx, color.new(_baseColor, Highlightboxbordertransparency))
 
-// ── Implied FVG – Bullish ──
 if ENABLE_IMBALANCES and array.size(_bullishifvg) > 0 and extendfvgbox
     for i = array.size(_bullishifvg) - 1 to 0 by 1
         _box = array.get(_bullishifvg, i)
@@ -1227,7 +1142,6 @@ if ENABLE_IMBALANCES and array.size(_bullishifvg) > 0 and extendfvgbox
                         alert(_wh_json("I.FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     buimpfvgtouch
 
-// ── Implied FVG – Bearish ──
 if ENABLE_IMBALANCES and array.size(_bearishifvg) > 0 and extendfvgbox
     for i = array.size(_bearishifvg) - 1 to 0 by 1
         _box = array.get(_bearishifvg, i)
@@ -1255,7 +1169,6 @@ if ENABLE_IMBALANCES and array.size(_bearishifvg) > 0 and extendfvgbox
                         alert(_wh_json("I.FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     beimpfvgtouch
 
-// ── FVG – Bullish  (extend + highlight + inverse-create + hide) ──
 if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) > 0
     for i = array.size(_bullBoxesFVG) - 1 to 0 by 1
         _box = array.get(_bullBoxesFVG, i)
@@ -1263,9 +1176,7 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
         _boxLow = box.get_bottom(_box)
         _boxHigh = box.get_top(_box)
         _boxRight = box.get_right(_box)
-        // NOTE: inverse-only hiding now applied at creation time (see FVG Detection above)
         if bar_index == _boxRight
-            // Extend (confirmed bars only)
             if barstate.isconfirmed and extendfvgbox
                 if fvgmitigationtype == 'Engulf'
                     if close >= _boxLow
@@ -1302,7 +1213,6 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
                         line.set_x2(_line, bar_index + 1)
                     else if low <= _boxLow and filterMitBOX
                         _applyMitStyle(_box, _line, true)
-            // Re-read bounds after extend may have modified box
             _boxLow  := box.get_bottom(_box)
             _boxHigh := box.get_top(_box)
             _boxRight := box.get_right(_box)
@@ -1322,7 +1232,6 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
                             alert(_wh_json("FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bufvgtouch
 
-// ── FVG – Bearish  (extend + highlight + inverse-create) ──
 if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) > 0
     for i = array.size(_bearBoxesFVG) - 1 to 0 by 1
         _box = array.get(_bearBoxesFVG, i)
@@ -1330,7 +1239,6 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
         _boxLow = box.get_bottom(_box)
         _boxHigh = box.get_top(_box)
         _boxRight = box.get_right(_box)
-        // NOTE: inverse-only hiding now applied at creation time (see FVG Detection above)
         if bar_index == _boxRight
             if barstate.isconfirmed and extendfvgbox
                 if fvgmitigationtype == 'Engulf'
@@ -1387,7 +1295,6 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
                             alert(_wh_json("FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         befvgtouch
 
-// ── Inverse FVG – Bullish  (restyle + extend + highlight) ──
 if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'Engulf' and Inversefvgmode
     for i = array.size(bullInvFVG) - 1 to 0 by 1
         _box = array.get(bullInvFVG, i)
@@ -1395,7 +1302,6 @@ if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'En
         _boxLow = box.get_bottom(_box)
         _boxHigh = box.get_top(_box)
         _boxRight = box.get_right(_box)
-        // Restyle (confirmed bars)
         if barstate.isconfirmed
             box.set_bgcolor(_box, buinvfvgcolor)
             if plotBoxLabel
@@ -1413,7 +1319,6 @@ if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'En
             else if close < _boxLow
                 box.delete(_box)
                 line.delete(_line)
-        // Highlight (every bar)
         _boxRight := box.get_right(_box)
         if extendfvgbox and HighlightBox and bar_index == _boxRight
             if close >= _boxLow and low < _boxHigh
@@ -1423,7 +1328,6 @@ if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'En
                     alert(_wh_json("Inv.FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                 buinvfvgtouch
 
-// ── Inverse FVG – Bearish  (restyle + extend + highlight) ──
 if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'Engulf' and Inversefvgmode
     for i = array.size(bearInvFVG) - 1 to 0 by 1
         _box = array.get(bearInvFVG, i)
@@ -1466,7 +1370,6 @@ if array.size(buinvfvgce) > invfvgMaxBoxSet
 if array.size(beinvfvgce) > invfvgMaxBoxSet
     line.delete(array.shift(beinvfvgce))
 
-// ── VI – Bullish  (Engulf/Mitigate extend + highlight) ──
 if ENABLE_IMBALANCES and array.size(_bullishvi) > 0 and extendvibox
     for i = array.size(_bullishvi) - 1 to 0 by 1
         _box = array.get(_bullishvi, i)
@@ -1498,7 +1401,6 @@ if ENABLE_IMBALANCES and array.size(_bullishvi) > 0 and extendvibox
                         alert(_wh_json("VI+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     buvitouch
 
-// ── VI – Bearish  (Engulf/Mitigate extend + highlight) ──
 if ENABLE_IMBALANCES and array.size(_bearishvi) > 0 and extendvibox
     for i = array.size(_bearishvi) - 1 to 0 by 1
         _box = array.get(_bearishvi, i)
@@ -1530,7 +1432,6 @@ if ENABLE_IMBALANCES and array.size(_bearishvi) > 0 and extendvibox
                         alert(_wh_json("VI- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                     bevitouch
 
-// ── GAP – Bullish  (Engulf/Rebalance extend + highlight) ──
 if ENABLE_IMBALANCES and array.size(_gapsboxesbu) > 0 and array.size(bugapce) > 0 and extendgapbox
     for i = array.size(_gapsboxesbu) - 1 to 0 by 1
         _box = array.get(_gapsboxesbu, i)
@@ -1577,7 +1478,6 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbu) > 0 and array.size(bugapce) > 
                             alert(_wh_json("GAP+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         bugaptouch
 
-// ── GAP – Bearish  (Engulf/Rebalance extend + highlight) ──
 if ENABLE_IMBALANCES and array.size(_gapsboxesbe) > 0 and array.size(begapce) > 0 and extendgapbox
     for i = array.size(_gapsboxesbe) - 1 to 0 by 1
         _box = array.get(_gapsboxesbe, i)
@@ -1624,13 +1524,11 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbe) > 0 and array.size(begapce) > 
                             alert(_wh_json("GAP- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
                         begaptouch
 
-// ── Order Block Alerts ──
 alertcondition(ob_bullFormed, title = 'Bull OB Formed', message = 'Bullish OB formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(ob_bearFormed, title = 'Bear OB Formed', message = 'Bearish OB formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(ob_bullMit, title = 'Bull OB Mitigated', message = 'Bullish OB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(ob_bearMit, title = 'Bear OB Mitigated', message = 'Bearish OB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 
-// ── ICT Alerts ──
 alertcondition(barstate.isconfirmed and isFvgUp(0), title = 'FVG+', message = 'FVG+ : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(barstate.isconfirmed and isFvgDown(0), title = 'FVG-', message = 'FVG- : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(barstate.isconfirmed and isBuIFvg(0), title = 'Implied.FVG+', message = 'I.FVG+ : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
@@ -1654,14 +1552,8 @@ alertcondition(bevitouch, title = 'VI(-) Mitigation', message = 'VI(-) Mitigated
 alertcondition(buinvfvgtouch, title = 'Inverse.FVG(+) Mitigation', message = 'Inverse.FVG(+) Mitigated :{{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(beinvfvgtouch, title = 'Inverse.FVG(-) Mitigation', message = 'Inverse.FVG(-) Mitigated :{{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 
+// SECTION C – ICT NWOG / NDOG  (© fadizeidan)
 
-// ════════════════════════════════════════════════════════════════
-//  SECTION C – ICT NWOG / NDOG  (© fadizeidan)
-//  NOTE: UDT "box" renamed to "GapBox" to avoid conflict with
-//        Pine Script's built-in `box` type used in Section B.
-// ════════════════════════════════════════════════════════════════
-
-// ── Helper type ──
 type NWOGHelper
     string  name
 
@@ -1714,7 +1606,6 @@ type OpenGap
     NWOGSettings    settings
     line            EventHorizon    = na
 
-// ── Instantiate NWOG / NDOG / NDOG-RTH ──
 var nwog_gaps               = array.new<Gap>()
 var OpenGap NWOG            = OpenGap.new()
 NWOG.gaps                  := nwog_gaps
@@ -1736,8 +1627,7 @@ NWOG_Group                  = "⑧ NWOG"
 NDOG_Group                  = "⑨ NDOG ETH"
 NDOGrth_Group               = "⑩ NDOG RTH"
 
-// ── NWOG Inputs ──
-NWOG.settings.show         := input.bool(true, "NWOG        ", group=NWOG_Group, inline="1")
+NWOG.settings.show         := input.bool(true, "NWOG", group=NWOG_Group, inline="1")
 NWOG.settings.color_new    := input.color(color.new(color.purple,0), '', group=NWOG_Group, inline='1')
 NWOG.settings.color        := input.color(color.new(color.black,0), '', group=NWOG_Group, inline='1')
 NWOG.settings.style        := input.string('⎯⎯⎯', '', options = ['⎯⎯⎯', '----', '····'], group=NWOG_Group, inline='1')
@@ -1747,16 +1637,16 @@ NWOG.settings.ce_color_new := input.color(color.new(color.purple,0), 'C.E.      
 NWOG.settings.ce_color     := input.color(color.new(color.black,0), '', group=NWOG_Group, inline='3')
 NWOG.settings.ce_style     := input.string('····', '', options = ['⎯⎯⎯', '----', '····'], group=NWOG_Group, inline='3')
 NWOG.settings.ce_size      := input.int(1, '', options = [1,2,3,4], group=NWOG_Group, inline='3')
-NWOG.settings.EH_show      := input.bool(true, "Event Horizon   ", group=NWOG_Group, inline="4")
+NWOG.settings.EH_show      := input.bool(true, "Event Horizon", group=NWOG_Group, inline="4")
 NWOG.settings.EH_color     := input.color(color.new(color.purple,20), "", group=NWOG_Group, inline='4')
 NWOG.settings.EH_style     := input.string('----', '      ', options = ['⎯⎯⎯', '----', '····'], group=NWOG_Group, inline='4')
 NWOG.settings.EH_size      := input.int(1, '', options = [1,2,3,4], group=NWOG_Group, inline='4')
 
-NWOG.settings.use_background    := input.bool(true, "Background    ", group=NWOG_Group, inline="5")
+NWOG.settings.use_background    := input.bool(true, "Background", group=NWOG_Group, inline="5")
 NWOG.settings.background_new    := input.color(color.new(color.purple,95), "", group=NWOG_Group, inline='5')
 NWOG.settings.background        := input.color(color.new(color.black,95), "", group=NWOG_Group, inline='5')
 
-NWOG.settings.label_show    := input.bool(true, "label         ", group=NWOG_Group, inline='2')
+NWOG.settings.label_show    := input.bool(true, "label", group=NWOG_Group, inline='2')
 NWOG.settings.label_color   := input.color(color.black, "", group=NWOG_Group, inline='2')
 NWOG.settings.label_bgcolor := input.color(color.new(color.orange, 100), "", group=NWOG_Group, inline='2')
 NWOG.settings.label_size    := input.string(size.small, "", [size.auto, size.tiny, size.small, size.normal, size.large, size.huge], group=NWOG_Group, inline='2')
@@ -1764,8 +1654,7 @@ max_week                     = input.int(5, "Maximum number", 1, 50, group=NWOG_
 NWOG.settings.max_count     := max_week
 NWOG.settings.extend        := input.string("Always", "Extend Gaps", options = ['Always', 'Above and below only', 'Any that is near current price'], group=NWOG_Group)
 
-// ── NDOG ETH Inputs ──
-NDOG.settings.show         := input.bool(true, "NDOG ETH     ", group=NDOG_Group, inline='1')
+NDOG.settings.show         := input.bool(true, "NDOG ETH", group=NDOG_Group, inline='1')
 NDOG.settings.color_new    := input.color(color.new(color.green,0), '', group=NDOG_Group, inline='1')
 NDOG.settings.color        := input.color(color.new(color.blue,0), '', group=NDOG_Group, inline='1')
 NDOG.settings.style        := input.string('⎯⎯⎯', '', options = ['⎯⎯⎯', '----', '····'], group=NDOG_Group, inline='1')
@@ -1774,11 +1663,11 @@ NDOG.settings.ce_color_new := input.color(color.new(color.green,0), 'C.E.       
 NDOG.settings.ce_color     := input.color(color.new(color.blue,0), '', group=NDOG_Group, inline='3')
 NDOG.settings.ce_style     := input.string('····', '', options = ['⎯⎯⎯', '----', '····'], group=NDOG_Group, inline='3')
 NDOG.settings.ce_size      := input.int(1, '', options = [1,2,3,4], group=NDOG_Group, inline='3')
-NDOG.settings.use_background    := input.bool(true, "Background    ", group=NDOG_Group, inline="5")
+NDOG.settings.use_background    := input.bool(true, "Background", group=NDOG_Group, inline="5")
 NDOG.settings.background_new    := input.color(color.new(color.green,95), "", group=NDOG_Group, inline='5')
 NDOG.settings.background        := input.color(color.new(color.blue,95), "", group=NDOG_Group, inline='5')
 
-NDOG.settings.label_show    := input.bool(true, "label         ", group=NDOG_Group, inline='2')
+NDOG.settings.label_show    := input.bool(true, "label", group=NDOG_Group, inline='2')
 NDOG.settings.label_color   := input.color(color.black, "", group=NDOG_Group, inline='2')
 NDOG.settings.label_bgcolor := input.color(color.new(color.orange, 100), "", group=NDOG_Group, inline='2')
 NDOG.settings.label_size    := input.string(size.small, "", [size.auto, size.tiny, size.small, size.normal, size.large, size.huge], group=NDOG_Group, inline='2')
@@ -1786,8 +1675,7 @@ NDOG.settings.label_size    := input.string(size.small, "", [size.auto, size.tin
 NDOG.settings.max_count     := input.int(5, "Maximum number", 1, 50, group=NDOG_Group)
 NDOG.settings.extend        := input.string("Always", "Extend Gaps", options = ['Always', 'Above and below only', 'Any that is near current price'], group=NDOG_Group)
 
-// ── NDOG RTH Inputs ──
-NDOGrth.settings.show         := input.bool(true, "NDOG RTH     ", group=NDOGrth_Group, inline='1')
+NDOGrth.settings.show         := input.bool(true, "NDOG RTH", group=NDOGrth_Group, inline='1')
 NDOGrth.settings.color_new    := input.color(color.new(color.orange,0), '', group=NDOGrth_Group, inline='1')
 NDOGrth.settings.color        := input.color(color.new(color.red,0), '', group=NDOGrth_Group, inline='1')
 NDOGrth.settings.style        := input.string('⎯⎯⎯', '', options = ['⎯⎯⎯', '----', '····'], group=NDOGrth_Group, inline='1')
@@ -1796,11 +1684,11 @@ NDOGrth.settings.ce_color_new := input.color(color.new(color.orange,0), 'C.E.   
 NDOGrth.settings.ce_color     := input.color(color.new(color.red,0), '', group=NDOGrth_Group, inline='3')
 NDOGrth.settings.ce_style     := input.string('····', '', options = ['⎯⎯⎯', '----', '····'], group=NDOGrth_Group, inline='3')
 NDOGrth.settings.ce_size      := input.int(1, '', options = [1,2,3,4], group=NDOGrth_Group, inline='3')
-NDOGrth.settings.use_background    := input.bool(true, "Background    ", group=NDOGrth_Group, inline="5")
+NDOGrth.settings.use_background    := input.bool(true, "Background", group=NDOGrth_Group, inline="5")
 NDOGrth.settings.background_new    := input.color(color.new(color.orange,95), "", group=NDOGrth_Group, inline='5')
 NDOGrth.settings.background        := input.color(color.new(color.red,95), "", group=NDOGrth_Group, inline='5')
 
-NDOGrth.settings.label_show    := input.bool(true, "label         ", group=NDOGrth_Group, inline='2')
+NDOGrth.settings.label_show    := input.bool(true, "label", group=NDOGrth_Group, inline='2')
 NDOGrth.settings.label_color   := input.color(color.black, "", group=NDOGrth_Group, inline='2')
 NDOGrth.settings.label_bgcolor := input.color(color.new(color.orange, 100), "", group=NDOGrth_Group, inline='2')
 NDOGrth.settings.label_size    := input.string(size.small, "", [size.auto, size.tiny, size.small, size.normal, size.large, size.huge], group=NDOGrth_Group, inline='2')
@@ -1808,7 +1696,6 @@ NDOGrth.settings.label_size    := input.string(size.small, "", [size.auto, size.
 NDOGrth.settings.max_count    := input.int(5, "Maximum number", 1, 50, group=NDOGrth_Group)
 NDOGrth.settings.extend       := input.string("Always", "Extend Gaps", options = ['Always', 'Above and below only', 'Any that is near current price'], group=NDOGrth_Group)
 
-// ── Advanced Inputs ──
 distance                    = input.int(200, "Number of candles to use in calculation", group="⑪ Advanced (NWOG/NDOG)")
 factor                      = input.float(20, "Factor multiplier for distance test", group="⑪ Advanced (NWOG/NDOG)")
 buffer                      = input.int(10, "Buffer - Number of candles to extend by", minval=0, group="⑪ Advanced (NWOG/NDOG)")+1
@@ -1823,7 +1710,6 @@ if median.size() > length
     median.pop()
 float spacing = ta.sma(ta.sma(median.median(), length), length) *.5
 
-// ── NWOG/NDOG Methods ──
 method AbovePrice(Gap[] gaps, price) =>
     float delta = -1
     sz = gaps.size()
@@ -2012,7 +1898,6 @@ getOpenAtTime() =>
                     openedtime := openedAtTime.get(index)
     [opened, openedtime]
 
-// ── NWOG/NDOG Main Logic ──
 if barstate.isconfirmed and ENABLE_NWOG_NDOG
     is_sunday = dayofweek == dayofweek.sunday
     if NWOG.settings.show and timeframe.isintraday
@@ -2049,15 +1934,7 @@ if barstate.isconfirmed and ENABLE_NWOG_NDOG
             nwog_opened := na
         NDOGrth.Redraw()
 
-
-
-// ════════════════════════════════════════════════════════════════
-//  SECTION D – ICT HTF CANDLES  (© fadizeidan)
-//  NOTE: "type Settings" renamed to "type HTFSettings" and
-//        variable "settings" renamed to "htfSettings" to avoid
-//        conflicts with other sections.
-//        "type Helper" kept as-is (NWOG's was renamed instead).
-// ════════════════════════════════════════════════════════════════
+// SECTION D – ICT HTF CANDLES  (© fadizeidan)
 
 type Candle
 	float o
@@ -2206,8 +2083,6 @@ htf6.csettings := SettingsHTF6
 htf6.candles := candles_6
 htf6.imbalances := imbalances_6
 
-// ── HTF Candle Settings ──
-
 string group_htfc_style              = "⑬ HTF Candle Styling"
 string group_htfc_label              = "⑭ HTF Candle Labels"
 string group_htfc_imbalance          = "⑮ HTF Candle Imbalance"
@@ -2298,12 +2173,9 @@ htfSettings.label_show             := input.bool(false, 'Price Label           '
 htfSettings.label_color            := input.color(color.new(color.black, 10), '', inline = 'label', group = group_htfc_trace)
 htfSettings.label_size             := input.string(size.small, '', [size.tiny, size.small, size.normal, size.large, size.huge], inline = 'label', group = group_htfc_trace)
 
-// ── HTF Candle Variables ──
 Helper htfHelper = Helper.new()
 var Trace htfTrace = Trace.new()
 color htfc_color_transparent = #ffffff00
-
-// ── HTF Candle Internal Functions ──
 
 method LineStyle(Helper helper, string style) =>
     helper.name := style
@@ -2334,7 +2206,6 @@ method ValidTimeframe(Helper helper, string HTF) =>
         n2 = timeframe.in_seconds(HTF)
         n3 = n1 % n2
         n1 < n2 and math.round(n2 / n1) == n2 / n1
-
 
 method RemainingTime(Helper helper, string HTF) =>
     helper.name := HTF
@@ -2528,7 +2399,7 @@ method Reorder(CandleSet candleSet, int offset) =>
 
         string tmr = '(' + htfHelper.RemainingTime(candleSet.csettings.htf) + ')' + (htfSettings.daily_name ? '\n' : '')
         if htfSettings.label_position == 'Both' or htfSettings.label_position == 'Top'
-            
+
             if not na(candleSet.tfNameTop)
                 candleSet.tfNameTop.set_xy(left, top)
             else
@@ -2605,9 +2476,9 @@ method Monitor(CandleSet candleSet) =>
         if candleSet.csettings.htf == '1D'
             if htfSettings.custom_daily == 'Midnight'
                 isNewHTFCandle := dayofweek(time, 'America/New_York') != dayofweek(time - (time - time[1]), 'America/New_York')
-            if htfSettings.custom_daily == '8:30'    
+            if htfSettings.custom_daily == '8:30'
                 isNewHTFCandle := not na(time(timeframe.period, "0830-0831:123456", 'America/New_York')) and na(time(timeframe.period, "0830-0831:123456", 'America/New_York')[1])
-            if htfSettings.custom_daily == '9:30'    
+            if htfSettings.custom_daily == '9:30'
                 isNewHTFCandle := not na(time(timeframe.period, "0930-0931:123456", 'America/New_York')) and na(time(timeframe.period, "0930-0931:123456", 'America/New_York')[1])
     if isNewHTFCandle
         Candle candle = Candle.new()
@@ -2740,7 +2611,6 @@ method Update(CandleSet candleSet, int offset, bool showTrace) =>
                             label.set_text(htfTrace.l_l, str.tostring(candle.l))
     candleSet
 
-// ── HTF Candle Main Logic ──
 int htfCnt = 0
 int htfLast = htfHelper.HTFEnabled()
 
@@ -2821,15 +2691,10 @@ if ENABLE_HTF_CANDLES and htf6.csettings.show and htfHelper.ValidTimeframe(htf6.
     htf6.UpdateTime(htfOffset)
     htf6.Monitor().Update(htfOffset, showTrace).FindImbalance()
 
-// ── End of HTF Section ──
+// End of HTF Section
 
+// SECTION F – ICT KILLZONES
 
-// ════════════════════════════════════════════════════════════════
-//  SECTION F – ICT KILLZONES
-//  Background highlighting for key trading sessions (NY time)
-// ════════════════════════════════════════════════════════════════
-
-// Helper: check if NY time is within session (handles overnight wrap for Asia)
 f_inSession(_h, _m, _startH, _startM, _endH, _endM) =>
     int _startTotal = _startH * 60 + _startM
     int _endTotal   = _endH * 60 + _endM
@@ -2859,15 +2724,8 @@ if ENABLE_KILLZONES and timeframe.isintraday
 
 bgcolor(kz_bg)
 
+// SECTION G – SESSION HIGHS / LOWS
 
-// ════════════════════════════════════════════════════════════════
-//  SECTION G – SESSION HIGHS / LOWS
-//  Tracks Asia, London, NY AM, NY Lunch, NY PM session H/L and
-//  draws lines from session start as buyside/sellside liquidity.
-//  Supports up to 5 previous sessions with body-close mitigation.
-// ════════════════════════════════════════════════════════════════
-
-// ── Session H/L UDT ──
 type SHLevel
     float price
     int   startBar
@@ -2876,15 +2734,10 @@ type SHLevel
     line  ln = na
     label lbl = na
 
-// ── Session H/L helper: format time as "Mon 02/09 22:15" ──
 _sh_fmtTime(_t) =>
     na(_t) ? "" : " (" + str.format_time(_t, "EEE MM/dd HH:mm", "America/New_York") + ")"
 
-// ── Session H/L helper: convert size string to size constant ──
-_sh_getSize(_s) =>
-    _s == "Auto" ? size.auto : _s == "Small" ? size.small : _s == "Normal" ? size.normal : _s == "Large" ? size.large : _s == "Huge" ? size.huge : size.tiny
 
-// ── Archive completed session H/L into history arrays, trim to max ──
 _sh_archive(_histH, _histL, _curH, _curL, _curBar, _curHT, _curLT) =>
     if not na(_curH)
         array.unshift(_histH, SHLevel.new(price = _curH, startBar = _curBar, priceTime = _curHT))
@@ -2898,9 +2751,6 @@ _sh_archive(_histH, _histL, _curH, _curL, _curBar, _curHT, _curLT) =>
             line.delete(_old.ln)
             label.delete(_old.lbl)
 
-// ── Process history array: check mitigation + draw/update lines ──
-// NOTE: Uses flat if-blocks (no else) to avoid Pine Script type mismatches
-//       between void-returning setters and typed assignments.
 _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
     if _show and array.size(_hist) > 0
         string _side = _isHigh ? "High - Buyside Liquidity " : "Low - Sellside Liquidity "
@@ -2908,14 +2758,12 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
             SHLevel _lvl = array.get(_hist, i)
             if na(_lvl.price)
                 continue
-            // Already mitigated — hide if toggle is off
             if _lvl.mitigated and not sh_showMit
                 line.delete(_lvl.ln)
                 label.delete(_lvl.lbl)
                 _lvl.ln  := line(na)
                 _lvl.lbl := label(na)
                 continue
-            // Check for new mitigation on confirmed bars
             if not _lvl.mitigated and barstate.isconfirmed
                 bool _hit = _isHigh ? close > _lvl.price : close < _lvl.price
                 if _hit
@@ -2923,7 +2771,6 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
                     if not na(_lvl.ln)
                         line.set_color(_lvl.ln, sh_mitColor)
                         line.set_style(_lvl.ln, line.style_dotted)
-            // Draw / extend (both mitigated and unmitigated)
             int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
             int _x2 = bar_index + sh_lineExtend
             color _lineClr = _lvl.mitigated ? sh_mitColor : _color
@@ -2932,7 +2779,7 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
             string _mitTxt = _lvl.mitigated ? " [Mitigated]" : ""
             string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + _mitTxt
             string _ls = _lvl.mitigated ? line.style_dotted : f_get_line_style(_style)
-            string _sz = _lvl.mitigated ? _sh_getSize(sh_mitLabelSize) : _sh_getSize(sh_labelSize)
+            string _sz = _lvl.mitigated ? _ho_getSize(sh_mitLabelSize) : _ho_getSize(sh_labelSize)
             if na(_lvl.ln)
                 _lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _lineClr, style = _ls, width = _lw)
             line.set_x2(_lvl.ln, _x2)
@@ -2946,8 +2793,6 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
                 label.set_textcolor(_lvl.lbl, _lblClr)
                 label.set_size(_lvl.lbl, _sz)
 
-// ── Draw current (in-progress) session lines ──
-// NOTE: Uses create-then-always-set pattern to avoid if/else type mismatches.
 _sh_drawCur(_show, _inSess, _curH, _curL, _curHTime, _curLTime, _startBar, _hColor, _lColor, _name) =>
     var line _cLineH = na, var line _cLineL = na
     var label _cLblH = na, var label _cLblL = na
@@ -2965,7 +2810,7 @@ _sh_drawCur(_show, _inSess, _curH, _curL, _curHTime, _curLTime, _startBar, _hCol
         line.set_xy1(_cLineL, _x1, _curL)
         line.set_xy2(_cLineL, _x2, _curL)
         if sh_showLabels
-            string _sz = _sh_getSize(sh_labelSize)
+            string _sz = _ho_getSize(sh_labelSize)
             if na(_cLblH)
                 _cLblH := label.new(_x2, _curH, _hTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_hColor, 40), size = _sz)
                 _cLblL := label.new(_x2, _curL, _lTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_lColor, 40), size = _sz)
@@ -2976,7 +2821,6 @@ _sh_drawCur(_show, _inSess, _curH, _curL, _curHTime, _curLTime, _startBar, _hCol
             label.set_size(_cLblH, _sz)
             label.set_size(_cLblL, _sz)
     if not _active and not _inSess
-        // Hide when session is not active
         if not na(_cLineH)
             line.set_xy1(_cLineH, na, na)
             line.set_xy2(_cLineH, na, na)
@@ -2987,7 +2831,6 @@ _sh_drawCur(_show, _inSess, _curH, _curL, _curHTime, _curLTime, _startBar, _hCol
             label.set_xy(_cLblL, na, na)
     [_cLineH, _cLineL, _cLblH, _cLblL]
 
-// ── History arrays (index 0 = most recent completed session) ──
 var array<SHLevel> sh_histAsiaH = array.new<SHLevel>()
 var array<SHLevel> sh_histAsiaL = array.new<SHLevel>()
 var array<SHLevel> sh_histLonH  = array.new<SHLevel>()
@@ -3001,7 +2844,6 @@ var array<SHLevel> sh_histNylL  = array.new<SHLevel>()
 var array<SHLevel> sh_histNypmH = array.new<SHLevel>()
 var array<SHLevel> sh_histNypmL = array.new<SHLevel>()
 
-// ── Current session tracking state ──
 var float sh_asiaH = na,  var float sh_asiaL = na,  var int sh_asiaBar = na,  var int sh_asiaHT = na, var int sh_asiaLT = na
 var float sh_lonH  = na,  var float sh_lonL  = na,  var int sh_lonBar  = na,  var int sh_lonHT  = na, var int sh_lonLT  = na
 var float sh_nyamH = na,  var float sh_nyamL = na,  var int sh_nyamBar = na,  var int sh_nyamHT = na, var int sh_nyamLT = na
@@ -3009,12 +2851,10 @@ var float sh_nypreH = na, var float sh_nypreL = na, var int sh_nypreBar = na, va
 var float sh_nylH  = na,  var float sh_nylL  = na,  var int sh_nylBar  = na,  var int sh_nylHT  = na, var int sh_nylLT  = na
 var float sh_nypmH = na,  var float sh_nypmL = na,  var int sh_nypmBar = na,  var int sh_nypmHT = na, var int sh_nypmLT = na
 
-// In-session flags
 var bool sh_inAsia = false, var bool sh_inLon = false
 var bool sh_inNYAM = false, var bool sh_inNYPre = false, var bool sh_inNYL = false, var bool sh_inNYPM = false
 
 if ENABLE_SESSION_HL and timeframe.isintraday
-    // ── Detect sessions (uses Killzone times from ⑱, except NY Lunch which is hardcoded 12:00-13:30) ──
     bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
     bool _isLon  = f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
     bool _isNYAM  = f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, 0)
@@ -3022,7 +2862,6 @@ if ENABLE_SESSION_HL and timeframe.isintraday
     bool _isNYL   = f_inSession(kz_nyHour, kz_nyMin, 12, 0, 13, 30)
     bool _isNYPM = f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
 
-    // ── Track Asia ──
     if _isAsia and not sh_inAsia
         sh_asiaH := high, sh_asiaL := low, sh_asiaBar := bar_index
         sh_asiaHT := time, sh_asiaLT := time
@@ -3037,7 +2876,6 @@ if ENABLE_SESSION_HL and timeframe.isintraday
             _sh_archive(sh_histAsiaH, sh_histAsiaL, sh_asiaH, sh_asiaL, sh_asiaBar, sh_asiaHT, sh_asiaLT)
         sh_inAsia := false
 
-    // ── Track London ──
     if _isLon and not sh_inLon
         sh_lonH := high, sh_lonL := low, sh_lonBar := bar_index
         sh_lonHT := time, sh_lonLT := time
@@ -3052,7 +2890,6 @@ if ENABLE_SESSION_HL and timeframe.isintraday
             _sh_archive(sh_histLonH, sh_histLonL, sh_lonH, sh_lonL, sh_lonBar, sh_lonHT, sh_lonLT)
         sh_inLon := false
 
-    // ── Track NY AM ──
     if _isNYAM and not sh_inNYAM
         sh_nyamH := high, sh_nyamL := low, sh_nyamBar := bar_index
         sh_nyamHT := time, sh_nyamLT := time
@@ -3067,7 +2904,6 @@ if ENABLE_SESSION_HL and timeframe.isintraday
             _sh_archive(sh_histNyamH, sh_histNyamL, sh_nyamH, sh_nyamL, sh_nyamBar, sh_nyamHT, sh_nyamLT)
         sh_inNYAM := false
 
-    // ── Track NY Pre-AM ──
     if _isNYPre and not sh_inNYPre
         sh_nypreH := high, sh_nypreL := low, sh_nypreBar := bar_index
         sh_nypreHT := time, sh_nypreLT := time
@@ -3082,7 +2918,6 @@ if ENABLE_SESSION_HL and timeframe.isintraday
             _sh_archive(sh_histNypreH, sh_histNypreL, sh_nypreH, sh_nypreL, sh_nypreBar, sh_nypreHT, sh_nypreLT)
         sh_inNYPre := false
 
-    // ── Track NY Lunch ──
     if _isNYL and not sh_inNYL
         sh_nylH := high, sh_nylL := low, sh_nylBar := bar_index
         sh_nylHT := time, sh_nylLT := time
@@ -3097,7 +2932,6 @@ if ENABLE_SESSION_HL and timeframe.isintraday
             _sh_archive(sh_histNylH, sh_histNylL, sh_nylH, sh_nylL, sh_nylBar, sh_nylHT, sh_nylLT)
         sh_inNYL := false
 
-    // ── Track NY PM ──
     if _isNYPM and not sh_inNYPM
         sh_nypmH := high, sh_nypmL := low, sh_nypmBar := bar_index
         sh_nypmHT := time, sh_nypmLT := time
@@ -3112,7 +2946,6 @@ if ENABLE_SESSION_HL and timeframe.isintraday
             _sh_archive(sh_histNypmH, sh_histNypmL, sh_nypmH, sh_nypmL, sh_nypmBar, sh_nypmHT, sh_nypmLT)
         sh_inNYPM := false
 
-    // ── Process history: check mitigation + draw/update lines ──
     _sh_processHist(sh_showAsian,   sh_histAsiaH, true,  sh_asianHColor,  sh_asianStyle,  "Asia")
     _sh_processHist(sh_showAsian,   sh_histAsiaL, false, sh_asianLColor,  sh_asianStyle,  "Asia")
     _sh_processHist(sh_showLondon,  sh_histLonH,  true,  sh_londonHColor, sh_londonStyle, "London")
@@ -3126,7 +2959,6 @@ if ENABLE_SESSION_HL and timeframe.isintraday
     _sh_processHist(sh_showNYPM,    sh_histNypmH, true,  sh_nypmHColor,   sh_nypmStyle,   "NY PM")
     _sh_processHist(sh_showNYPM,    sh_histNypmL, false, sh_nypmLColor,   sh_nypmStyle,   "NY PM")
 
-    // ── Draw current (in-progress) session H/L ──
     if sh_showCurrent
         _sh_drawCur(sh_showAsian,   _isAsia, sh_asiaH, sh_asiaL, sh_asiaHT, sh_asiaLT, sh_asiaBar, sh_asianHColor,  sh_asianLColor,  "Asia")
         _sh_drawCur(sh_showLondon,  _isLon,  sh_lonH,  sh_lonL,  sh_lonHT,  sh_lonLT,  sh_lonBar,  sh_londonHColor, sh_londonLColor, "London")
@@ -3135,12 +2967,8 @@ if ENABLE_SESSION_HL and timeframe.isintraday
         _sh_drawCur(sh_showNYLunch, _isNYL,  sh_nylH,  sh_nylL,  sh_nylHT,  sh_nylLT,  sh_nylBar,  sh_nylHColor,    sh_nylLColor,    "NY Lunch")
         _sh_drawCur(sh_showNYPM,    _isNYPM, sh_nypmH, sh_nypmL, sh_nypmHT, sh_nypmLT, sh_nypmBar, sh_nypmHColor,   sh_nypmLColor,   "NY PM")
 
-// ════════════════════════════════════════════════════════════════
-//  SECTION H – PDH/PDL / PWH/PWL / PMH/PML LIQUIDITY LEVELS
-//  Previous Day, Week, Month High & Low — external liquidity pools
-// ════════════════════════════════════════════════════════════════
+// SECTION H – PDH/PDL / PWH/PWL / PMH/PML LIQUIDITY LEVELS
 
-// Drawing objects
 var line lq_linePDH = na, var line lq_linePDL = na
 var line lq_linePWH = na, var line lq_linePWL = na
 var line lq_linePMH = na, var line lq_linePML = na
@@ -3149,11 +2977,9 @@ var label lq_lblPWH = na, var label lq_lblPWL = na
 var label lq_lblPMH = na, var label lq_lblPML = na
 
 if ENABLE_LIQUIDITY
-    // request.security for previous period highs/lows (only when section is enabled)
     [lq_dayHigh, lq_dayLow]     = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
     [lq_weekHigh, lq_weekLow]   = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
     [lq_monthHigh, lq_monthLow] = request.security(syminfo.tickerid, "M", [high[1], low[1]], lookahead = barmerge.lookahead_on)
-    // ── PDH / PDL ──  (create once, update coords thereafter)
     if lq_showPDH and not na(lq_dayHigh)
         if na(lq_linePDH)
             lq_linePDH := line.new(bar_index - 1, lq_dayHigh, bar_index + 30, lq_dayHigh, color = lq_pdhColor, style = f_get_line_style(lq_pdStyle), width = lq_lineWidth)
@@ -3181,7 +3007,6 @@ if ENABLE_LIQUIDITY
                 label.set_y(lq_lblPDL, lq_dayLow)
                 label.set_text(lq_lblPDL, _pdlTxt)
 
-    // ── PWH / PWL ──
     if lq_showPWH and not na(lq_weekHigh)
         if na(lq_linePWH)
             lq_linePWH := line.new(bar_index - 1, lq_weekHigh, bar_index + 30, lq_weekHigh, color = lq_pwhColor, style = f_get_line_style(lq_pwStyle), width = lq_lineWidth)
@@ -3209,7 +3034,6 @@ if ENABLE_LIQUIDITY
                 label.set_y(lq_lblPWL, lq_weekLow)
                 label.set_text(lq_lblPWL, _pwlTxt)
 
-    // ── PMH / PML ──
     if lq_showPMH and not na(lq_monthHigh)
         if na(lq_linePMH)
             lq_linePMH := line.new(bar_index - 1, lq_monthHigh, bar_index + 30, lq_monthHigh, color = lq_pmhColor, style = f_get_line_style(lq_pmStyle), width = lq_lineWidth)
@@ -3237,67 +3061,54 @@ if ENABLE_LIQUIDITY
                 label.set_y(lq_lblPML, lq_monthLow)
                 label.set_text(lq_lblPML, _pmlTxt)
 
+// SECTION I – ICT REJECTION BLOCKS
 
-// ════════════════════════════════════════════════════════════════
-//  SECTION I – ICT REJECTION BLOCKS
-//  A Rejection Block is the wick range at a swing high or swing low.
-//  Bearish RB: highest open/close → highest high at a swing high.
-//  Bullish RB: lowest low → lowest open/close at a swing low.
-//  Wicks highlight where liquidity was swept before rejection.
-//  The zone is treated like an order block for re-entry.
-// ════════════════════════════════════════════════════════════════
-
-// ── Rejection Block Inputs ──
-var bool   rb_showBull     = input.bool(true,  "Bullish RB         ", group = "㉒ Rejection Blocks", inline = "rb1")
-var color  rb_bullColor    = input.color(color.new(#089981, 75), "",  group = "㉒ Rejection Blocks", inline = "rb1")
-var bool   rb_showBear     = input.bool(true,  "Bearish RB         ", group = "㉒ Rejection Blocks", inline = "rb2")
-var color  rb_bearColor    = input.color(color.new(#f23645, 75), "",  group = "㉒ Rejection Blocks", inline = "rb2")
-var int    rb_swingLen     = input.int(5, "Swing Length       ", 2, 50, group = "㉒ Rejection Blocks", inline = "rb3", tooltip = "Pivot lookback/lookforward bars for swing detection. Higher = fewer, larger swings.")
-var float  rb_minWickPct   = input.float(33.0, "Min Wick %", 0, 90, step = 5, group = "㉒ Rejection Blocks", inline = "rb3", tooltip = "Minimum wick size as % of swing range to qualify as a rejection block.")
-var string rb_borderStyle  = input.string("Dashed", "Border            ", options = ["Solid", "Dashed", "Dotted"], group = "㉒ Rejection Blocks", inline = "rb4")
-var bool   rb_extend       = input.bool(true,  "Extend",  group = "㉒ Rejection Blocks", inline = "rb4")
-var bool   rb_showLabel    = input.bool(true,  "Label",   group = "㉒ Rejection Blocks", inline = "rb4")
-var bool   rb_showTrigger  = input.bool(true,  "Trigger Line      ", group = "㉒ Rejection Blocks", inline = "rb5")
+var bool rb_showBull = input.bool(true, "Bullish RB", group = "㉒ Rejection Blocks", inline = "rb1")
+var color rb_bullColor = input.color(color.new(#089981, 75), "", group = "㉒ Rejection Blocks", inline = "rb1")
+var bool rb_showBear = input.bool(true, "Bearish RB", group = "㉒ Rejection Blocks", inline = "rb2")
+var color rb_bearColor = input.color(color.new(#f23645, 75), "", group = "㉒ Rejection Blocks", inline = "rb2")
+var int rb_swingLen = input.int(5, "Swing Length", 2, 50, group = "㉒ Rejection Blocks", inline = "rb3", tooltip = "Pivot lookback bars. Higher = larger swings.")
+var float rb_minWickPct = input.float(33.0, "Min Wick %", 0, 90, step = 5, group = "㉒ Rejection Blocks", inline = "rb3", tooltip = "Min wick % of swing range for RB.")
+var string rb_borderStyle = input.string("Dashed", "Border", options = ["Solid", "Dashed", "Dotted"], group = "㉒ Rejection Blocks", inline = "rb4")
+var bool rb_extend = input.bool(true, "Extend", group = "㉒ Rejection Blocks", inline = "rb4")
+var bool rb_showLabel = input.bool(true, "Label", group = "㉒ Rejection Blocks", inline = "rb4")
+var bool rb_showTrigger = input.bool(true, "Trigger Line", group = "㉒ Rejection Blocks", inline = "rb5")
 var string rb_triggerStyle = input.string("Dotted", "", options = ["Solid", "Dashed", "Dotted"], group = "㉒ Rejection Blocks", inline = "rb5")
-var int    rb_triggerWidth = input.int(1, "", 1, 4, group = "㉒ Rejection Blocks", inline = "rb5", tooltip = "Line at the body boundary (entry trigger level per ICT).")
-var color  rb_mitColor     = input.color(color.new(color.gray, 92), "Mitigated         ", group = "㉒ Rejection Blocks", inline = "rb6")
-var int    rb_maxBoxes     = input.int(10, "Max Boxes", 1, 50, group = "㉒ Rejection Blocks", inline = "rb6")
-var int    rb_pruneAge     = input.int(500, "Prune After", 0, 5000, group = "㉒ Rejection Blocks", inline = "rb6", tooltip = "Auto-delete mitigated RBs older than N bars. 0 = never.")
+var int rb_triggerWidth = input.int(1, "", 1, 4, group = "㉒ Rejection Blocks", inline = "rb5", tooltip = "Body boundary trigger line.")
+var color rb_mitColor = input.color(color.new(color.gray, 92), "Mitigated", group = "㉒ Rejection Blocks", inline = "rb6")
+var int rb_maxBoxes = input.int(10, "Max Boxes", 1, 50, group = "㉒ Rejection Blocks", inline = "rb6")
+var int rb_pruneAge = input.int(500, "Prune After", 0, 5000, group = "㉒ Rejection Blocks", inline = "rb6", tooltip = "Auto-delete after N bars. 0=never.")
 
-// ── ㉓ Breaker Block Inputs ──
-var bool   bk_show         = input.bool(true, "Show Breakers     ", group = "㉓ Breaker Blocks", inline = "bk0")
-var int    bk_swingLen     = input.int(5, "Swing Lookback    ", 1, 50, group = "㉓ Breaker Blocks", inline = "bk1", tooltip = "Pivot lookback/forward for swing detection. Higher = larger swings.")
-var color  bk_bullColor    = input.color(color.new(#089981, 70), "Bull", group = "㉓ Breaker Blocks", inline = "bk2")
-var color  bk_bearColor    = input.color(color.new(#f23645, 70), "Bear", group = "㉓ Breaker Blocks", inline = "bk2")
-var bool   bk_showLabel    = input.bool(true, "Labels", group = "㉓ Breaker Blocks", inline = "bk3")
-var bool   bk_extend       = input.bool(true, "Extend", group = "㉓ Breaker Blocks", inline = "bk3")
-var int    bk_maxBoxes     = input.int(10, "Max Boxes         ", 1, 30, group = "㉓ Breaker Blocks", inline = "bk4")
-var color  bk_mitColor     = input.color(color.new(color.gray, 92), "Mitigated", group = "㉓ Breaker Blocks", inline = "bk4")
-var int    bk_pruneAge     = input.int(500, "Prune After       ", 0, 5000, group = "㉓ Breaker Blocks", inline = "bk5", tooltip = "Auto-delete mitigated breakers older than N bars. 0 = never.")
+var bool bk_show = input.bool(true, "Show Breakers", group = "㉓ Breaker Blocks", inline = "bk0")
+var int bk_swingLen = input.int(5, "Swing Lookback", 1, 50, group = "㉓ Breaker Blocks", inline = "bk1", tooltip = "Pivot lookback. Higher = larger swings.")
+var color bk_bullColor = input.color(color.new(#089981, 70), "Bull", group = "㉓ Breaker Blocks", inline = "bk2")
+var color bk_bearColor = input.color(color.new(#f23645, 70), "Bear", group = "㉓ Breaker Blocks", inline = "bk2")
+var bool bk_showLabel = input.bool(true, "Labels", group = "㉓ Breaker Blocks", inline = "bk3")
+var bool bk_extend = input.bool(true, "Extend", group = "㉓ Breaker Blocks", inline = "bk3")
+var int bk_maxBoxes = input.int(10, "Max Boxes", 1, 30, group = "㉓ Breaker Blocks", inline = "bk4")
+var color bk_mitColor = input.color(color.new(color.gray, 92), "Mitigated", group = "㉓ Breaker Blocks", inline = "bk4")
+var int bk_pruneAge = input.int(500, "Prune After", 0, 5000, group = "㉓ Breaker Blocks", inline = "bk5", tooltip = "Auto-delete after N bars. 0=never.")
 
-// ── ㉔ Mitigation Block Inputs ──
-var bool   mb_show         = input.bool(true, "Show Mit Blocks   ", group = "㉔ Mitigation Blocks", inline = "mb0")
-var int    mb_swingLen     = input.int(5, "Swing Lookback    ", 1, 50, group = "㉔ Mitigation Blocks", inline = "mb1", tooltip = "Pivot lookback/forward for swing detection.")
-var color  mb_bullColor    = input.color(color.new(#089981, 75), "Bull", group = "㉔ Mitigation Blocks", inline = "mb2")
-var color  mb_bearColor    = input.color(color.new(#f23645, 75), "Bear", group = "㉔ Mitigation Blocks", inline = "mb2")
-var bool   mb_showLabel    = input.bool(true, "Labels", group = "㉔ Mitigation Blocks", inline = "mb3")
-var bool   mb_extend       = input.bool(true, "Extend", group = "㉔ Mitigation Blocks", inline = "mb3")
-var int    mb_maxBoxes     = input.int(10, "Max Boxes         ", 1, 30, group = "㉔ Mitigation Blocks", inline = "mb4")
-var color  mb_mitColor     = input.color(color.new(color.gray, 92), "Mitigated", group = "㉔ Mitigation Blocks", inline = "mb4")
-var int    mb_pruneAge     = input.int(500, "Prune After       ", 0, 5000, group = "㉔ Mitigation Blocks", inline = "mb5", tooltip = "Auto-delete mitigated blocks older than N bars. 0 = never.")
+var bool mb_show = input.bool(true, "Show Mit Blocks", group = "㉔ Mitigation Blocks", inline = "mb0")
+var int mb_swingLen = input.int(5, "Swing Lookback", 1, 50, group = "㉔ Mitigation Blocks", inline = "mb1", tooltip = "Pivot lookback.")
+var color mb_bullColor = input.color(color.new(#089981, 75), "Bull", group = "㉔ Mitigation Blocks", inline = "mb2")
+var color mb_bearColor = input.color(color.new(#f23645, 75), "Bear", group = "㉔ Mitigation Blocks", inline = "mb2")
+var bool mb_showLabel = input.bool(true, "Labels", group = "㉔ Mitigation Blocks", inline = "mb3")
+var bool mb_extend = input.bool(true, "Extend", group = "㉔ Mitigation Blocks", inline = "mb3")
+var int mb_maxBoxes = input.int(10, "Max Boxes", 1, 30, group = "㉔ Mitigation Blocks", inline = "mb4")
+var color mb_mitColor = input.color(color.new(color.gray, 92), "Mitigated", group = "㉔ Mitigation Blocks", inline = "mb4")
+var int mb_pruneAge = input.int(500, "Prune After", 0, 5000, group = "㉔ Mitigation Blocks", inline = "mb5", tooltip = "Auto-delete after N bars. 0=never.")
 
-// ── Rejection Block UDT ──
 type RejBlock
     box     bx
-    line    trigLine        // trigger line at body boundary
-    float   triggerLevel    // body boundary — entry trigger level
+    line    trigLine
+    float   triggerLevel
     bool    isBull
     bool    mitigated
     int     mit_bar
 
 var array<RejBlock> rb_blocks = array.new<RejBlock>()
 
-// Alert flags (reset each bar)
 bool rb_bullFormed = false
 bool rb_bearFormed = false
 bool rb_bullMit    = false
@@ -3315,19 +3126,15 @@ rb_trigStyle = switch rb_triggerStyle
     "Dotted" => line.style_dotted
     =>          line.style_dotted
 
-// ── Swing detection via pivots ──
 float rb_pvtHi = ta.pivothigh(high, rb_swingLen, rb_swingLen)
 float rb_pvtLo = ta.pivotlow(low,   rb_swingLen, rb_swingLen)
 
 f_rbDetect() =>
     bool _bearFormed = false
     bool _bullFormed = false
-    // ── Bearish Rejection Block (at swing highs) ──
     if rb_showBear and not na(rb_pvtHi)
-        int _pvtOff = rb_swingLen   // pivot candle is this many bars back
-        // Highest high is the pivot value itself
+        int _pvtOff = rb_swingLen
         float _wickHigh = rb_pvtHi
-        // Scan the swing formation for the highest body (max of open/close)
         float _highestBody = math.max(open[_pvtOff], close[_pvtOff])
         int   _leftBar     = bar_index - _pvtOff
         for j = 1 to rb_swingLen
@@ -3337,18 +3144,14 @@ f_rbDetect() =>
                 _highestBody := _bt
             if bar_index - idx < _leftBar
                 _leftBar := bar_index - idx
-        // Also check a couple bars on the right of the pivot (part of the topping formation)
         for j = 1 to math.min(2, _pvtOff - 1)
             int idx = _pvtOff - j
             float _bt = math.max(open[idx], close[idx])
             if _bt > _highestBody
                 _highestBody := _bt
-        // Ensure body doesn't exceed wick high (can happen if body IS the high)
         _highestBody := math.min(_highestBody, _wickHigh)
-        // Wick range = rejection block zone
         float _wickRange  = _wickHigh - _highestBody
         float _swingRange = _wickHigh - ta.lowest(low, rb_swingLen * 2 + 1)[0]
-        // Only qualify if the wick is meaningful
         bool _valid = _wickRange > 0 and _swingRange > 0 and (_wickRange / _swingRange * 100 >= rb_minWickPct)
         if _valid
             box _bx = box.new(_leftBar, _wickHigh, bar_index, _highestBody,
@@ -3374,11 +3177,9 @@ f_rbDetect() =>
                 box.delete(_del.bx)
                 line.delete(_del.trigLine)
 
-    // ── Bullish Rejection Block (at swing lows) ──
     if rb_showBull and not na(rb_pvtLo)
         int _pvtOff = rb_swingLen
         float _wickLow = rb_pvtLo
-        // Scan the swing formation for the lowest body (min of open/close)
         float _lowestBody = math.min(open[_pvtOff], close[_pvtOff])
         int   _leftBar    = bar_index - _pvtOff
         for j = 1 to rb_swingLen
@@ -3388,13 +3189,11 @@ f_rbDetect() =>
                 _lowestBody := _bb
             if bar_index - idx < _leftBar
                 _leftBar := bar_index - idx
-        // Also check a couple bars on the right of the pivot
         for j = 1 to math.min(2, _pvtOff - 1)
             int idx = _pvtOff - j
             float _bb = math.min(open[idx], close[idx])
             if _bb < _lowestBody
                 _lowestBody := _bb
-        // Ensure body doesn't go below wick low
         _lowestBody := math.max(_lowestBody, _wickLow)
         float _wickRange  = _lowestBody - _wickLow
         float _swingRange = ta.highest(high, rb_swingLen * 2 + 1)[0] - _wickLow
@@ -3429,15 +3228,12 @@ if ENABLE_REJECTION_BLK
     rb_bearFormed := _rbBearF
     rb_bullFormed := _rbBullF
 
-// ── Extend, Mitigate & Auto-Prune Rejection Blocks ──
 f_rbManage() =>
     bool _bullMit = false
     bool _bearMit = false
     for i = rb_blocks.size() - 1 to 0 by 1
         RejBlock _rb = rb_blocks.get(i)
         if not _rb.mitigated
-            // Bullish RB (support): mitigated when price closes below zone bottom (wick low)
-            // Bearish RB (resistance): mitigated when price closes above zone top (wick high)
             bool _hit = _rb.isBull ? (close < box.get_bottom(_rb.bx)) : (close > box.get_top(_rb.bx))
             if _hit
                 _rb.mitigated := true
@@ -3460,7 +3256,6 @@ f_rbManage() =>
                 if not na(_rb.trigLine)
                     line.set_x2(_rb.trigLine, bar_index + 1)
         else
-            // Already mitigated — auto-prune if old
             if rb_pruneAge > 0 and (bar_index - _rb.mit_bar) > rb_pruneAge
                 box.delete(_rb.bx)
                 line.delete(_rb.trigLine)
@@ -3473,39 +3268,32 @@ if ENABLE_REJECTION_BLK and rb_blocks.size() > 0
     rb_bullMit := _rbBullM
     rb_bearMit := _rbBearM
 
-// ════════════════════════════════════════════════════════════════
-//  SECTION G – BREAKER & MITIGATION BLOCKS
-// ════════════════════════════════════════════════════════════════
+// SECTION G – BREAKER & MITIGATION BLOCKS
 
-// ── Swing-point UDT (shared by both block types) ──
 type SwingPt
-    float   price       // the high or low value
-    int     bar         // bar_index of the pivot
-    float   bodyTop     // max(open, close) of last directional candle
-    float   bodyBot     // min(open, close) of last directional candle
-    float   wickHi      // high of that candle
-    float   wickLo      // low of that candle
-
-// ── Pending breaker (waiting for MSS confirmation) ──
-type PendingBrk
-    float   trigPrice   // price that must be broken for MSS confirmation
+    float   price
+    int     bar
     float   bodyTop
     float   bodyBot
     float   wickHi
     float   wickLo
-    int     zoneBar     // bar_index of the zone candle
-    bool    isBull      // true = bullish breaker setup
 
-// ── Block arrays (reusing OrderBlock UDT) ──
+type PendingBrk
+    float   trigPrice
+    float   bodyTop
+    float   bodyBot
+    float   wickHi
+    float   wickLo
+    int     zoneBar
+    bool    isBull
+
 var array<OrderBlock>  bk_blocks  = array.new<OrderBlock>()
 var array<OrderBlock>  mb_blocks  = array.new<OrderBlock>()
 
-// ── Swing history for pattern tracking ──
 var array<SwingPt> bm_swHi = array.new<SwingPt>()
 var array<SwingPt> bm_swLo = array.new<SwingPt>()
 var array<PendingBrk> bm_pendBrk = array.new<PendingBrk>()
 
-// Alert flags
 bool bk_bullFormed = false
 bool bk_bearFormed = false
 bool bk_bullMit    = false
@@ -3515,8 +3303,6 @@ bool mb_bearFormed = false
 bool mb_bullMit    = false
 bool mb_bearMit    = false
 
-// ── Helper: find last directional candle at/near a pivot ──
-// _dir: +1 = bullish (close > open), -1 = bearish (close < open)
 f_lastDirCandle(int _pvtOffset, int _dir) =>
     float _bTop = na
     float _bBot = na
@@ -3537,7 +3323,6 @@ f_lastDirCandle(int _pvtOffset, int _dir) =>
         _wL   := low[_pvtOffset]
     [_bTop, _bBot, _wH, _wL]
 
-// ── Swing detection (shared lookback: max of the two settings) ──
 int _bmSwLen = math.max(bk_swingLen, mb_swingLen)
 float bm_pvtHi = ta.pivothigh(high, _bmSwLen, _bmSwLen)
 float bm_pvtLo = ta.pivotlow(low,   _bmSwLen, _bmSwLen)
@@ -3551,9 +3336,6 @@ f_breakerMitProcess() =>
     bool _bkBearM = false
     bool _mbBullM = false
     bool _mbBearM = false
-    // ──────────────────────────────────────────────────
-    //  Record new swing points
-    // ──────────────────────────────────────────────────
     if not na(bm_pvtHi)
         int _off = _bmSwLen
         [_bTop, _bBot, _wH, _wL] = f_lastDirCandle(_off, 1)
@@ -3568,13 +3350,7 @@ f_breakerMitProcess() =>
         if bm_swLo.size() > 30
             bm_swLo.shift()
 
-    // ──────────────────────────────────────────────────
-    //  MITIGATION BLOCK DETECTION
-    //  Bearish: swing low broken → last down candle at that low = sell zone
-    //  Bullish: swing high broken → last up candle at that high = buy zone
-    // ──────────────────────────────────────────────────
     if mb_show and barstate.isconfirmed
-        // Bearish mitigation blocks — check for broken swing lows
         if bm_swLo.size() > 0
             for i = bm_swLo.size() - 1 to 0 by 1
                 SwingPt _sw = bm_swLo.get(i)
@@ -3605,7 +3381,6 @@ f_breakerMitProcess() =>
                             line.delete(_del.mtLine)
                     break
 
-        // Bullish mitigation blocks — check for broken swing highs
         if bm_swHi.size() > 0
             for i = bm_swHi.size() - 1 to 0 by 1
                 SwingPt _sw = bm_swHi.get(i)
@@ -3636,21 +3411,12 @@ f_breakerMitProcess() =>
                             line.delete(_del.mtLine)
                     break
 
-    // ──────────────────────────────────────────────────
-    //  BREAKER BLOCK DETECTION
-    //  Bullish: Low1 → High → Low2 (< Low1) → price breaks above High
-    //  Bearish: High1 → Low → High2 (> High1) → price breaks below Low
-    // ──────────────────────────────────────────────────
-
-    // ── Detect new breaker setups when a stop-run swing forms ──
     if bk_show
-        // Bullish breaker setup: new swing low that is LOWER than a prior swing low
         if not na(bm_pvtLo) and bm_swLo.size() >= 2
             SwingPt _newLo = bm_swLo.last()
             for i = bm_swLo.size() - 2 to math.max(0, bm_swLo.size() - 6) by 1
                 SwingPt _oldLo = bm_swLo.get(i)
                 if _newLo.price < _oldLo.price
-                    // Find the swing high between the two lows
                     for h = bm_swHi.size() - 1 to 0 by 1
                         SwingPt _hi = bm_swHi.get(h)
                         if _hi.bar > _oldLo.bar and _hi.bar < _newLo.bar
@@ -3660,13 +3426,11 @@ f_breakerMitProcess() =>
                             break
                     break
 
-        // Bearish breaker setup: new swing high that is HIGHER than a prior swing high
         if not na(bm_pvtHi) and bm_swHi.size() >= 2
             SwingPt _newHi = bm_swHi.last()
             for i = bm_swHi.size() - 2 to math.max(0, bm_swHi.size() - 6) by 1
                 SwingPt _oldHi = bm_swHi.get(i)
                 if _newHi.price > _oldHi.price
-                    // Find the swing low between the two highs
                     for l = bm_swLo.size() - 1 to 0 by 1
                         SwingPt _lo = bm_swLo.get(l)
                         if _lo.bar > _oldHi.bar and _lo.bar < _newHi.bar
@@ -3676,7 +3440,6 @@ f_breakerMitProcess() =>
                             break
                     break
 
-    // ── Confirm pending breakers on MSS ──
     if bk_show and barstate.isconfirmed and bm_pendBrk.size() > 0
         for i = bm_pendBrk.size() - 1 to 0 by 1
             PendingBrk _p = bm_pendBrk.get(i)
@@ -3712,23 +3475,16 @@ f_breakerMitProcess() =>
                     if not na(_del.mtLine)
                         line.delete(_del.mtLine)
 
-    // Expire stale pending breakers (older than 200 bars)
     if bm_pendBrk.size() > 0
         for i = bm_pendBrk.size() - 1 to 0 by 1
             if bar_index - bm_pendBrk.get(i).zoneBar > 200
                 bm_pendBrk.remove(i)
             true
 
-    // ──────────────────────────────────────────────────
-    //  MANAGEMENT: extend, mitigate, prune (both types)
-    // ──────────────────────────────────────────────────
-
-    // ── Breaker Block management ──
     if bk_blocks.size() > 0
         for i = bk_blocks.size() - 1 to 0 by 1
             OrderBlock _ob = bk_blocks.get(i)
             if not _ob.mitigated
-                // Bullish breaker mitigated when close < bodyBot; bearish when close > bodyTop
                 bool _hit = _ob.isBull ? close < _ob.bodyBot : close > _ob.bodyTop
                 if _hit and barstate.isconfirmed
                     _ob.mitigated := true
@@ -3754,12 +3510,10 @@ f_breakerMitProcess() =>
                         line.delete(_ob.mtLine)
             true
 
-    // ── Mitigation Block management ──
     if mb_blocks.size() > 0
         for i = mb_blocks.size() - 1 to 0 by 1
             OrderBlock _ob = mb_blocks.get(i)
             if not _ob.mitigated
-                // Bull MB mitigated when close < bodyBot; bear MB when close > bodyTop
                 bool _hit = _ob.isBull ? close < _ob.bodyBot : close > _ob.bodyTop
                 if _hit and barstate.isconfirmed
                     _ob.mitigated := true
@@ -3797,60 +3551,46 @@ if ENABLE_BREAKER_MIT
     mb_bullMit    := _r7
     mb_bearMit    := _r8
 
-// ── Rejection Block Alerts ──
 alertcondition(rb_bullFormed, title = 'Bull RB Formed', message = 'Bullish Rejection Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(rb_bearFormed, title = 'Bear RB Formed', message = 'Bearish Rejection Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(rb_bullMit,    title = 'Bull RB Mitigated', message = 'Bullish RB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(rb_bearMit,    title = 'Bear RB Mitigated', message = 'Bearish RB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 
-// ── Breaker Block Alerts ──
 alertcondition(bk_bullFormed, title = 'Bull Breaker Formed',    message = 'Bullish Breaker confirmed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(bk_bearFormed, title = 'Bear Breaker Formed',    message = 'Bearish Breaker confirmed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(bk_bullMit,    title = 'Bull Breaker Mitigated', message = 'Bullish Breaker mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(bk_bearMit,    title = 'Bear Breaker Mitigated', message = 'Bearish Breaker mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 
-// ── Mitigation Block Alerts ──
 alertcondition(mb_bullFormed, title = 'Bull MB Formed',    message = 'Bullish Mitigation Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(mb_bearFormed, title = 'Bear MB Formed',    message = 'Bearish Mitigation Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(mb_bullMit,    title = 'Bull MB Mitigated', message = 'Bullish MB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(mb_bearMit,    title = 'Bear MB Mitigated', message = 'Bearish MB mitigated : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 
+// SECTION I – PD ARRAY CONFLUENCE SCANNER
 
-// ════════════════════════════════════════════════════════════════
-//  SECTION I – PD ARRAY CONFLUENCE SCANNER
-//  Equilibrium engine + zone collector + overlap detection + table
-//  ICT hierarchy: MB → BRK → LV → FVG → OB → RB → Old H/L
-// ════════════════════════════════════════════════════════════════
+var string pda_range = input.string("Previous Day", "Dealing Range", options = ["Previous Day", "Previous Week", "Previous Month"], group = "㉕ PD Array Scanner", tooltip = "Dealing range for Equilibrium. Premium=above, Discount=below.")
+var bool pda_showEQ = input.bool(true, "EQ Line", group = "㉕ PD Array Scanner", inline = "pda1")
+var color pda_eqColor = input.color(color.new(color.white, 30), "", group = "㉕ PD Array Scanner", inline = "pda1")
+var bool pda_showTable = input.bool(true, "Table", group = "㉕ PD Array Scanner", inline = "pda2")
+var string pda_tblPos = input.string("Top Right", "", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group = "㉕ PD Array Scanner", inline = "pda2")
+var bool pda_showConfl = input.bool(true, "Confluence Zones", group = "㉕ PD Array Scanner", inline = "pda3")
+var color pda_conflClr = input.color(color.new(#ffeb3b, 80), "", group = "㉕ PD Array Scanner", inline = "pda3")
+var int pda_minConfl = input.int(2, "Min Overlap Count ", 2, 5, group = "㉕ PD Array Scanner", inline = "pda4", tooltip = "Min overlapping PD array types for confluence.")
 
-// ── Inputs ──
-var string pda_range     = input.string("Previous Day", "Dealing Range     ", options = ["Previous Day", "Previous Week", "Previous Month"], group = "㉕ PD Array Scanner", tooltip = "Timeframe for the dealing range that defines Equilibrium.\nPremium = above EQ, Discount = below EQ.")
-var bool   pda_showEQ    = input.bool(true, "EQ Line           ", group = "㉕ PD Array Scanner", inline = "pda1")
-var color  pda_eqColor   = input.color(color.new(color.white, 30), "", group = "㉕ PD Array Scanner", inline = "pda1")
-var bool   pda_showTable = input.bool(true, "Table             ", group = "㉕ PD Array Scanner", inline = "pda2")
-var string pda_tblPos    = input.string("Top Right", "", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group = "㉕ PD Array Scanner", inline = "pda2")
-var bool   pda_showConfl = input.bool(true, "Confluence Zones  ", group = "㉕ PD Array Scanner", inline = "pda3")
-var color  pda_conflClr  = input.color(color.new(#ffeb3b, 80), "", group = "㉕ PD Array Scanner", inline = "pda3")
-var int    pda_minConfl  = input.int(2, "Min Overlap Count ", 2, 5, group = "㉕ PD Array Scanner", inline = "pda4", tooltip = "Minimum number of different PD array types overlapping to flag as confluence.")
-
-// ── PDZone: unified envelope for any PD array ──
 type PDZone
     float   top
     float   bot
-    string  kind       // "OB", "FVG", "VI", "RB", "BRK", "MB", "GAP", "I.FVG", "Inv.FVG"
+    string  kind
     bool    isBull
-    int     rank       // ICT hierarchy 1-7 (1 = nearest EQ, 7 = deepest)
-    int     score      // confluence count (filled during overlap scan)
-    bool    blocked    // true if a breaker sits between this zone and EQ
+    int     rank
+    int     score
+    bool    blocked
 
-// ── Own request.security for EQ (independent of ENABLE_LIQUIDITY) ──
 [pda_dayHi, pda_dayLo]   = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
 [pda_weekHi, pda_weekLo] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
 [pda_moHi, pda_moLo]     = request.security(syminfo.tickerid, "M", [high[1], low[1]], lookahead = barmerge.lookahead_on)
 
-// ── Helpers ──
 pda_rankFor(_kind, _isBull, _isPrem) =>
-    // ICT hierarchy — Premium arrays (bearish) rank top→bottom: 7=Old H/L, 6=RB, 5=OB, 4=FVG, 3=LV/VI, 2=BRK, 1=MB
-    // Discount arrays (bullish) rank bottom→top: 7=Old H/L, 6=RB, 5=OB, 4=FVG, 3=LV/VI, 2=BRK, 1=MB
     switch _kind
         "MB"      => 1
         "BRK"     => 2
@@ -3861,7 +3601,7 @@ pda_rankFor(_kind, _isBull, _isPrem) =>
         "Inv.FVG" => 4
         "OB"      => 5
         "RB"      => 6
-        => 5  // HTF OB etc.
+        => 5
 
 pda_tblPosition(_pos) =>
     switch _pos
@@ -3886,16 +3626,13 @@ pda_sortByRankDesc(_arr) =>
             j -= 1
         _arr.set(j + 1, _key)
 
-// ── State ──
 var line       pda_eqLine     = na
 var array<box> pda_conflBoxes = array.new<box>()
 var table      pda_tbl        = na
 
-// ── Main Scanner Logic ──
 f_pdaScanner() =>
     line  _eqLine = pda_eqLine
     table _tbl    = pda_tbl
-    // ── Equilibrium calculation ──
     float _rangeHi = switch pda_range
         "Previous Day"   => pda_dayHi
         "Previous Week"  => pda_weekHi
@@ -3908,7 +3645,6 @@ f_pdaScanner() =>
         => pda_dayLo
     float _eq = nz((_rangeHi + _rangeLo) / 2)
 
-    // ── Draw EQ line (every bar for real-time update) ──
     if pda_showEQ and not na(_rangeHi)
         if na(_eqLine)
             _eqLine := line.new(bar_index, _eq, bar_index + 1, _eq,
@@ -3917,13 +3653,10 @@ f_pdaScanner() =>
             line.set_xy1(_eqLine, bar_index - 50, _eq)
             line.set_xy2(_eqLine, bar_index + 20, _eq)
 
-    // ── Zone collection + overlap + table  (last bar only for performance) ──
     if barstate.islast
-        // ────── Collect all active PD zones ──────
         var array<PDZone> _zones = array.new<PDZone>()
         _zones.clear()
 
-        // 1. Order Blocks (chart TF)
         for i = 0 to ob_bulls.size() - 1
             OrderBlock _ob = ob_bulls.get(i)
             if not _ob.mitigated
@@ -3934,37 +3667,31 @@ f_pdaScanner() =>
             if not _ob.mitigated
                 pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", false, _eq)
 
-        // 2. HTF Order Blocks (MTF 1)
         for i = 0 to ob_mtf1.size() - 1
             OrderBlock _ob = ob_mtf1.get(i)
             if not _ob.mitigated
                 pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
 
-        // HTF Order Blocks (MTF 2)
         for i = 0 to ob_mtf2.size() - 1
             OrderBlock _ob = ob_mtf2.get(i)
             if not _ob.mitigated
                 pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
 
-        // HTF Order Blocks (MTF 3)
         for i = 0 to ob_mtf3.size() - 1
             OrderBlock _ob = ob_mtf3.get(i)
             if not _ob.mitigated
                 pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "OB", _ob.isBull, _eq)
 
-        // 3. Breaker Blocks
         for i = 0 to bk_blocks.size() - 1
             OrderBlock _ob = bk_blocks.get(i)
             if not _ob.mitigated
                 pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "BRK", _ob.isBull, _eq)
 
-        // 4. Mitigation Blocks
         for i = 0 to mb_blocks.size() - 1
             OrderBlock _ob = mb_blocks.get(i)
             if not _ob.mitigated
                 pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, "MB", _ob.isBull, _eq)
 
-        // 5. Rejection Blocks
         for i = 0 to rb_blocks.size() - 1
             RejBlock _rb = rb_blocks.get(i)
             if not _rb.mitigated and not na(_rb.bx)
@@ -3972,7 +3699,6 @@ f_pdaScanner() =>
                 float _b = box.get_bottom(_rb.bx)
                 pda_addZone(_zones, _t, _b, "RB", _rb.isBull, _eq)
 
-        // 6. FVGs (bull + bear)
         for i = 0 to _bullBoxesFVG.size() - 1
             box _bx = _bullBoxesFVG.get(i)
             if not na(_bx)
@@ -3983,7 +3709,6 @@ f_pdaScanner() =>
             if not na(_bx)
                 pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "FVG", false, _eq)
 
-        // 7. Volume Imbalances
         for i = 0 to _bullishvi.size() - 1
             box _bx = _bullishvi.get(i)
             if not na(_bx)
@@ -3994,7 +3719,6 @@ f_pdaScanner() =>
             if not na(_bx)
                 pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "VI", false, _eq)
 
-        // 8. Implied FVGs
         for i = 0 to _bullishifvg.size() - 1
             box _bx = _bullishifvg.get(i)
             if not na(_bx)
@@ -4005,7 +3729,6 @@ f_pdaScanner() =>
             if not na(_bx)
                 pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "I.FVG", false, _eq)
 
-        // 9. Inverse FVGs
         for i = 0 to bullInvFVG.size() - 1
             box _bx = bullInvFVG.get(i)
             if not na(_bx)
@@ -4016,7 +3739,6 @@ f_pdaScanner() =>
             if not na(_bx)
                 pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "Inv.FVG", false, _eq)
 
-        // 10. Gaps (Opening Gaps)
         for i = 0 to _gapsboxesbu.size() - 1
             box _bx = _gapsboxesbu.get(i)
             if not na(_bx)
@@ -4027,22 +3749,17 @@ f_pdaScanner() =>
             if not na(_bx)
                 pda_addZone(_zones, box.get_top(_bx), box.get_bottom(_bx), "GAP", false, _eq)
 
-        // ────── Overlap scan: O(n²) on last bar only ──────
         for i = 0 to _zones.size() - 1
             PDZone _z1 = _zones.get(i)
             int _cnt = 1
             for j = 0 to _zones.size() - 1
                 if j != i
                     PDZone _z2 = _zones.get(j)
-                    // Two zones overlap if z1.top >= z2.bot AND z2.top >= z1.bot
                     if _z1.top >= _z2.bot and _z2.top >= _z1.bot
-                        // Only count different kinds for true confluence
                         if _z1.kind != _z2.kind
                             _cnt += 1
             _z1.score := _cnt
 
-        // ────── Breaker gating ──────
-        // Collect breaker midpoints to check if they sit between a zone and EQ
         var array<float> _brkMids = array.new<float>()
         _brkMids.clear()
         for i = 0 to _zones.size() - 1
@@ -4055,20 +3772,15 @@ f_pdaScanner() =>
             if _z.kind != "BRK"
                 float _mid = (_z.top + _z.bot) / 2.0
                 bool _isPrem = _mid > _eq
-                // Check if any breaker sits between this zone and EQ
                 for j = 0 to _brkMids.size() - 1
                     float _bm = _brkMids.get(j)
                     if _isPrem
-                        // Premium zone: breaker blocks if breaker is between EQ and zone
                         if _bm > _eq and _bm < _mid
                             _z.blocked := true
                     else
-                        // Discount zone: breaker blocks if breaker is between zone and EQ
                         if _bm < _eq and _bm > _mid
                             _z.blocked := true
 
-        // ────── Draw confluence overlay boxes ──────
-        // Clean up old confluence boxes
         for i = pda_conflBoxes.size() - 1 to 0 by 1
             box.delete(pda_conflBoxes.get(i))
         pda_conflBoxes.clear()
@@ -4087,9 +3799,7 @@ f_pdaScanner() =>
                          bgcolor = _clr)
                     pda_conflBoxes.push(_bx)
 
-        // ────── Summary Table ──────
         if pda_showTable
-            // Sort zones into premium (above EQ) and discount (below EQ)
             var array<PDZone> _premZones = array.new<PDZone>()
             var array<PDZone> _discZones = array.new<PDZone>()
             _premZones.clear()
@@ -4101,17 +3811,14 @@ f_pdaScanner() =>
                 else
                     _discZones.push(_z)
 
-            // Sort by rank descending (deepest first for premium = top of table)
             pda_sortByRankDesc(_premZones)
             pda_sortByRankDesc(_discZones)
 
-            // Limit display to 6 per side
             int _maxRows = 6
             int _premCount = math.min(_premZones.size(), _maxRows)
             int _discCount = math.min(_discZones.size(), _maxRows)
-            int _totalRows = 3 + _premCount + 1 + _discCount  // header + prem + EQ row + disc
+            int _totalRows = 3 + _premCount + 1 + _discCount
 
-            // Create/recreate table
             if not na(_tbl)
                 table.delete(_tbl)
 
@@ -4122,7 +3829,6 @@ f_pdaScanner() =>
                  frame_width = 2,
                  frame_color = color.new(#555577, 10))
 
-            // Row 0: Title
             string _rangeLabel = switch pda_range
                 "Previous Day"   => "PDH/PDL"
                 "Previous Week"  => "PWH/PWL"
@@ -4135,7 +3841,6 @@ f_pdaScanner() =>
                  text_size = size.small, bgcolor = color.new(#16213e, 0))
             table.merge_cells(_tbl, 0, 0, 3, 0)
 
-            // Row 1: Range + EQ info
             table.cell(_tbl, 0, 1, _rangeLabel, text_color = color.new(color.white, 30),
                  text_size = size.tiny, text_halign = text.align_left)
             table.cell(_tbl, 1, 1, "EQ: " + str.tostring(_eq, format.mintick), text_color = pda_eqColor,
@@ -4145,7 +3850,6 @@ f_pdaScanner() =>
             table.cell(_tbl, 3, 1, str.tostring(_zones.size()) + " zones", text_color = color.new(color.white, 40),
                  text_size = size.tiny)
 
-            // Row 2: Premium header
             int _row = 2
             table.cell(_tbl, 0, _row, "PREMIUM", text_color = #f23645,
                  text_size = size.tiny, text_halign = text.align_left)
@@ -4157,7 +3861,6 @@ f_pdaScanner() =>
                  text_size = size.tiny)
             _row += 1
 
-            // Premium zones (bearish arrays above EQ)
             for i = 0 to _premCount - 1
                 PDZone _z = _premZones.get(i)
                 string _dir  = _z.isBull ? "+" : "-"
@@ -4179,13 +3882,11 @@ f_pdaScanner() =>
                      text_size = size.tiny)
                 _row += 1
 
-            // EQ divider row
             table.cell(_tbl, 0, _row, "=== EQ " + str.tostring(_eq, format.mintick) + " ===",
                  text_color = pda_eqColor, text_size = size.tiny, text_halign = text.align_center)
             table.merge_cells(_tbl, 0, _row, 3, _row)
             _row += 1
 
-            // Discount zones (bullish arrays below EQ)
             for i = 0 to _discCount - 1
                 PDZone _z = _discZones.get(i)
                 string _dir  = _z.isBull ? "+" : "-"
@@ -4213,8 +3914,6 @@ if ENABLE_PDA_SCANNER
     pda_eqLine := _pEq
     pda_tbl    := _pTbl
 
-// ── Timeframe Warning ──
-// Many sections require intraday charts; show a one-time warning on daily+ charts
 var label _tfWarning = na
 if barstate.islast and not timeframe.isintraday
     bool _anyIntraday = ENABLE_HOURLY_OPEN or ENABLE_ORDER_BLOCKS or ENABLE_IMBALANCES or ENABLE_KILLZONES or ENABLE_SESSION_HL
@@ -4232,4 +3931,4 @@ if barstate.islast and not timeframe.isintraday
             label.set_x(_tfWarning, bar_index)
             label.set_y(_tfWarning, close)
 
-// ── End of Merged Script ──
+// End of Merged Script
