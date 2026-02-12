@@ -371,7 +371,7 @@ if barstate.isconfirmed and ENABLE_ORDER_BLOCKS
                         line.delete(_del.mtLine)
 
 // ── Extend, Mitigate & Auto-Prune Bullish OBs ──
-if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
+f_obManageBulls() =>
     for i = ob_bulls.size() - 1 to 0 by 1
         OrderBlock _ob = ob_bulls.get(i)
         if not _ob.mitigated
@@ -410,8 +410,11 @@ if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
                     line.delete(_ob.mtLine)
                 ob_bulls.remove(i)
 
+if ENABLE_ORDER_BLOCKS and ob_bulls.size() > 0
+    f_obManageBulls()
+
 // ── Extend, Mitigate & Auto-Prune Bearish OBs ──
-if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
+f_obManageBears() =>
     for i = ob_bears.size() - 1 to 0 by 1
         OrderBlock _ob = ob_bears.get(i)
         if not _ob.mitigated
@@ -449,6 +452,9 @@ if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
                 if not na(_ob.mtLine)
                     line.delete(_ob.mtLine)
                 ob_bears.remove(i)
+
+if ENABLE_ORDER_BLOCKS and ob_bears.size() > 0
+    f_obManageBears()
 
 // ── MTF OB Detection Function ──
 // Runs on HTF bars via request.security(); returns sequence counters + zone data.
@@ -618,7 +624,7 @@ f_mtfObManage(array<OrderBlock> _arr) =>
                         line.delete(_ob.mtLine)
 
 // ── Create new MTF OB boxes when sequence counters tick ──
-if ENABLE_ORDER_BLOCKS
+f_mtfObTick() =>
     string _tf1Lbl = f_tfStr(ob_mtf1_tf)
     string _tf2Lbl = f_tfStr(ob_mtf2_tf)
     string _tf3Lbl = f_tfStr(ob_mtf3_tf)
@@ -680,6 +686,8 @@ if ENABLE_ORDER_BLOCKS
                 alert(_wh_json("Bear OB " + _tf3Lbl + " Formed", _t, _b), alert.freq_once_per_bar_close)
         f_mtfObManage(ob_mtf3)
 
+if ENABLE_ORDER_BLOCKS
+    f_mtfObTick()
 
 // ════════════════════════════════════════════════════════════════
 //  SECTION B – ICT GAPS / FVG / VI  (© Vulnerable_human_x)
@@ -2986,7 +2994,7 @@ var float sh_nypmH = na,  var float sh_nypmL = na,  var int sh_nypmBar = na,  va
 var bool sh_inAsia = false, var bool sh_inLon = false
 var bool sh_inNYAM = false, var bool sh_inNYPre = false, var bool sh_inNYL = false, var bool sh_inNYPM = false
 
-if ENABLE_SESSION_HL and timeframe.isintraday
+f_sessionHL() =>
     // ── Detect sessions (uses Killzone times from ⑱, except NY Lunch which is hardcoded 12:00-13:30) ──
     bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
     bool _isLon  = f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
@@ -3108,6 +3116,8 @@ if ENABLE_SESSION_HL and timeframe.isintraday
         _sh_drawCur(sh_showNYLunch, _isNYL,  sh_nylH,  sh_nylL,  sh_nylHT,  sh_nylLT,  sh_nylBar,  sh_nylHColor,    sh_nylLColor,    "NY Lunch")
         _sh_drawCur(sh_showNYPM,    _isNYPM, sh_nypmH, sh_nypmL, sh_nypmHT, sh_nypmLT, sh_nypmBar, sh_nypmHColor,   sh_nypmLColor,   "NY PM")
 
+if ENABLE_SESSION_HL and timeframe.isintraday
+    f_sessionHL()
 
 // ════════════════════════════════════════════════════════════════
 //  SECTION H – PDH/PDL / PWH/PWL / PMH/PML LIQUIDITY LEVELS
@@ -3293,7 +3303,7 @@ rb_trigStyle = switch rb_triggerStyle
 float rb_pvtHi = ta.pivothigh(high, rb_swingLen, rb_swingLen)
 float rb_pvtLo = ta.pivotlow(low,   rb_swingLen, rb_swingLen)
 
-if ENABLE_REJECTION_BLK
+f_rbDetect() =>
     // ── Bearish Rejection Block (at swing highs) ──
     if rb_showBear and not na(rb_pvtHi)
         int _pvtOff = rb_swingLen   // pivot candle is this many bars back
@@ -3395,8 +3405,11 @@ if ENABLE_REJECTION_BLK
                 box.delete(_del.bx)
                 line.delete(_del.trigLine)
 
+if ENABLE_REJECTION_BLK
+    f_rbDetect()
+
 // ── Extend, Mitigate & Auto-Prune Rejection Blocks ──
-if ENABLE_REJECTION_BLK and rb_blocks.size() > 0
+f_rbManage() =>
     for i = rb_blocks.size() - 1 to 0 by 1
         RejBlock _rb = rb_blocks.get(i)
         if not _rb.mitigated
@@ -3429,6 +3442,9 @@ if ENABLE_REJECTION_BLK and rb_blocks.size() > 0
                 box.delete(_rb.bx)
                 line.delete(_rb.trigLine)
                 rb_blocks.remove(i)
+
+if ENABLE_REJECTION_BLK and rb_blocks.size() > 0
+    f_rbManage()
 
 // ════════════════════════════════════════════════════════════════
 //  SECTION G – BREAKER & MITIGATION BLOCKS
@@ -3499,7 +3515,7 @@ int _bmSwLen = math.max(bk_swingLen, mb_swingLen)
 float bm_pvtHi = ta.pivothigh(high, _bmSwLen, _bmSwLen)
 float bm_pvtLo = ta.pivotlow(low,   _bmSwLen, _bmSwLen)
 
-if ENABLE_BREAKER_MIT
+f_breakerMitProcess() =>
     // ──────────────────────────────────────────────────
     //  Record new swing points
     // ──────────────────────────────────────────────────
@@ -3731,6 +3747,9 @@ if ENABLE_BREAKER_MIT
                     if not na(_ob.mtLine)
                         line.delete(_ob.mtLine)
 
+if ENABLE_BREAKER_MIT
+    f_breakerMitProcess()
+
 // ── Rejection Block Alerts ──
 alertcondition(rb_bullFormed, title = 'Bull RB Formed', message = 'Bullish Rejection Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
 alertcondition(rb_bearFormed, title = 'Bear RB Formed', message = 'Bearish Rejection Block formed : {{exchange}}:{{ticker}} TIMEFRAME:{{interval}}')
@@ -3826,7 +3845,7 @@ var array<box> pda_conflBoxes = array.new<box>()
 var table      pda_tbl        = na
 
 // ── Main Scanner Logic ──
-if ENABLE_PDA_SCANNER
+f_pdaScanner() =>
     // ── Equilibrium calculation ──
     float _rangeHi = switch pda_range
         "Previous Day"   => pda_dayHi
@@ -4138,6 +4157,9 @@ if ENABLE_PDA_SCANNER
                 table.cell(pda_tbl, 3, _row, _gate, text_color = _gateClr,
                      text_size = size.tiny)
                 _row += 1
+
+if ENABLE_PDA_SCANNER
+    f_pdaScanner()
 
 // ── Timeframe Warning ──
 // Many sections require intraday charts; show a one-time warning on daily+ charts
