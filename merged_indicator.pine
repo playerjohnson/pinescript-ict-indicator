@@ -3312,12 +3312,12 @@ pda_addZone(_zones, _top, _bot, _kind, _isBull) =>
 	if not na(_top) and not na(_bot) and _top > _bot
 		_zones.push(PDZone.new(_top, _bot, _kind, _isBull, pda_rankFor(_kind), 0))
 
-pda_scanOBArr(_zones, _arr, _kind, bool _forceBull = na) =>
+pda_scanOBArr(_zones, _arr, _kind) =>
 	for i = 0 to math.max(_arr.size() - 1, 0)
 		if i < _arr.size()
 			OrderBlock _ob = _arr.get(i)
 			if not _ob.mitigated
-				pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, _kind, na(_forceBull) ? _ob.isBull : _forceBull)
+				pda_addZone(_zones, _ob.bodyTop, _ob.bodyBot, _kind, _ob.isBull)
 
 pda_scanBoxArr(_zones, _arr, _kind, bool _isBull) =>
 	for i = 0 to math.max(_arr.size() - 1, 0)
@@ -3380,8 +3380,8 @@ f_pdaScanner() =>
 		var array<PDZone> _zones=array.new<PDZone>()
 		_zones.clear()
 
-		pda_scanOBArr(_zones, ob_bulls, "OB", true)
-		pda_scanOBArr(_zones, ob_bears, "OB", false)
+		pda_scanOBArr(_zones, ob_bulls, "OB")
+		pda_scanOBArr(_zones, ob_bears, "OB")
 		pda_scanOBArr(_zones, ob_mtf1, "OB")
 		pda_scanOBArr(_zones, ob_mtf2, "OB")
 		pda_scanOBArr(_zones, ob_mtf3, "OB")
