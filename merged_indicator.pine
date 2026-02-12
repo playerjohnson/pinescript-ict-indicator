@@ -610,10 +610,10 @@ f_mtfObManage(array<OrderBlock> _arr) =>
                     if not na(_ob.mtLine)
                         line.set_x2(_ob.mtLine, bar_index + 1)
                 if ob_pruneAge > 0 and (bar_index - _ob.mit_bar) > ob_pruneAge
+                    _arr.remove(i)
                     box.delete(_ob.bx)
                     if not na(_ob.mtLine)
                         line.delete(_ob.mtLine)
-                    _arr.remove(i)
 
 // ── Create new MTF OB boxes when sequence counters tick ──
 if ENABLE_ORDER_BLOCKS
