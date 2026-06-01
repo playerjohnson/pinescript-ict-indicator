@@ -10,6 +10,8 @@ Severity legend: 🔴 high · 🟠 medium · 🟡 low/cleanup · 🔵 note. Conf
 
 ## Uncommitted change: HTF draw-magnet (lines 2100–2127)
 
+> **✅ RESOLVED 2026-06-01 — feature REMOVED.** On-chart testing confirmed the magnet cannot snap onto the projected HTF candles: they are `box`/`line` drawing objects (never magnet targets), and the plots render only on real bars, not in the offset region. TradingView's "Snap to indicators" only snaps to plotted *series values* on real bars — not to drawing objects. The 24 plots could not achieve the intended goal, so they (plus the `_hg` helper and `_mc`) were deleted; output count dropped 47→23 of 64. The findings below are retained for the record. To read exact HTF levels, use the built-in **HTF Candle Trace** lines + **Price Label** ([lines 1676-1693](../../merged_indicator.pine#L1676-L1693)).
+
 The change adds 24 near-invisible `plot()` calls exposing each HTF candle's front (most-recent) O/H/L/C so TradingView's price-scale magnet snaps to those levels. **Two of the items below are gates that must be confirmed on a live chart — they decide whether the feature works at all, or crashes — and rank above the cosmetic issue I originally led with.**
 
 ### 🟠 M1 (RESOLVED via research 2026-06-01) — Magnet snaps to plot *values*, not to drawing objects, and only with "Snap to indicators" ON
