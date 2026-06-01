@@ -2094,6 +2094,36 @@ if ENABLE_HTF_CANDLES
 			htfCnt += 1
 			htfOffset += _cs.candles.size() * htfSettings.width + (_cs.candles.size() > 0 ? (_cs.candles.size() - 1) * htfSettings.buffer : 0) + htfSettings.htf_buffer
 
+// HTF draw-magnet: plot O/H/L/C as nearly invisible series (99% transp, not 100%)
+// TradingView skips alpha=0 series for magnet; 99% transparent still registers.
+// NOTE: these 24 plots + bgcolor + alertconditions use ~47 of TradingView's 64-output cap; little headroom remains for future plot-based features.
+_hg(CandleSet _cs)=>ENABLE_HTF_CANDLES and _cs.csettings.show and _cs.candles.size()>0
+var color _mc=color.new(color.white,99)
+plot(_hg(htf1)?htf1.candles.first().o:na,color=_mc,title="H1 O")
+plot(_hg(htf1)?htf1.candles.first().h:na,color=_mc,title="H1 H")
+plot(_hg(htf1)?htf1.candles.first().l:na,color=_mc,title="H1 L")
+plot(_hg(htf1)?htf1.candles.first().c:na,color=_mc,title="H1 C")
+plot(_hg(htf2)?htf2.candles.first().o:na,color=_mc,title="H2 O")
+plot(_hg(htf2)?htf2.candles.first().h:na,color=_mc,title="H2 H")
+plot(_hg(htf2)?htf2.candles.first().l:na,color=_mc,title="H2 L")
+plot(_hg(htf2)?htf2.candles.first().c:na,color=_mc,title="H2 C")
+plot(_hg(htf3)?htf3.candles.first().o:na,color=_mc,title="H3 O")
+plot(_hg(htf3)?htf3.candles.first().h:na,color=_mc,title="H3 H")
+plot(_hg(htf3)?htf3.candles.first().l:na,color=_mc,title="H3 L")
+plot(_hg(htf3)?htf3.candles.first().c:na,color=_mc,title="H3 C")
+plot(_hg(htf4)?htf4.candles.first().o:na,color=_mc,title="H4 O")
+plot(_hg(htf4)?htf4.candles.first().h:na,color=_mc,title="H4 H")
+plot(_hg(htf4)?htf4.candles.first().l:na,color=_mc,title="H4 L")
+plot(_hg(htf4)?htf4.candles.first().c:na,color=_mc,title="H4 C")
+plot(_hg(htf5)?htf5.candles.first().o:na,color=_mc,title="H5 O")
+plot(_hg(htf5)?htf5.candles.first().h:na,color=_mc,title="H5 H")
+plot(_hg(htf5)?htf5.candles.first().l:na,color=_mc,title="H5 L")
+plot(_hg(htf5)?htf5.candles.first().c:na,color=_mc,title="H5 C")
+plot(_hg(htf6)?htf6.candles.first().o:na,color=_mc,title="H6 O")
+plot(_hg(htf6)?htf6.candles.first().h:na,color=_mc,title="H6 H")
+plot(_hg(htf6)?htf6.candles.first().l:na,color=_mc,title="H6 L")
+plot(_hg(htf6)?htf6.candles.first().c:na,color=_mc,title="H6 C")
+
 f_inSession(_h, _m, _startH, _startM, _endH, _endM) =>
 	int _startTotal = _startH * 60 + _startM
 	int _endTotal = _endH * 60 + _endM
