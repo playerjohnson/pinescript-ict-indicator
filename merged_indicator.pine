@@ -73,6 +73,7 @@ f_get_line_style(style) =>
 		'⎯⎯⎯'  => line.style_solid
 		'----' => line.style_dashed
 		'····' => line.style_dotted
+		=> line.style_solid
 
 var line[] ho_lines=array.new_line()
 var line[] hs_lines=array.new_line()
@@ -347,15 +348,10 @@ var array<line> beinvfvgce=array.new_line()
 var array<line> bugapce=array.new_line()
 var array<line> begapce=array.new_line()
 
-_controlBox2(_boxes, _high, _low) =>
+_controlBox2(_boxes) =>
 	if array.size(_boxes) > 0
-		for i = array.size(_boxes) - 1 to 0 by 1
-			_box = array.get(_boxes, i)
-			_boxLow = box.get_bottom(_box)
-			_boxHigh = box.get_top(_box)
-			_boxRight = box.get_right(_box)
-			if extendallvis
-				box.set_right(_box, bar_index + 1)
+		for i = 0 to array.size(_boxes) - 1
+			box.set_right(array.get(_boxes, i), bar_index + 1)
 
 isBuVItype1(index) =>
 	open[index] > close[index + 1] and low[index] <= high[index + 1] and close[index] > open[index] and close[index + 1] > open[index + 1]
@@ -438,8 +434,8 @@ if isBeVItype3(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
 		alert(_wh_json("VI-", math.min(open, close[1]), math.max(open, close[1])), alert.freq_once_per_bar_close)
 
 if extendallvis
-	_controlBox2(_bullishvi, high, low)
-	_controlBox2(_bearishvi, high, low)
+	_controlBox2(_bullishvi)
+	_controlBox2(_bearishvi)
 
 if (high[1] < low or low[1] > high) and truegap and ENABLE_IMBALANCES
 	box _gapsbu = na
@@ -1382,9 +1378,9 @@ getCloseAtTime() =>
 					index := i
 					break
 			if not na(index)
-				if closeAt.size() >= index
+				if closeAt.size() > index
 					closed := closeAt.get(index)
-				if closedAtTime.size() >= index
+				if closedAtTime.size() > index
 					closedtime := closedAtTime.get(index)
 	[closed, closedtime]
 
@@ -1406,9 +1402,9 @@ getOpenAtTime() =>
 					index := i
 					break
 			if not na(index)
-				if openAt.size() >= index
+				if openAt.size() > index
 					opened := openAt.get(index)
-				if openedAtTime.size() >=index
+				if openedAtTime.size() > index
 					openedtime := openedAtTime.get(index)
 	[opened, openedtime]
 
@@ -1716,7 +1712,6 @@ _htf_ValidTimeframe(string HTF) =>
 	else
 		n1 = timeframe.in_seconds()
 		n2 = timeframe.in_seconds(HTF)
-		n3 = n1 % n2
 		n1 < n2 and math.round(n2 / n1) == n2 / n1
 
 _htf_RemainingTime(string HTF) =>
@@ -2006,7 +2001,6 @@ method Monitor(CandleSet candleSet) =>
 				str.format_time(candle.o_time, 'M', 'America/New_York')
 			=>
 				''
-		log.info('dow: {1} |{0}|', candle.dow, candleSet.csettings.htf)
 		bull = candle.c > candle.o
 
 		candle.body := box.new(bar_index, math.max(candle.o, candle.c), bar_index + 2, math.min(candle.o, candle.c), bull ? htfSettings.bull_border : htfSettings.bear_border, 1, bgcolor = bull ? htfSettings.bull_body : htfSettings.bear_body)
