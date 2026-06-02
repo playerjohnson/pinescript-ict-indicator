@@ -2176,6 +2176,53 @@ f_sweepMark(SweepState st, string name, bool isHigh) =>
 	if wh_enable and wh_sweeps
 		alert(_wh_json("SWEEP " + name + (isHigh ? " BSL" : " SSL"), st.levelPrice, st.levelPrice), alert.freq_once_per_bar)
 
+// ===== ㉓ Equal Highs/Lows (resting liquidity pools) =====
+var int    eqhl_pivotLen = input.int(5, "Pivot length", minval=2, maxval=50, group="㉓ Equal Highs/Lows", inline="eq1", tooltip="Bars each side for swing pivots; pivots confirm this many bars late.")
+var float  eqhl_tolMult  = input.float(0.1, "Tolerance ×range", minval=0.0, maxval=1.0, step=0.05, group="㉓ Equal Highs/Lows", inline="eq1", tooltip="Two pivots are 'equal' if within this fraction of the average bar range.")
+var int    eqhl_maxPools = input.int(10, "Max pools/side", minval=1, maxval=50, group="㉓ Equal Highs/Lows", inline="eq2")
+var color  eqhl_color    = input.color(color.new(#b39ddb, 0), "Color", group="㉓ Equal Highs/Lows", inline="eq2")
+
+type LiqPool
+	float price
+	line  ln = na
+	label lbl = na
+	SweepState sweep = na
+
+// Register a new equal-high/low pool, deduped against the newest existing pool, pruned to cap.
+f_eqhlAdd(array<LiqPool> pools, float price, float tol) =>
+	bool _dup = false
+	if pools.size() > 0
+		LiqPool _last = pools.get(0)
+		if math.abs(_last.price - price) <= tol
+			_dup := true
+	if not _dup
+		pools.unshift(LiqPool.new(price = price))
+		while pools.size() > eqhl_maxPools
+			LiqPool _old = pools.pop()
+			line.delete(_old.ln)
+			label.delete(_old.lbl)
+			if not na(_old.sweep)
+				label.delete(_old.sweep.marker)
+
+// Draw/update each pool's line+label, run sweep detection through the shared engine.
+f_eqhlProcess(array<LiqPool> pools, bool isHigh) =>
+	if pools.size() > 0
+		for i = 0 to pools.size() - 1
+			LiqPool _p = pools.get(i)
+			int _x2 = bar_index + 30
+			if na(_p.ln)
+				_p.ln := line.new(bar_index - 1, _p.price, _x2, _p.price, color=eqhl_color, style=line.style_dashed, width=1)
+			line.set_x2(_p.ln, _x2)
+			if na(_p.lbl)
+				_p.lbl := label.new(_x2, _p.price, isHigh ? "EQH" : "EQL", style=label.style_label_left, color=color.new(color.white, 100), textcolor=eqhl_color, size=size.tiny)
+			label.set_x(_p.lbl, _x2)
+			if ENABLE_SWEEPS
+				if na(_p.sweep)
+					_p.sweep := SweepState.new()
+				if f_sweepTick(_p.sweep, _p.price, isHigh, sweep_confirmBars)
+					f_sweepMark(_p.sweep, isHigh ? "EQH" : "EQL", isHigh)
+				line.set_color(_p.ln, _p.sweep.phase == 2 ? sweep_lineColor : eqhl_color)
+
 type SHLevel
 	float price
 	int startBar
