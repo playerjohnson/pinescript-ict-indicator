@@ -23,7 +23,7 @@ TradingView compiles Pine Script into tokens and enforces a hard limit (~100K). 
 ## Architecture
 
 ### Master Toggle Pattern
-All features are gated by `ENABLE_*` booleans (group `⓪ Section Toggles`). Disabled sections incur zero per-bar cost. New features **must** follow this pattern.
+All features are gated by `ENABLE_*` booleans (group `⓪ Section Toggles`). Disabled sections incur zero per-bar cost. New features **must** follow this pattern. `ENABLE_SWEEPS` (Liquidity Sweeps) defaults on; `ENABLE_EQHL` (Equal Highs/Lows pivot layer) defaults off to save tokens.
 
 ### Input Groups
 Numbered `⓪` through `㉕` with Unicode circled numbers. Each feature section has its own group. When adding inputs, use the next available group number and follow the existing `inline=` pattern for compact layout.
@@ -48,6 +48,7 @@ Numbered `⓪` through `㉕` with Unicode circled numbers. Each feature section 
 7. **Killzones** — Session highlight boxes (Asian, London, NY, Silver Bullet)
 8. **Session Highs/Lows** — Previous session range tracking
 9. **Liquidity Levels** — PDH/PDL, PWH/PWL, PMH/PML
+9b. **Liquidity Sweeps** — shared sweep engine (`SweepState`, `f_sweepTick`, `f_sweepMark`); confirmed Turtle Soup detection on session H/L + PD/PW/PM, gated by `ENABLE_SWEEPS` (default on). Equal-High/Low pools (`LiqPool`, `ta.pivothigh/low`) gated by `ENABLE_EQHL` (default off) reuse the same engine. EQH/EQL pairs pivots within tolerance via a 6-deep recent-pivot ring buffer (`_eqhRecent`/`_eqlRecent`), so it catches equal highs/lows separated by an intervening raid. Known limitation: in a strong trend the pairwise tolerance can emit a few extra pools (pool span can drift beyond `tol`). Sweep detection deliberately still fires on already-mitigated session levels (re-tests), which can show both `⚡TS` and `[Mitigated]`.
 10. **Rejection Blocks** — `f_rbDetect()`, `f_rbManage()`, pivot + wick% validation
 11. **Breaker & Mitigation Blocks** — `f_breakerMitProcess()`, swing-based detection
 12. **PD Array Scanner** — `f_pdaScanner()`, confluence scoring across all formations
@@ -67,5 +68,5 @@ TradingView caps at 500 each of boxes, lines, and labels. The indicator declares
 - Prefix `f_` for global functions, `_` for local variables/parameters
 - `var` keyword for persistent state (initialized once, survives across bars)
 - `barstate.isconfirmed` guards on mitigation/extend loops to avoid repainting
-- `request.security()` calls are minimized (currently 7 total) due to performance cost
+- `request.security()` calls are minimized (currently 8 total) due to performance cost
 - Tabs for indentation, compact spacing around `=` in input declarations

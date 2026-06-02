@@ -12,7 +12,7 @@ indicator(
 	 shorttitle  = "HO + Imbal + NWOG + HTF [Merged]",
 	 overlay = true,
 	 max_boxes_count = 500,
-	 max_lines_count = 500,1
+	 max_lines_count = 500,
 	 max_labels_count = 500,
 	 max_bars_back = 5000,
 	 behind_chart = true,
@@ -26,10 +26,13 @@ var bool ENABLE_KILLZONES=input.bool(true, "Enable Killzones", group="⓪ Sectio
 var bool ENABLE_SESSION_HL=input.bool(true, "Enable Session Highs/Lows", group="⓪ Section Toggles")
 var bool ENABLE_LIQUIDITY=input.bool(true, "Enable PDH/PDL/PWH/PWL", group="⓪ Section Toggles")
 var bool ENABLE_PDA_SCANNER=input.bool(false, "Enable PD Array Scanner", group="⓪ Section Toggles")
+var bool ENABLE_SWEEPS=input.bool(true, "Enable Liquidity Sweeps", group="⓪ Section Toggles")
+var bool ENABLE_EQHL=input.bool(false, "Enable Equal Highs/Lows", group="⓪ Section Toggles")
 
 var bool wh_enable=input.bool(false, "Enable Webhook Alerts", group="㉑ Webhook Alerts", tooltip="JSON alerts via alert(). In TV alert dialog, select 'Any alert() function call'.")
 var bool wh_formations=input.bool(true, "Formation Alerts", group="㉑ Webhook Alerts", inline="wh1", tooltip="OB/FVG/VI/GAP formations")
 var bool wh_mitigations=input.bool(true, "Mitigation Alerts", group="㉑ Webhook Alerts", inline="wh1", tooltip="Mitigation events")
+var bool wh_sweeps=input.bool(true, "Sweep Alerts", group="㉑ Webhook Alerts", tooltip="Liquidity sweep / Turtle Soup events")
 
 _wh_json(string _event, float _high, float _low) =>
 	'{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '"}'
@@ -2117,6 +2120,109 @@ if ENABLE_KILLZONES and timeframe.isintraday
 
 bgcolor(kz_bg)
 
+// ===== ㉒ Liquidity Sweep engine (shared by Session H/L, PD/PW/PM, EQH/EQL) =====
+var int    sweep_confirmBars = input.int(2, "Confirm bars", minval=1, maxval=5, group="㉒ Liquidity Sweeps", inline="sw1", tooltip="A reversal must confirm within this many bars after the wick-reject, or the sweep re-arms.")
+var color  sweep_lineColor   = input.color(color.new(#ffd54f, 0), "Swept line", group="㉒ Liquidity Sweeps", inline="sw1")
+var bool   sweep_showMarker  = input.bool(true, "Marker", group="㉒ Liquidity Sweeps", inline="sw2")
+var color  sweep_markerColor = input.color(color.new(#ffd54f, 0), "", group="㉒ Liquidity Sweeps", inline="sw2")
+var string sweep_markerSize  = input.string(size.tiny, "", options=[size.tiny, size.small, size.normal], group="㉒ Liquidity Sweeps", inline="sw2")
+
+type SweepState
+	int   phase        = 0
+	float levelPrice   = na
+	int   sweepBar     = na
+	float confirmLevel = na
+	int   sweepTime    = na
+	label marker       = na
+
+// Advances the sweep state machine for one level on one bar. Returns true on the
+// bar a Turtle Soup confirms. Mutates st in place (Pine objects are by-reference).
+f_sweepTick(SweepState st, float lvl, bool isHigh, int confirmBars) =>
+	bool _justConfirmed = false
+	if not na(lvl)
+		if na(st.levelPrice) or st.levelPrice != lvl
+			label.delete(st.marker)
+			st.marker := na
+			st.phase := 0
+			st.levelPrice := lvl
+			st.sweepBar := na
+		if barstate.isconfirmed
+			if st.phase == 1
+				bool _confirmed = isHigh ? (close < st.confirmLevel) : (close > st.confirmLevel)
+				if _confirmed
+					st.phase := 2
+					_justConfirmed := true
+				else if bar_index - st.sweepBar >= confirmBars
+					st.phase := 0
+			if st.phase == 0
+				bool _bareSweep = isHigh ? (high > lvl and close < lvl) : (low < lvl and close > lvl)
+				if _bareSweep
+					st.phase := 1
+					st.sweepBar := bar_index
+					st.sweepTime := time
+					st.confirmLevel := isHigh ? low : high
+	_justConfirmed
+
+// Draws/updates the one marker label and fires the webhook alert. Does NOT recolor
+// the level line — each host module owns that.
+f_sweepMark(SweepState st, string name, bool isHigh) =>
+	if sweep_showMarker
+		string _tag = isHigh ? "TS↓" : "TS↑"
+		if na(st.marker)
+			st.marker := label.new(st.sweepBar, st.levelPrice, _tag, xloc=xloc.bar_index, style=isHigh ? label.style_label_down : label.style_label_up, color=color.new(sweep_markerColor, 20), textcolor=color.white, size=sweep_markerSize)
+		else
+			label.set_xy(st.marker, st.sweepBar, st.levelPrice)
+			label.set_text(st.marker, _tag)
+	if wh_enable and wh_sweeps
+		alert(_wh_json("SWEEP " + name + (isHigh ? " BSL" : " SSL"), st.levelPrice, st.levelPrice), alert.freq_once_per_bar)
+
+// ===== ㉓ Equal Highs/Lows (resting liquidity pools) =====
+var int    eqhl_pivotLen = input.int(5, "Pivot length", minval=2, maxval=50, group="㉓ Equal Highs/Lows", inline="eq1", tooltip="Bars each side for swing pivots; pivots confirm this many bars late.")
+var float  eqhl_tolMult  = input.float(0.1, "Tolerance ×range", minval=0.0, maxval=1.0, step=0.05, group="㉓ Equal Highs/Lows", inline="eq1", tooltip="Two pivots are 'equal' if within this fraction of the average bar range.")
+var int    eqhl_maxPools = input.int(10, "Max pools/side", minval=1, maxval=20, group="㉓ Equal Highs/Lows", inline="eq2")
+var color  eqhl_color    = input.color(color.new(#b39ddb, 0), "Color", group="㉓ Equal Highs/Lows", inline="eq2")
+
+type LiqPool
+	float price
+	line  ln = na
+	label lbl = na
+	SweepState sweep = na
+
+// Register a new equal-high/low pool, deduped against the newest existing pool, pruned to cap.
+f_eqhlAdd(array<LiqPool> pools, float price, float tol) =>
+	bool _dup = false
+	if pools.size() > 0
+		LiqPool _last = pools.get(0)
+		if math.abs(_last.price - price) <= tol
+			_dup := true
+	if not _dup
+		pools.unshift(LiqPool.new(price = price))
+		while pools.size() > eqhl_maxPools
+			LiqPool _old = pools.pop()
+			line.delete(_old.ln)
+			label.delete(_old.lbl)
+			if not na(_old.sweep)
+				label.delete(_old.sweep.marker)
+
+// Draw/update each pool's line+label, run sweep detection through the shared engine.
+f_eqhlProcess(array<LiqPool> pools, bool isHigh) =>
+	if pools.size() > 0
+		for i = 0 to pools.size() - 1
+			LiqPool _p = pools.get(i)
+			int _x2 = bar_index + 30
+			if na(_p.ln)
+				_p.ln := line.new(bar_index - 1, _p.price, _x2, _p.price, color=eqhl_color, style=line.style_dashed, width=1)
+			line.set_x2(_p.ln, _x2)
+			if na(_p.lbl)
+				_p.lbl := label.new(_x2, _p.price, isHigh ? "EQH" : "EQL", style=label.style_label_left, color=color.new(color.white, 100), textcolor=eqhl_color, size=size.tiny)
+			label.set_x(_p.lbl, _x2)
+			if ENABLE_SWEEPS
+				if na(_p.sweep)
+					_p.sweep := SweepState.new()
+				if f_sweepTick(_p.sweep, _p.price, isHigh, sweep_confirmBars)
+					f_sweepMark(_p.sweep, isHigh ? "EQH" : "EQL", isHigh)
+				line.set_color(_p.ln, _p.sweep.phase == 2 ? sweep_lineColor : eqhl_color)
+
 type SHLevel
 	float price
 	int startBar
@@ -2124,6 +2230,7 @@ type SHLevel
 	bool mitigated = false
 	line ln = na
 	label lbl = na
+	SweepState sweep = na
 
 _sh_fmtTime(_t) =>
 	na(_t) ? "" : " (" + str.format_time(_t, "EEE MM/dd HH:mm", "America/New_York") + ")"
@@ -2136,10 +2243,14 @@ _sh_archive(_histH, _histL, _curH, _curL, _curBar, _curHT, _curLT) =>
 			SHLevel _old = array.pop(_histH)
 			line.delete(_old.ln)
 			label.delete(_old.lbl)
+			if not na(_old.sweep)
+				label.delete(_old.sweep.marker)
 		while array.size(_histL) > sh_historyCount
 			SHLevel _old = array.pop(_histL)
 			line.delete(_old.ln)
 			label.delete(_old.lbl)
+			if not na(_old.sweep)
+				label.delete(_old.sweep.marker)
 
 _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
 	if _show and array.size(_hist) > 0
@@ -2153,7 +2264,15 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
 				label.delete(_lvl.lbl)
 				_lvl.ln := line(na)
 				_lvl.lbl := label(na)
+				if not na(_lvl.sweep)
+					label.delete(_lvl.sweep.marker)
+					_lvl.sweep.marker := na
 				continue
+			if ENABLE_SWEEPS
+				if na(_lvl.sweep)
+					_lvl.sweep := SweepState.new()
+				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
+					f_sweepMark(_lvl.sweep, _name, _isHigh)
 			if not _lvl.mitigated and barstate.isconfirmed
 				bool _hit = _isHigh ? close > _lvl.price : close < _lvl.price
 				if _hit
@@ -2163,11 +2282,13 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
 						line.set_style(_lvl.ln, f_get_line_style(sh_mitLineStyle))
 			int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
 			int _x2 = bar_index + sh_lineExtend
-			color _lineClr = _lvl.mitigated ? sh_mitColor : _color
-			color _lblClr = _lvl.mitigated ? sh_mitLblColor : _color
+			bool _swept = ENABLE_SWEEPS and not na(_lvl.sweep) and _lvl.sweep.phase == 2
+			color _lineClr = _swept ? sweep_lineColor : _lvl.mitigated ? sh_mitColor : _color
+			color _lblClr = _swept ? sweep_lineColor : _lvl.mitigated ? sh_mitLblColor : _color
 			int _lw = _lvl.mitigated ? sh_mitLineWidth : sh_lineWidth
+			string _swTxt = _swept ? " ⚡TS" : ""
 			string _mitTxt = _lvl.mitigated ? " [Mitigated]" : ""
-			string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + _mitTxt
+			string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + _swTxt + _mitTxt
 			string _ls = _lvl.mitigated ? f_get_line_style(sh_mitLineStyle) : f_get_line_style(_style)
 			string _sz = _lvl.mitigated ? _ho_getSize(sh_mitLabelSize) : _ho_getSize(sh_labelSize)
 			if na(_lvl.ln)
@@ -2360,6 +2481,8 @@ if ENABLE_SESSION_HL and timeframe.isintraday
 _lq_draw(_show, _hi, _lo, _hClr, _lClr, _style, _hName, _lName) =>
 	var line _lnH = na, var line _lnL = na
 	var label _lbH = na, var label _lbL = na
+	var SweepState _swH = SweepState.new()
+	var SweepState _swL = SweepState.new()
 	if _show and not na(_hi)
 		if na(_lnH)
 			_lnH := line.new(bar_index - 1, _hi, bar_index + 30, _hi, color=_hClr, style=f_get_line_style(_style), width=lq_lineWidth)
@@ -2368,6 +2491,15 @@ _lq_draw(_show, _hi, _lo, _hClr, _lClr, _style, _hName, _lName) =>
 			line.set_x1(_lnH, bar_index - 1), line.set_y1(_lnH, _hi), line.set_x2(_lnH, bar_index + 30), line.set_y2(_lnH, _hi)
 			line.set_x1(_lnL, bar_index - 1), line.set_y1(_lnL, _lo), line.set_x2(_lnL, bar_index + 30), line.set_y2(_lnL, _lo)
 			_lnL
+		if ENABLE_SWEEPS
+			if f_sweepTick(_swH, _hi, true, sweep_confirmBars)
+				f_sweepMark(_swH, _hName, true)
+			if f_sweepTick(_swL, _lo, false, sweep_confirmBars)
+				f_sweepMark(_swL, _lName, false)
+			if not na(_lnH)
+				line.set_color(_lnH, _swH.phase == 2 ? sweep_lineColor : _hClr)
+			if not na(_lnL)
+				line.set_color(_lnL, _swL.phase == 2 ? sweep_lineColor : _lClr)
 		if lq_showLabels
 			string _hTxt = _hName + " " + str.tostring(_hi, format.mintick)
 			string _lTxt = _lName + " " + str.tostring(_lo, format.mintick)
@@ -2408,6 +2540,37 @@ if ENABLE_LIQUIDITY
 	_lq_draw(lq_showPDH, _prevMidDayHi, _prevMidDayLo, lq_pdhColor, lq_pdlColor, lq_pdStyle, "PDH", "PDL")
 	_lq_draw(lq_showPWH, _secWeekHi, _secWeekLo, lq_pwhColor, lq_pwlColor, lq_pwStyle, "PWH", "PWL")
 	_lq_draw(lq_showPMH, _secMonthHi, _secMonthLo, lq_pmhColor, lq_pmlColor, lq_pmStyle, "PMH", "PML")
+
+var array<LiqPool> eqhPools = array.new<LiqPool>()
+var array<LiqPool> eqlPools = array.new<LiqPool>()
+var array<float> _eqhRecent = array.new<float>()
+var array<float> _eqlRecent = array.new<float>()
+
+// ta.* computed unconditionally (Pine requires consistent per-bar calls); logic/drawing gated by ENABLE_EQHL
+float _eqhlPh  = ta.pivothigh(eqhl_pivotLen, eqhl_pivotLen)
+float _eqhlPl  = ta.pivotlow(eqhl_pivotLen, eqhl_pivotLen)
+float _eqhlTol = ta.sma(high - low, eqhl_pivotLen) * eqhl_tolMult
+if ENABLE_EQHL
+	if not na(_eqhlPh)
+		if _eqhRecent.size() > 0
+			for j = 0 to _eqhRecent.size() - 1
+				if math.abs(_eqhlPh - _eqhRecent.get(j)) <= _eqhlTol
+					f_eqhlAdd(eqhPools, math.max(_eqhlPh, _eqhRecent.get(j)), _eqhlTol)
+					break
+		_eqhRecent.unshift(_eqhlPh)
+		if _eqhRecent.size() > 6
+			_eqhRecent.pop()
+	if not na(_eqhlPl)
+		if _eqlRecent.size() > 0
+			for j = 0 to _eqlRecent.size() - 1
+				if math.abs(_eqhlPl - _eqlRecent.get(j)) <= _eqhlTol
+					f_eqhlAdd(eqlPools, math.min(_eqhlPl, _eqlRecent.get(j)), _eqhlTol)
+					break
+		_eqlRecent.unshift(_eqhlPl)
+		if _eqlRecent.size() > 6
+			_eqlRecent.pop()
+	f_eqhlProcess(eqhPools, true)
+	f_eqhlProcess(eqlPools, false)
 
 var string pda_range=input.string("Previous Day", "Dealing Range", options=["Previous Day", "Previous Week", "Previous Month"], group="㉕ PD Array Scanner", tooltip="Range for EQ. Premium/Discount.")
 var bool pda_showEQ=input.bool(true, "EQ Line", group="㉕ PD Array Scanner", inline="pda1")
