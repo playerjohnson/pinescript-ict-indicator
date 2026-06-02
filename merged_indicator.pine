@@ -2183,6 +2183,7 @@ type SHLevel
 	bool mitigated = false
 	line ln = na
 	label lbl = na
+	SweepState sweep = na
 
 _sh_fmtTime(_t) =>
 	na(_t) ? "" : " (" + str.format_time(_t, "EEE MM/dd HH:mm", "America/New_York") + ")"
@@ -2195,10 +2196,14 @@ _sh_archive(_histH, _histL, _curH, _curL, _curBar, _curHT, _curLT) =>
 			SHLevel _old = array.pop(_histH)
 			line.delete(_old.ln)
 			label.delete(_old.lbl)
+			if not na(_old.sweep)
+				label.delete(_old.sweep.marker)
 		while array.size(_histL) > sh_historyCount
 			SHLevel _old = array.pop(_histL)
 			line.delete(_old.ln)
 			label.delete(_old.lbl)
+			if not na(_old.sweep)
+				label.delete(_old.sweep.marker)
 
 _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
 	if _show and array.size(_hist) > 0
