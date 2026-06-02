@@ -2212,6 +2212,11 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
 			SHLevel _lvl = array.get(_hist, i)
 			if na(_lvl.price)
 				continue
+			if ENABLE_SWEEPS
+				if na(_lvl.sweep)
+					_lvl.sweep := SweepState.new()
+				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
+					f_sweepMark(_lvl.sweep, _name, _isHigh)
 			if _lvl.mitigated and not sh_showMit
 				line.delete(_lvl.ln)
 				label.delete(_lvl.lbl)
@@ -2227,11 +2232,13 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
 						line.set_style(_lvl.ln, f_get_line_style(sh_mitLineStyle))
 			int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
 			int _x2 = bar_index + sh_lineExtend
-			color _lineClr = _lvl.mitigated ? sh_mitColor : _color
-			color _lblClr = _lvl.mitigated ? sh_mitLblColor : _color
+			bool _swept = ENABLE_SWEEPS and not na(_lvl.sweep) and _lvl.sweep.phase == 2
+			color _lineClr = _swept ? sweep_lineColor : _lvl.mitigated ? sh_mitColor : _color
+			color _lblClr = _swept ? sweep_lineColor : _lvl.mitigated ? sh_mitLblColor : _color
 			int _lw = _lvl.mitigated ? sh_mitLineWidth : sh_lineWidth
+			string _swTxt = _swept ? " ⚡TS" : ""
 			string _mitTxt = _lvl.mitigated ? " [Mitigated]" : ""
-			string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + _mitTxt
+			string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + _swTxt + _mitTxt
 			string _ls = _lvl.mitigated ? f_get_line_style(sh_mitLineStyle) : f_get_line_style(_style)
 			string _sz = _lvl.mitigated ? _ho_getSize(sh_mitLabelSize) : _ho_getSize(sh_labelSize)
 			if na(_lvl.ln)
