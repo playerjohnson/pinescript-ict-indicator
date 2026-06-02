@@ -2120,6 +2120,62 @@ if ENABLE_KILLZONES and timeframe.isintraday
 
 bgcolor(kz_bg)
 
+// ===== ㉒ Liquidity Sweep engine (shared by Session H/L, PD/PW/PM, EQH/EQL) =====
+var int    sweep_confirmBars = input.int(2, "Confirm bars", minval=1, maxval=5, group="㉒ Liquidity Sweeps", inline="sw1", tooltip="A reversal must confirm within this many bars after the wick-reject, or the sweep re-arms.")
+var color  sweep_lineColor   = input.color(color.new(#ffd54f, 0), "Swept line", group="㉒ Liquidity Sweeps", inline="sw1")
+var bool   sweep_showMarker  = input.bool(true, "Marker", group="㉒ Liquidity Sweeps", inline="sw2")
+var color  sweep_markerColor = input.color(color.new(#ffd54f, 0), "", group="㉒ Liquidity Sweeps", inline="sw2")
+var string sweep_markerSize  = input.string(size.tiny, "", options=[size.tiny, size.small, size.normal], group="㉒ Liquidity Sweeps", inline="sw2")
+
+type SweepState
+	int   phase        = 0
+	float levelPrice   = na
+	int   sweepBar     = na
+	float confirmLevel = na
+	int   sweepTime    = na
+	label marker       = na
+
+// Advances the sweep state machine for one level on one bar. Returns true on the
+// bar a Turtle Soup confirms. Mutates st in place (Pine objects are by-reference).
+f_sweepTick(SweepState st, float lvl, bool isHigh, int confirmBars) =>
+	bool _justConfirmed = false
+	if not na(lvl)
+		if na(st.levelPrice) or st.levelPrice != lvl
+			label.delete(st.marker)
+			st.marker := na
+			st.phase := 0
+			st.levelPrice := lvl
+			st.sweepBar := na
+		if barstate.isconfirmed
+			if st.phase == 0
+				bool _bareSweep = isHigh ? (high > lvl and close < lvl) : (low < lvl and close > lvl)
+				if _bareSweep
+					st.phase := 1
+					st.sweepBar := bar_index
+					st.sweepTime := time
+					st.confirmLevel := isHigh ? low : high
+			else if st.phase == 1
+				bool _confirmed = isHigh ? (close < st.confirmLevel) : (close > st.confirmLevel)
+				if _confirmed
+					st.phase := 2
+					_justConfirmed := true
+				else if bar_index - st.sweepBar >= confirmBars
+					st.phase := 0
+	_justConfirmed
+
+// Draws/updates the one marker label and fires the webhook alert. Does NOT recolor
+// the level line — each host module owns that.
+f_sweepMark(SweepState st, string name, bool isHigh) =>
+	if sweep_showMarker
+		string _tag = isHigh ? "TS↓" : "TS↑"
+		if na(st.marker)
+			st.marker := label.new(st.sweepBar, st.levelPrice, _tag, xloc=xloc.bar_index, style=isHigh ? label.style_label_down : label.style_label_up, color=color.new(sweep_markerColor, 20), textcolor=color.white, size=sweep_markerSize)
+		else
+			label.set_xy(st.marker, st.sweepBar, st.levelPrice)
+			label.set_text(st.marker, _tag)
+	if wh_enable and wh_sweeps
+		alert(_wh_json("SWEEP " + name + (isHigh ? " BSL" : " SSL"), st.levelPrice, st.levelPrice), alert.freq_once_per_bar)
+
 type SHLevel
 	float price
 	int startBar
