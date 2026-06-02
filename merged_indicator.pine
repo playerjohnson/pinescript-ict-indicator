@@ -2541,6 +2541,27 @@ if ENABLE_LIQUIDITY
 	_lq_draw(lq_showPWH, _secWeekHi, _secWeekLo, lq_pwhColor, lq_pwlColor, lq_pwStyle, "PWH", "PWL")
 	_lq_draw(lq_showPMH, _secMonthHi, _secMonthLo, lq_pmhColor, lq_pmlColor, lq_pmStyle, "PMH", "PML")
 
+var array<LiqPool> eqhPools = array.new<LiqPool>()
+var array<LiqPool> eqlPools = array.new<LiqPool>()
+var float _eqhlLastPH = na
+var float _eqhlLastPL = na
+
+// ta.* computed unconditionally (Pine requires consistent per-bar calls); logic/drawing gated by ENABLE_EQHL
+float _eqhlPh  = ta.pivothigh(eqhl_pivotLen, eqhl_pivotLen)
+float _eqhlPl  = ta.pivotlow(eqhl_pivotLen, eqhl_pivotLen)
+float _eqhlTol = ta.sma(high - low, eqhl_pivotLen) * eqhl_tolMult
+if ENABLE_EQHL
+	if not na(_eqhlPh)
+		if not na(_eqhlLastPH) and math.abs(_eqhlPh - _eqhlLastPH) <= _eqhlTol
+			f_eqhlAdd(eqhPools, math.max(_eqhlPh, _eqhlLastPH), _eqhlTol)
+		_eqhlLastPH := _eqhlPh
+	if not na(_eqhlPl)
+		if not na(_eqhlLastPL) and math.abs(_eqhlPl - _eqhlLastPL) <= _eqhlTol
+			f_eqhlAdd(eqlPools, math.min(_eqhlPl, _eqhlLastPL), _eqhlTol)
+		_eqhlLastPL := _eqhlPl
+	f_eqhlProcess(eqhPools, true)
+	f_eqhlProcess(eqlPools, false)
+
 var string pda_range=input.string("Previous Day", "Dealing Range", options=["Previous Day", "Previous Week", "Previous Month"], group="㉕ PD Array Scanner", tooltip="Range for EQ. Premium/Discount.")
 var bool pda_showEQ=input.bool(true, "EQ Line", group="㉕ PD Array Scanner", inline="pda1")
 var color pda_eqColor=input.color(color.new(color.white, 30), "", group="㉕ PD Array Scanner", inline="pda1")
