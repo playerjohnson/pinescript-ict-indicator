@@ -2147,6 +2147,13 @@ f_sweepTick(SweepState st, float lvl, bool isHigh, int confirmBars) =>
 			st.levelPrice := lvl
 			st.sweepBar := na
 		if barstate.isconfirmed
+			if st.phase == 1
+				bool _confirmed = isHigh ? (close < st.confirmLevel) : (close > st.confirmLevel)
+				if _confirmed
+					st.phase := 2
+					_justConfirmed := true
+				else if bar_index - st.sweepBar >= confirmBars
+					st.phase := 0
 			if st.phase == 0
 				bool _bareSweep = isHigh ? (high > lvl and close < lvl) : (low < lvl and close > lvl)
 				if _bareSweep
@@ -2154,13 +2161,6 @@ f_sweepTick(SweepState st, float lvl, bool isHigh, int confirmBars) =>
 					st.sweepBar := bar_index
 					st.sweepTime := time
 					st.confirmLevel := isHigh ? low : high
-			else if st.phase == 1
-				bool _confirmed = isHigh ? (close < st.confirmLevel) : (close > st.confirmLevel)
-				if _confirmed
-					st.phase := 2
-					_justConfirmed := true
-				else if bar_index - st.sweepBar >= confirmBars
-					st.phase := 0
 	_justConfirmed
 
 // Draws/updates the one marker label and fires the webhook alert. Does NOT recolor
@@ -2212,17 +2212,20 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
 			SHLevel _lvl = array.get(_hist, i)
 			if na(_lvl.price)
 				continue
-			if ENABLE_SWEEPS
-				if na(_lvl.sweep)
-					_lvl.sweep := SweepState.new()
-				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
-					f_sweepMark(_lvl.sweep, _name, _isHigh)
 			if _lvl.mitigated and not sh_showMit
 				line.delete(_lvl.ln)
 				label.delete(_lvl.lbl)
 				_lvl.ln := line(na)
 				_lvl.lbl := label(na)
+				if not na(_lvl.sweep)
+					label.delete(_lvl.sweep.marker)
+					_lvl.sweep.marker := na
 				continue
+			if ENABLE_SWEEPS
+				if na(_lvl.sweep)
+					_lvl.sweep := SweepState.new()
+				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
+					f_sweepMark(_lvl.sweep, _name, _isHigh)
 			if not _lvl.mitigated and barstate.isconfirmed
 				bool _hit = _isHigh ? close > _lvl.price : close < _lvl.price
 				if _hit
