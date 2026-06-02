@@ -48,7 +48,7 @@ Numbered `⓪` through `㉕` with Unicode circled numbers. Each feature section 
 7. **Killzones** — Session highlight boxes (Asian, London, NY, Silver Bullet)
 8. **Session Highs/Lows** — Previous session range tracking
 9. **Liquidity Levels** — PDH/PDL, PWH/PWL, PMH/PML
-9b. **Liquidity Sweeps** — shared sweep engine (`SweepState`, `f_sweepTick`, `f_sweepMark`); confirmed Turtle Soup detection on session H/L + PD/PW/PM, gated by `ENABLE_SWEEPS` (default on). Equal-High/Low pools (`LiqPool`, `ta.pivothigh/low`) gated by `ENABLE_EQHL` (default off) reuse the same engine.
+9b. **Liquidity Sweeps** — shared sweep engine (`SweepState`, `f_sweepTick`, `f_sweepMark`); confirmed Turtle Soup detection on session H/L + PD/PW/PM, gated by `ENABLE_SWEEPS` (default on). Equal-High/Low pools (`LiqPool`, `ta.pivothigh/low`) gated by `ENABLE_EQHL` (default off) reuse the same engine. EQH/EQL pairs pivots within tolerance via a 6-deep recent-pivot ring buffer (`_eqhRecent`/`_eqlRecent`), so it catches equal highs/lows separated by an intervening raid. Known limitation: in a strong trend the pairwise tolerance can emit a few extra pools (pool span can drift beyond `tol`). Sweep detection deliberately still fires on already-mitigated session levels (re-tests), which can show both `⚡TS` and `[Mitigated]`.
 10. **Rejection Blocks** — `f_rbDetect()`, `f_rbManage()`, pivot + wick% validation
 11. **Breaker & Mitigation Blocks** — `f_breakerMitProcess()`, swing-based detection
 12. **PD Array Scanner** — `f_pdaScanner()`, confluence scoring across all formations
