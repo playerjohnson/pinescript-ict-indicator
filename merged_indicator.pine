@@ -2179,7 +2179,7 @@ f_sweepMark(SweepState st, string name, bool isHigh) =>
 // ===== ㉓ Equal Highs/Lows (resting liquidity pools) =====
 var int    eqhl_pivotLen = input.int(5, "Pivot length", minval=2, maxval=50, group="㉓ Equal Highs/Lows", inline="eq1", tooltip="Bars each side for swing pivots; pivots confirm this many bars late.")
 var float  eqhl_tolMult  = input.float(0.1, "Tolerance ×range", minval=0.0, maxval=1.0, step=0.05, group="㉓ Equal Highs/Lows", inline="eq1", tooltip="Two pivots are 'equal' if within this fraction of the average bar range.")
-var int    eqhl_maxPools = input.int(10, "Max pools/side", minval=1, maxval=50, group="㉓ Equal Highs/Lows", inline="eq2")
+var int    eqhl_maxPools = input.int(10, "Max pools/side", minval=1, maxval=20, group="㉓ Equal Highs/Lows", inline="eq2")
 var color  eqhl_color    = input.color(color.new(#b39ddb, 0), "Color", group="㉓ Equal Highs/Lows", inline="eq2")
 
 type LiqPool
@@ -2543,8 +2543,8 @@ if ENABLE_LIQUIDITY
 
 var array<LiqPool> eqhPools = array.new<LiqPool>()
 var array<LiqPool> eqlPools = array.new<LiqPool>()
-var float _eqhlLastPH = na
-var float _eqhlLastPL = na
+var array<float> _eqhRecent = array.new<float>()
+var array<float> _eqlRecent = array.new<float>()
 
 // ta.* computed unconditionally (Pine requires consistent per-bar calls); logic/drawing gated by ENABLE_EQHL
 float _eqhlPh  = ta.pivothigh(eqhl_pivotLen, eqhl_pivotLen)
@@ -2552,13 +2552,23 @@ float _eqhlPl  = ta.pivotlow(eqhl_pivotLen, eqhl_pivotLen)
 float _eqhlTol = ta.sma(high - low, eqhl_pivotLen) * eqhl_tolMult
 if ENABLE_EQHL
 	if not na(_eqhlPh)
-		if not na(_eqhlLastPH) and math.abs(_eqhlPh - _eqhlLastPH) <= _eqhlTol
-			f_eqhlAdd(eqhPools, math.max(_eqhlPh, _eqhlLastPH), _eqhlTol)
-		_eqhlLastPH := _eqhlPh
+		if _eqhRecent.size() > 0
+			for j = 0 to _eqhRecent.size() - 1
+				if math.abs(_eqhlPh - _eqhRecent.get(j)) <= _eqhlTol
+					f_eqhlAdd(eqhPools, math.max(_eqhlPh, _eqhRecent.get(j)), _eqhlTol)
+					break
+		_eqhRecent.unshift(_eqhlPh)
+		if _eqhRecent.size() > 6
+			_eqhRecent.pop()
 	if not na(_eqhlPl)
-		if not na(_eqhlLastPL) and math.abs(_eqhlPl - _eqhlLastPL) <= _eqhlTol
-			f_eqhlAdd(eqlPools, math.min(_eqhlPl, _eqhlLastPL), _eqhlTol)
-		_eqhlLastPL := _eqhlPl
+		if _eqlRecent.size() > 0
+			for j = 0 to _eqlRecent.size() - 1
+				if math.abs(_eqhlPl - _eqlRecent.get(j)) <= _eqhlTol
+					f_eqhlAdd(eqlPools, math.min(_eqhlPl, _eqlRecent.get(j)), _eqhlTol)
+					break
+		_eqlRecent.unshift(_eqhlPl)
+		if _eqlRecent.size() > 6
+			_eqlRecent.pop()
 	f_eqhlProcess(eqhPools, true)
 	f_eqhlProcess(eqlPools, false)
 
