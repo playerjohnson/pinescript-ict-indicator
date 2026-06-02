@@ -12,7 +12,7 @@ indicator(
 	 shorttitle  = "HO + Imbal + NWOG + HTF [Merged]",
 	 overlay = true,
 	 max_boxes_count = 500,
-	 max_lines_count = 500,1
+	 max_lines_count = 500,
 	 max_labels_count = 500,
 	 max_bars_back = 5000,
 	 behind_chart = true,
