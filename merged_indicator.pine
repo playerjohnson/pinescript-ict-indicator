@@ -2256,7 +2256,7 @@ f_bosTick(BosState st, float lvl, bool isHigh, int holdBars) =>
 	int _out = 0
 	if not na(lvl) and barstate.isconfirmed
 		if st.phase == 1
-			bool _backInside = isHigh ? (close < st.breakLevel) : (close > st.breakLevel)
+			bool _backInside = isHigh ? (close <= st.breakLevel) : (close >= st.breakLevel)
 			if _backInside
 				st.phase := 3
 				_out := 3
@@ -2283,7 +2283,7 @@ f_structDrawBreak(float lvl, int swingBar, bool isChoch, bool isUp) =>
 	while struct_labels.size() > struct_maxBreaks
 		label.delete(struct_labels.pop())
 	if wh_enable and wh_structure
-		alert(_wh_json((isChoch ? "CHoCH " : "BOS ") + (isUp ? "BSL" : "SSL"), lvl, lvl), alert.freq_once_per_bar)
+		alert(_wh_json((isChoch ? "CHoCH " : "BOS ") + (isUp ? "BSL" : "SSL"), lvl, lvl), alert.freq_once_per_bar_close)
 
 type SHLevel
 	float price
@@ -2638,6 +2638,24 @@ if ENABLE_EQHL
 float _structPh = ta.pivothigh(struct_pivotLen, struct_pivotLen)
 float _structPl = ta.pivotlow(struct_pivotLen, struct_pivotLen)
 if ENABLE_STRUCTURE
+	// Resolve any pending break on the CURRENT swings first, so a same-bar new pivot can't wipe a confirming candidate.
+	if not na(structLastHigh) and not structHighResolved
+		int _rH = f_bosTick(bosH, structLastHigh, true, struct_holdBars)
+		if _rH == 2
+			f_structDrawBreak(structLastHigh, structHighBar, struct_trend == -1, true)
+			struct_trend := 1
+			structHighResolved := true
+		else if _rH == 3
+			bosH.phase := 0    // re-arm: a failed break leaves the level live for a later genuine break
+	if not na(structLastLow) and not structLowResolved
+		int _rL = f_bosTick(bosL, structLastLow, false, struct_holdBars)
+		if _rL == 2
+			f_structDrawBreak(structLastLow, structLowBar, struct_trend == 1, false)
+			struct_trend := -1
+			structLowResolved := true
+		else if _rL == 3
+			bosL.phase := 0
+	// Then ingest fresh confirmed pivots (re-arm for the new swing level).
 	if not na(_structPh)
 		structLastHigh := _structPh
 		structHighBar := bar_index - struct_pivotLen
@@ -2648,22 +2666,6 @@ if ENABLE_STRUCTURE
 		structLowBar := bar_index - struct_pivotLen
 		structLowResolved := false
 		bosL := BosState.new()
-	if not na(structLastHigh) and not structHighResolved
-		int _rH = f_bosTick(bosH, structLastHigh, true, struct_holdBars)
-		if _rH == 2
-			f_structDrawBreak(structLastHigh, structHighBar, struct_trend == -1, true)
-			struct_trend := 1
-			structHighResolved := true
-		else if _rH == 3
-			structHighResolved := true
-	if not na(structLastLow) and not structLowResolved
-		int _rL = f_bosTick(bosL, structLastLow, false, struct_holdBars)
-		if _rL == 2
-			f_structDrawBreak(structLastLow, structLowBar, struct_trend == 1, false)
-			struct_trend := -1
-			structLowResolved := true
-		else if _rL == 3
-			structLowResolved := true
 
 var string pda_range=input.string("Previous Day", "Dealing Range", options=["Previous Day", "Previous Week", "Previous Month"], group="㉕ PD Array Scanner", tooltip="Range for EQ. Premium/Discount.")
 var bool pda_showEQ=input.bool(true, "EQ Line", group="㉕ PD Array Scanner", inline="pda1")
