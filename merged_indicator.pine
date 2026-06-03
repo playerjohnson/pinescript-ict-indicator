@@ -28,11 +28,13 @@ var bool ENABLE_LIQUIDITY=input.bool(true, "Enable PDH/PDL/PWH/PWL", group="⓪ 
 var bool ENABLE_PDA_SCANNER=input.bool(false, "Enable PD Array Scanner", group="⓪ Section Toggles")
 var bool ENABLE_SWEEPS=input.bool(true, "Enable Liquidity Sweeps", group="⓪ Section Toggles")
 var bool ENABLE_EQHL=input.bool(false, "Enable Equal Highs/Lows", group="⓪ Section Toggles")
+var bool ENABLE_STRUCTURE=input.bool(false, "Enable Market Structure (BOS/CHoCH)", group="⓪ Section Toggles")
 
 var bool wh_enable=input.bool(false, "Enable Webhook Alerts", group="㉑ Webhook Alerts", tooltip="JSON alerts via alert(). In TV alert dialog, select 'Any alert() function call'.")
 var bool wh_formations=input.bool(true, "Formation Alerts", group="㉑ Webhook Alerts", inline="wh1", tooltip="OB/FVG/VI/GAP formations")
 var bool wh_mitigations=input.bool(true, "Mitigation Alerts", group="㉑ Webhook Alerts", inline="wh1", tooltip="Mitigation events")
 var bool wh_sweeps=input.bool(true, "Sweep Alerts", group="㉑ Webhook Alerts", tooltip="Liquidity sweep / Turtle Soup events")
+var bool wh_structure=input.bool(true, "Structure Alerts", group="㉑ Webhook Alerts", tooltip="BOS / CHoCH break events.")
 
 _wh_json(string _event, float _high, float _low) =>
 	'{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '"}'
@@ -2223,6 +2225,66 @@ f_eqhlProcess(array<LiqPool> pools, bool isHigh) =>
 					f_sweepMark(_p.sweep, isHigh ? "EQH" : "EQL", isHigh)
 				line.set_color(_p.ln, _p.sweep.phase == 2 ? sweep_lineColor : eqhl_color)
 
+// ===== ㉔ Market Structure (BOS / CHoCH) =====
+var int    struct_pivotLen  = input.int(5, "Pivot length", minval=2, maxval=50, group="㉔ Market Structure", inline="ms1", tooltip="Swing pivots use this many bars each side; pivots confirm this many bars late. Independent of ㉓.")
+var int    struct_holdBars  = input.int(2, "Hold bars", minval=1, maxval=5, group="㉔ Market Structure", inline="ms1", tooltip="A close-break must hold this many bars to confirm BOS/CHoCH; closing back inside = trap (suppressed).")
+var color  struct_bullColor = input.color(color.new(#26a69a, 0), "Bull", group="㉔ Market Structure", inline="ms2")
+var color  struct_bearColor = input.color(color.new(#ef5350, 0), "Bear", group="㉔ Market Structure", inline="ms2")
+var string struct_lineStyle = input.string("----", "", options=['⎯⎯⎯', '----', '····'], group="㉔ Market Structure", inline="ms2")
+var string struct_labelSize = input.string("Tiny", "", options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="㉔ Market Structure", inline="ms2")
+var int    struct_maxBreaks = input.int(15, "Max breaks", minval=1, maxval=40, group="㉔ Market Structure", inline="ms3", tooltip="Older break lines/labels pruned to this cap (shared 500-drawing budget).")
+
+type BosState
+	int   phase      = 0
+	int   breakBar   = na
+	float breakLevel = na
+
+var float structLastHigh = na
+var int   structHighBar = na
+var bool  structHighResolved = false
+var float structLastLow = na
+var int   structLowBar = na
+var bool  structLowResolved = false
+var int   struct_trend = 0
+var BosState bosH = BosState.new()
+var BosState bosL = BosState.new()
+var array<line>  struct_lines  = array.new<line>()
+var array<label> struct_labels = array.new<label>()
+
+// Mirror of f_sweepTick (comparisons inverted): a close-break must HOLD to confirm. Returns 2=confirm, 3=trap, 0=none.
+f_bosTick(BosState st, float lvl, bool isHigh, int holdBars) =>
+	int _out = 0
+	if not na(lvl) and barstate.isconfirmed
+		if st.phase == 1
+			bool _backInside = isHigh ? (close < st.breakLevel) : (close > st.breakLevel)
+			if _backInside
+				st.phase := 3
+				_out := 3
+			else if bar_index - st.breakBar >= holdBars
+				st.phase := 2
+				_out := 2
+		if st.phase == 0
+			bool _closeBreak = isHigh ? (close > lvl) : (close < lvl)
+			if _closeBreak
+				st.phase := 1
+				st.breakBar := bar_index
+				st.breakLevel := lvl
+	_out
+
+// Draw a confirmed BOS/CHoCH break: line at the broken swing + label, pruned to cap; optional webhook.
+f_structDrawBreak(float lvl, int swingBar, bool isChoch, bool isUp) =>
+	color _clr = isUp ? struct_bullColor : struct_bearColor
+	line _ln = line.new(swingBar, lvl, bar_index, lvl, color=_clr, style=f_get_line_style(struct_lineStyle), width=1)
+	label _lb = label.new(bar_index, lvl, isChoch ? "CHoCH" : "BOS", style=isUp ? label.style_label_up : label.style_label_down, color=color.new(_clr, 20), textcolor=color.white, size=_ho_getSize(struct_labelSize))
+	struct_lines.unshift(_ln)
+	struct_labels.unshift(_lb)
+	while struct_lines.size() > struct_maxBreaks
+		line.delete(struct_lines.pop())
+	while struct_labels.size() > struct_maxBreaks
+		label.delete(struct_labels.pop())
+	if wh_enable and wh_structure
+		alert(_wh_json((isChoch ? "CHoCH " : "BOS ") + (isUp ? "BSL" : "SSL"), lvl, lvl), alert.freq_once_per_bar)
+
 type SHLevel
 	float price
 	int startBar
@@ -2571,6 +2633,37 @@ if ENABLE_EQHL
 			_eqlRecent.pop()
 	f_eqhlProcess(eqhPools, true)
 	f_eqhlProcess(eqlPools, false)
+
+// ㉔ Market Structure driver — pivots computed unconditionally (ta.* consistency); gated logic below
+float _structPh = ta.pivothigh(struct_pivotLen, struct_pivotLen)
+float _structPl = ta.pivotlow(struct_pivotLen, struct_pivotLen)
+if ENABLE_STRUCTURE
+	if not na(_structPh)
+		structLastHigh := _structPh
+		structHighBar := bar_index - struct_pivotLen
+		structHighResolved := false
+		bosH := BosState.new()
+	if not na(_structPl)
+		structLastLow := _structPl
+		structLowBar := bar_index - struct_pivotLen
+		structLowResolved := false
+		bosL := BosState.new()
+	if not na(structLastHigh) and not structHighResolved
+		int _rH = f_bosTick(bosH, structLastHigh, true, struct_holdBars)
+		if _rH == 2
+			f_structDrawBreak(structLastHigh, structHighBar, struct_trend == -1, true)
+			struct_trend := 1
+			structHighResolved := true
+		else if _rH == 3
+			structHighResolved := true
+	if not na(structLastLow) and not structLowResolved
+		int _rL = f_bosTick(bosL, structLastLow, false, struct_holdBars)
+		if _rL == 2
+			f_structDrawBreak(structLastLow, structLowBar, struct_trend == 1, false)
+			struct_trend := -1
+			structLowResolved := true
+		else if _rL == 3
+			structLowResolved := true
 
 var string pda_range=input.string("Previous Day", "Dealing Range", options=["Previous Day", "Previous Week", "Previous Month"], group="㉕ PD Array Scanner", tooltip="Range for EQ. Premium/Discount.")
 var bool pda_showEQ=input.bool(true, "EQ Line", group="㉕ PD Array Scanner", inline="pda1")
