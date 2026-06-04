@@ -2247,6 +2247,7 @@ var float structLastLow = na
 var int   structLowBar = na
 var bool  structLowResolved = false
 var int   struct_trend = 0
+var string struct_lastBreak = na
 var BosState bosH = BosState.new()
 var BosState bosL = BosState.new()
 var array<line>  struct_lines  = array.new<line>()
@@ -2643,7 +2644,9 @@ if ENABLE_STRUCTURE
 	if not na(structLastHigh) and not structHighResolved
 		int _rH = f_bosTick(bosH, structLastHigh, true, struct_holdBars)
 		if _rH == 2
-			f_structDrawBreak(structLastHigh, structHighBar, struct_trend == -1, true)
+			bool _isCh = struct_trend == -1
+			f_structDrawBreak(structLastHigh, structHighBar, _isCh, true)
+			struct_lastBreak := _isCh ? "CHoCH" : "BOS"
 			struct_trend := 1
 			structHighResolved := true
 		else if _rH == 3
@@ -2651,7 +2654,9 @@ if ENABLE_STRUCTURE
 	if not na(structLastLow) and not structLowResolved
 		int _rL = f_bosTick(bosL, structLastLow, false, struct_holdBars)
 		if _rL == 2
-			f_structDrawBreak(structLastLow, structLowBar, struct_trend == 1, false)
+			bool _isCh = struct_trend == 1
+			f_structDrawBreak(structLastLow, structLowBar, _isCh, false)
+			struct_lastBreak := _isCh ? "CHoCH" : "BOS"
 			struct_trend := -1
 			structLowResolved := true
 		else if _rL == 3
