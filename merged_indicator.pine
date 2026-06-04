@@ -2814,32 +2814,29 @@ var string dash_size = input.string(size.small, "Text size", options=[size.tiny,
 var color  dash_bg   = input.color(color.new(color.black, 20), "Background", group="㉖ Dashboard", inline="d1")
 var color  dash_txt  = input.color(color.white, "Text", group="㉖ Dashboard", inline="d1")
 
-// Thread the nearest level above (_aP/_aN) and below (_bP/_bN) the close with one candidate.
-f_dashNear(float _p, string _nm, float _aP, string _aN, float _bP, string _bN) =>
-	float _ap = _aP
-	float _bp = _bP
-	string _an = _aN
-	string _bn = _bN
+// Accumulator for the nearest untapped level above / below the close (mutated by reference).
+type DashAcc
+	float aP = na
+	string aN = ""
+	float bP = na
+	string bN = ""
+
+// Update the accumulator with one candidate level (mutates _acc in place).
+f_dashNear(DashAcc _acc, float _p, string _nm) =>
 	if not na(_p)
-		if _p > close and (na(_ap) or _p < _ap)
-			_ap := _p
-			_an := _nm
-		if _p < close and (na(_bp) or _p > _bp)
-			_bp := _p
-			_bn := _nm
-	[_ap, _an, _bp, _bn]
+		if _p > close and (na(_acc.aP) or _p < _acc.aP)
+			_acc.aP := _p
+			_acc.aN := _nm
+		if _p < close and (na(_acc.bP) or _p > _acc.bP)
+			_acc.bP := _p
+			_acc.bN := _nm
 
 // Consider the newest (index 0) level of a session-H/L array if present and un-mitigated.
-f_dashShArr(array<SHLevel> _arr, string _nm, float _aP, string _aN, float _bP, string _bN) =>
-	float _ap = _aP
-	float _bp = _bP
-	string _an = _aN
-	string _bn = _bN
+f_dashShArr(DashAcc _acc, array<SHLevel> _arr, string _nm) =>
 	if _arr.size() > 0
 		SHLevel _l = _arr.get(0)
 		if not na(_l.price) and not _l.mitigated
-			[_ap, _an, _bp, _bn] = f_dashNear(_l.price, _nm, _ap, _an, _bp, _bn)
-	[_ap, _an, _bp, _bn]
+			f_dashNear(_acc, _l.price, _nm)
 
 _dashPosCnst = switch dash_pos
 	"Top Left"     => position.top_left
@@ -2861,39 +2858,36 @@ if ENABLE_DASHBOARD and barstate.islast
 	if ENABLE_STRUCTURE and struct_trend != 0
 		_structTxt := (struct_trend == 1 ? "Bull" : "Bear") + (na(struct_lastBreak) ? "" : " · " + struct_lastBreak)
 		_structCol := struct_trend == 1 ? color.new(color.green, 40) : color.new(color.red, 40)
-	float _aP = na
-	string _aN = ""
-	float _bP = na
-	string _bN = ""
+	DashAcc _acc = DashAcc.new()
 	if ENABLE_LIQUIDITY
-		[_aP, _aN, _bP, _bN] = f_dashNear(_prevMidDayHi, "PDH", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashNear(_prevMidDayLo, "PDL", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashNear(_secWeekHi, "PWH", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashNear(_secWeekLo, "PWL", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashNear(_secMonthHi, "PMH", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashNear(_secMonthLo, "PML", _aP, _aN, _bP, _bN)
+		f_dashNear(_acc, _prevMidDayHi, "PDH")
+		f_dashNear(_acc, _prevMidDayLo, "PDL")
+		f_dashNear(_acc, _secWeekHi, "PWH")
+		f_dashNear(_acc, _secWeekLo, "PWL")
+		f_dashNear(_acc, _secMonthHi, "PMH")
+		f_dashNear(_acc, _secMonthLo, "PML")
 	if ENABLE_SESSION_HL
-		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histAsiaH, "Asia H", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histAsiaL, "Asia L", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histLonH, "London H", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histLonL, "London L", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histNyamH, "NY AM H", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histNyamL, "NY AM L", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histNypmH, "NY PM H", _aP, _aN, _bP, _bN)
-		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histNypmL, "NY PM L", _aP, _aN, _bP, _bN)
+		f_dashShArr(_acc, sh_histAsiaH, "Asia H")
+		f_dashShArr(_acc, sh_histAsiaL, "Asia L")
+		f_dashShArr(_acc, sh_histLonH, "London H")
+		f_dashShArr(_acc, sh_histLonL, "London L")
+		f_dashShArr(_acc, sh_histNyamH, "NY AM H")
+		f_dashShArr(_acc, sh_histNyamL, "NY AM L")
+		f_dashShArr(_acc, sh_histNypmH, "NY PM H")
+		f_dashShArr(_acc, sh_histNypmL, "NY PM L")
 	if ENABLE_EQHL
 		if eqhPools.size() > 0
 			for i = 0 to eqhPools.size() - 1
 				LiqPool _p = eqhPools.get(i)
 				if na(_p.sweep) or _p.sweep.phase != 2
-					[_aP, _aN, _bP, _bN] = f_dashNear(_p.price, "EQH", _aP, _aN, _bP, _bN)
+					f_dashNear(_acc, _p.price, "EQH")
 		if eqlPools.size() > 0
 			for i = 0 to eqlPools.size() - 1
 				LiqPool _p = eqlPools.get(i)
 				if na(_p.sweep) or _p.sweep.phase != 2
-					[_aP, _aN, _bP, _bN] = f_dashNear(_p.price, "EQL", _aP, _aN, _bP, _bN)
-	string _upTxt = na(_aP) ? "—" : "↑ " + _aN + " " + str.tostring(_aP, format.mintick)
-	string _dnTxt = na(_bP) ? "—" : "↓ " + _bN + " " + str.tostring(_bP, format.mintick)
+					f_dashNear(_acc, _p.price, "EQL")
+	string _upTxt = na(_acc.aP) ? "—" : "↑ " + _acc.aN + " " + str.tostring(_acc.aP, format.mintick)
+	string _dnTxt = na(_acc.bP) ? "—" : "↓ " + _acc.bN + " " + str.tostring(_acc.bP, format.mintick)
 	string _kzTxt = "Dead"
 	if timeframe.isintraday
 		if kz_showAsian and f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
