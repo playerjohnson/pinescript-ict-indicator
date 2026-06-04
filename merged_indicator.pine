@@ -29,6 +29,7 @@ var bool ENABLE_PDA_SCANNER=input.bool(false, "Enable PD Array Scanner", group="
 var bool ENABLE_SWEEPS=input.bool(true, "Enable Liquidity Sweeps", group="⓪ Section Toggles")
 var bool ENABLE_EQHL=input.bool(false, "Enable Equal Highs/Lows", group="⓪ Section Toggles")
 var bool ENABLE_STRUCTURE=input.bool(false, "Enable Market Structure (BOS/CHoCH)", group="⓪ Section Toggles")
+var bool ENABLE_DASHBOARD=input.bool(false, "Enable Dashboard", group="⓪ Section Toggles")
 
 var bool wh_enable=input.bool(false, "Enable Webhook Alerts", group="㉑ Webhook Alerts", tooltip="JSON alerts via alert(). In TV alert dialog, select 'Any alert() function call'.")
 var bool wh_formations=input.bool(true, "Formation Alerts", group="㉑ Webhook Alerts", inline="wh1", tooltip="OB/FVG/VI/GAP formations")
@@ -2246,6 +2247,7 @@ var float structLastLow = na
 var int   structLowBar = na
 var bool  structLowResolved = false
 var int   struct_trend = 0
+var string struct_lastBreak = na
 var BosState bosH = BosState.new()
 var BosState bosL = BosState.new()
 var array<line>  struct_lines  = array.new<line>()
@@ -2642,7 +2644,9 @@ if ENABLE_STRUCTURE
 	if not na(structLastHigh) and not structHighResolved
 		int _rH = f_bosTick(bosH, structLastHigh, true, struct_holdBars)
 		if _rH == 2
-			f_structDrawBreak(structLastHigh, structHighBar, struct_trend == -1, true)
+			bool _isCh = struct_trend == -1
+			f_structDrawBreak(structLastHigh, structHighBar, _isCh, true)
+			struct_lastBreak := _isCh ? "CHoCH" : "BOS"
 			struct_trend := 1
 			structHighResolved := true
 		else if _rH == 3
@@ -2650,7 +2654,9 @@ if ENABLE_STRUCTURE
 	if not na(structLastLow) and not structLowResolved
 		int _rL = f_bosTick(bosL, structLastLow, false, struct_holdBars)
 		if _rL == 2
-			f_structDrawBreak(structLastLow, structLowBar, struct_trend == 1, false)
+			bool _isCh = struct_trend == 1
+			f_structDrawBreak(structLastLow, structLowBar, _isCh, false)
+			struct_lastBreak := _isCh ? "CHoCH" : "BOS"
 			struct_trend := -1
 			structLowResolved := true
 		else if _rL == 3
@@ -2801,6 +2807,111 @@ f_pdaScanner() =>
 
 if ENABLE_PDA_SCANNER
 	f_pdaScanner()
+
+// ===== ㉖ Dashboard =====
+var string dash_pos  = input.string("Top Right", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="㉖ Dashboard")
+var string dash_size = input.string(size.small, "Text size", options=[size.tiny, size.small, size.normal], group="㉖ Dashboard")
+var color  dash_bg   = input.color(color.new(color.black, 20), "Background", group="㉖ Dashboard", inline="d1")
+var color  dash_txt  = input.color(color.white, "Text", group="㉖ Dashboard", inline="d1")
+
+// Accumulator for the nearest untapped level above / below the close (mutated by reference).
+type DashAcc
+	float aP = na
+	string aN = ""
+	float bP = na
+	string bN = ""
+
+// Update the accumulator with one candidate level (mutates _acc in place).
+f_dashNear(DashAcc _acc, float _p, string _nm) =>
+	if not na(_p)
+		if _p > close and (na(_acc.aP) or _p < _acc.aP)
+			_acc.aP := _p
+			_acc.aN := _nm
+		if _p < close and (na(_acc.bP) or _p > _acc.bP)
+			_acc.bP := _p
+			_acc.bN := _nm
+
+// Consider the newest (index 0) level of a session-H/L array if present and un-mitigated.
+f_dashShArr(DashAcc _acc, array<SHLevel> _arr, string _nm) =>
+	if _arr.size() > 0
+		SHLevel _l = _arr.get(0)
+		if not na(_l.price) and not _l.mitigated
+			f_dashNear(_acc, _l.price, _nm)
+
+_dashPosCnst = switch dash_pos
+	"Top Left"     => position.top_left
+	"Bottom Right" => position.bottom_right
+	"Bottom Left"  => position.bottom_left
+	=> position.top_right
+var table dashTbl = table.new(_dashPosCnst, 2, 5, border_width=1)
+
+if ENABLE_DASHBOARD and barstate.islast
+	string _biasTxt = "—"
+	color _biasCol = dash_bg
+	if not na(_pdaHi) and _pdaHi > _pdaLo
+		float _pct = (close - _pdaLo) / (_pdaHi - _pdaLo) * 100
+		bool _prem = _pct >= 50
+		_biasTxt := (_prem ? "Premium " : "Discount ") + str.tostring(_pct, "#") + "%"
+		_biasCol := _prem ? color.new(color.red, 40) : color.new(color.green, 40)
+	string _structTxt = "—"
+	color _structCol = dash_bg
+	if ENABLE_STRUCTURE and struct_trend != 0
+		_structTxt := (struct_trend == 1 ? "Bull" : "Bear") + (na(struct_lastBreak) ? "" : " · " + struct_lastBreak)
+		_structCol := struct_trend == 1 ? color.new(color.green, 40) : color.new(color.red, 40)
+	DashAcc _acc = DashAcc.new()
+	if ENABLE_LIQUIDITY
+		f_dashNear(_acc, _prevMidDayHi, "PDH")
+		f_dashNear(_acc, _prevMidDayLo, "PDL")
+		f_dashNear(_acc, _secWeekHi, "PWH")
+		f_dashNear(_acc, _secWeekLo, "PWL")
+		f_dashNear(_acc, _secMonthHi, "PMH")
+		f_dashNear(_acc, _secMonthLo, "PML")
+	if ENABLE_SESSION_HL
+		f_dashShArr(_acc, sh_histAsiaH, "Asia H")
+		f_dashShArr(_acc, sh_histAsiaL, "Asia L")
+		f_dashShArr(_acc, sh_histLonH, "London H")
+		f_dashShArr(_acc, sh_histLonL, "London L")
+		f_dashShArr(_acc, sh_histNyamH, "NY AM H")
+		f_dashShArr(_acc, sh_histNyamL, "NY AM L")
+		f_dashShArr(_acc, sh_histNypmH, "NY PM H")
+		f_dashShArr(_acc, sh_histNypmL, "NY PM L")
+	if ENABLE_EQHL
+		if eqhPools.size() > 0
+			for i = 0 to eqhPools.size() - 1
+				LiqPool _p = eqhPools.get(i)
+				if na(_p.sweep) or _p.sweep.phase != 2
+					f_dashNear(_acc, _p.price, "EQH")
+		if eqlPools.size() > 0
+			for i = 0 to eqlPools.size() - 1
+				LiqPool _p = eqlPools.get(i)
+				if na(_p.sweep) or _p.sweep.phase != 2
+					f_dashNear(_acc, _p.price, "EQL")
+	string _upTxt = na(_acc.aP) ? "—" : "↑ " + _acc.aN + " " + str.tostring(_acc.aP, format.mintick)
+	string _dnTxt = na(_acc.bP) ? "—" : "↓ " + _acc.bN + " " + str.tostring(_acc.bP, format.mintick)
+	string _kzTxt = "Dead"
+	if timeframe.isintraday
+		if kz_showAsian and f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
+			_kzTxt := "Asian"
+		if kz_showLondon and f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
+			_kzTxt := "London"
+		if kz_showNYAM and f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, 0)
+			_kzTxt := "NY AM"
+		if kz_showNYPM and f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
+			_kzTxt := "NY PM"
+		if kz_showSBAM and f_inSession(kz_nyHour, kz_nyMin, kz_sbamStart, 0, kz_sbamEnd, 0)
+			_kzTxt := "Silver Bullet"
+		if kz_showSBPM and f_inSession(kz_nyHour, kz_nyMin, kz_sbpmStart, 0, kz_sbpmEnd, 0)
+			_kzTxt := "Silver Bullet"
+	table.cell(dashTbl, 0, 0, "Bias",      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 0, _biasTxt,    text_color=color.white,  text_size=dash_size, bgcolor=_biasCol)
+	table.cell(dashTbl, 0, 1, "Structure", text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 1, _structTxt,  text_color=color.white,  text_size=dash_size, bgcolor=_structCol)
+	table.cell(dashTbl, 0, 2, "Liq ↑",     text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 2, _upTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 0, 3, "Liq ↓",     text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 3, _dnTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 0, 4, "Killzone",  text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 4, _kzTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 
 var label _tfWarning=na
 if barstate.islast and not timeframe.isintraday
