@@ -29,6 +29,7 @@ var bool ENABLE_PDA_SCANNER=input.bool(false, "Enable PD Array Scanner", group="
 var bool ENABLE_SWEEPS=input.bool(true, "Enable Liquidity Sweeps", group="⓪ Section Toggles")
 var bool ENABLE_EQHL=input.bool(false, "Enable Equal Highs/Lows", group="⓪ Section Toggles")
 var bool ENABLE_STRUCTURE=input.bool(false, "Enable Market Structure (BOS/CHoCH)", group="⓪ Section Toggles")
+var bool ENABLE_DASHBOARD=input.bool(false, "Enable Dashboard", group="⓪ Section Toggles")
 
 var bool wh_enable=input.bool(false, "Enable Webhook Alerts", group="㉑ Webhook Alerts", tooltip="JSON alerts via alert(). In TV alert dialog, select 'Any alert() function call'.")
 var bool wh_formations=input.bool(true, "Formation Alerts", group="㉑ Webhook Alerts", inline="wh1", tooltip="OB/FVG/VI/GAP formations")
