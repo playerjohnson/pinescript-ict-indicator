@@ -2808,6 +2808,117 @@ f_pdaScanner() =>
 if ENABLE_PDA_SCANNER
 	f_pdaScanner()
 
+// ===== ㉖ Dashboard =====
+var string dash_pos  = input.string("Top Right", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="㉖ Dashboard")
+var string dash_size = input.string(size.small, "Text size", options=[size.tiny, size.small, size.normal], group="㉖ Dashboard")
+var color  dash_bg   = input.color(color.new(color.black, 20), "Background", group="㉖ Dashboard", inline="d1")
+var color  dash_txt  = input.color(color.white, "Text", group="㉖ Dashboard", inline="d1")
+
+// Thread the nearest level above (_aP/_aN) and below (_bP/_bN) the close with one candidate.
+f_dashNear(float _p, string _nm, float _aP, string _aN, float _bP, string _bN) =>
+	float _ap = _aP
+	float _bp = _bP
+	string _an = _aN
+	string _bn = _bN
+	if not na(_p)
+		if _p > close and (na(_ap) or _p < _ap)
+			_ap := _p
+			_an := _nm
+		if _p < close and (na(_bp) or _p > _bp)
+			_bp := _p
+			_bn := _nm
+	[_ap, _an, _bp, _bn]
+
+// Consider the newest (index 0) level of a session-H/L array if present and un-mitigated.
+f_dashShArr(array<SHLevel> _arr, string _nm, float _aP, string _aN, float _bP, string _bN) =>
+	float _ap = _aP
+	float _bp = _bP
+	string _an = _aN
+	string _bn = _bN
+	if _arr.size() > 0
+		SHLevel _l = _arr.get(0)
+		if not na(_l.price) and not _l.mitigated
+			[_ap, _an, _bp, _bn] = f_dashNear(_l.price, _nm, _ap, _an, _bp, _bn)
+	[_ap, _an, _bp, _bn]
+
+_dashPosCnst = switch dash_pos
+	"Top Left"     => position.top_left
+	"Bottom Right" => position.bottom_right
+	"Bottom Left"  => position.bottom_left
+	=> position.top_right
+var table dashTbl = table.new(_dashPosCnst, 2, 5, border_width=1)
+
+if ENABLE_DASHBOARD and barstate.islast
+	string _biasTxt = "—"
+	color _biasCol = dash_bg
+	if not na(_pdaHi) and _pdaHi > _pdaLo
+		float _pct = (close - _pdaLo) / (_pdaHi - _pdaLo) * 100
+		bool _prem = _pct >= 50
+		_biasTxt := (_prem ? "Premium " : "Discount ") + str.tostring(_pct, "#") + "%"
+		_biasCol := _prem ? color.new(color.red, 40) : color.new(color.green, 40)
+	string _structTxt = "—"
+	color _structCol = dash_bg
+	if ENABLE_STRUCTURE and struct_trend != 0
+		_structTxt := (struct_trend == 1 ? "Bull" : "Bear") + (na(struct_lastBreak) ? "" : " · " + struct_lastBreak)
+		_structCol := struct_trend == 1 ? color.new(color.green, 40) : color.new(color.red, 40)
+	float _aP = na
+	string _aN = ""
+	float _bP = na
+	string _bN = ""
+	if ENABLE_LIQUIDITY
+		[_aP, _aN, _bP, _bN] = f_dashNear(_prevMidDayHi, "PDH", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashNear(_prevMidDayLo, "PDL", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashNear(_secWeekHi, "PWH", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashNear(_secWeekLo, "PWL", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashNear(_secMonthHi, "PMH", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashNear(_secMonthLo, "PML", _aP, _aN, _bP, _bN)
+	if ENABLE_SESSION_HL
+		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histAsiaH, "Asia H", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histAsiaL, "Asia L", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histLonH, "London H", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histLonL, "London L", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histNyamH, "NY AM H", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histNyamL, "NY AM L", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histNypmH, "NY PM H", _aP, _aN, _bP, _bN)
+		[_aP, _aN, _bP, _bN] = f_dashShArr(sh_histNypmL, "NY PM L", _aP, _aN, _bP, _bN)
+	if ENABLE_EQHL
+		if eqhPools.size() > 0
+			for i = 0 to eqhPools.size() - 1
+				LiqPool _p = eqhPools.get(i)
+				if na(_p.sweep) or _p.sweep.phase != 2
+					[_aP, _aN, _bP, _bN] = f_dashNear(_p.price, "EQH", _aP, _aN, _bP, _bN)
+		if eqlPools.size() > 0
+			for i = 0 to eqlPools.size() - 1
+				LiqPool _p = eqlPools.get(i)
+				if na(_p.sweep) or _p.sweep.phase != 2
+					[_aP, _aN, _bP, _bN] = f_dashNear(_p.price, "EQL", _aP, _aN, _bP, _bN)
+	string _upTxt = na(_aP) ? "—" : "↑ " + _aN + " " + str.tostring(_aP, format.mintick)
+	string _dnTxt = na(_bP) ? "—" : "↓ " + _bN + " " + str.tostring(_bP, format.mintick)
+	string _kzTxt = "Dead"
+	if timeframe.isintraday
+		if kz_showAsian and f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
+			_kzTxt := "Asian"
+		if kz_showLondon and f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
+			_kzTxt := "London"
+		if kz_showNYAM and f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, 0)
+			_kzTxt := "NY AM"
+		if kz_showNYPM and f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
+			_kzTxt := "NY PM"
+		if kz_showSBAM and f_inSession(kz_nyHour, kz_nyMin, kz_sbamStart, 0, kz_sbamEnd, 0)
+			_kzTxt := "Silver Bullet"
+		if kz_showSBPM and f_inSession(kz_nyHour, kz_nyMin, kz_sbpmStart, 0, kz_sbpmEnd, 0)
+			_kzTxt := "Silver Bullet"
+	table.cell(dashTbl, 0, 0, "Bias",      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 0, _biasTxt,    text_color=color.white,  text_size=dash_size, bgcolor=_biasCol)
+	table.cell(dashTbl, 0, 1, "Structure", text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 1, _structTxt,  text_color=color.white,  text_size=dash_size, bgcolor=_structCol)
+	table.cell(dashTbl, 0, 2, "Liq ↑",     text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 2, _upTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 0, 3, "Liq ↓",     text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 3, _dnTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 0, 4, "Killzone",  text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 4, _kzTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+
 var label _tfWarning=na
 if barstate.islast and not timeframe.isintraday
 	bool _anyIntraday = ENABLE_HOURLY_OPEN or ENABLE_IMBALANCES or ENABLE_KILLZONES or ENABLE_SESSION_HL
