@@ -2548,6 +2548,75 @@ if ENABLE_SESSION_HL and timeframe.isintraday
 		_sh_drawCur(sh_showNYLunch, _isNYL,  sh_nylH,  sh_nylL,  sh_nylHT,  sh_nylLT,  sh_nylBar,  sh_nylHColor,    sh_nylLColor,    "NY Lunch")
 		_sh_drawCur(sh_showNYPM,    _isNYPM, sh_nypmH, sh_nypmL, sh_nypmHT, sh_nypmLT, sh_nypmBar, sh_nypmHColor,   sh_nypmLColor,   "NY PM")
 
+// ===== ⑳ Liquidity Levels — multi-level history (reuses SHLevel + sweep engine) =====
+var array<SHLevel> lq_histDayH   = array.new<SHLevel>()
+var array<SHLevel> lq_histDayL   = array.new<SHLevel>()
+var array<SHLevel> lq_histWeekH  = array.new<SHLevel>()
+var array<SHLevel> lq_histWeekL  = array.new<SHLevel>()
+var array<SHLevel> lq_histMonthH = array.new<SHLevel>()
+var array<SHLevel> lq_histMonthL = array.new<SHLevel>()
+
+// Prune a level array by count cap, then by age (deletes drawings). Newest is index 0; oldest is last().
+f_lqPrune(array<SHLevel> _arr, int _cap, int _lookbackMs) =>
+	while _arr.size() > _cap
+		SHLevel _o = _arr.pop()
+		line.delete(_o.ln)
+		label.delete(_o.lbl)
+		if not na(_o.sweep)
+			label.delete(_o.sweep.marker)
+	while _arr.size() > 0 and not na(_arr.last().priceTime) and (time - _arr.last().priceTime) > _lookbackMs
+		SHLevel _o = _arr.pop()
+		line.delete(_o.ln)
+		label.delete(_o.lbl)
+		if not na(_o.sweep)
+			label.delete(_o.sweep.marker)
+
+// Draw/update one liquidity-level array: shared sweep detection, close-through mitigation, grey-out.
+_lq_processHist(_show, array<SHLevel> _hist, _isHigh, _color, _style, _name) =>
+	if _show and _hist.size() > 0
+		for i = 0 to _hist.size() - 1
+			SHLevel _lvl = _hist.get(i)
+			if na(_lvl.price)
+				continue
+			if _lvl.mitigated and not lq_showMit
+				line.delete(_lvl.ln)
+				label.delete(_lvl.lbl)
+				_lvl.ln := line(na)
+				_lvl.lbl := label(na)
+				if not na(_lvl.sweep)
+					label.delete(_lvl.sweep.marker)
+					_lvl.sweep.marker := na
+				continue
+			if ENABLE_SWEEPS
+				if na(_lvl.sweep)
+					_lvl.sweep := SweepState.new()
+				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
+					f_sweepMark(_lvl.sweep, _name, _isHigh)
+			if not _lvl.mitigated and barstate.isconfirmed
+				bool _hit = _isHigh ? close > _lvl.price : close < _lvl.price
+				if _hit
+					_lvl.mitigated := true
+			int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
+			int _x2 = bar_index + 30
+			bool _swept = ENABLE_SWEEPS and not na(_lvl.sweep) and _lvl.sweep.phase == 2
+			color _lineClr = _swept ? sweep_lineColor : _lvl.mitigated ? lq_mitColor : _color
+			string _swTxt = _swept ? " ⚡TS" : ""
+			string _mitTxt = _lvl.mitigated ? " [Mitigated]" : ""
+			string _txt = _name + " " + str.tostring(_lvl.price, format.mintick) + _swTxt + _mitTxt
+			string _ls = _lvl.mitigated ? line.style_dotted : f_get_line_style(_style)
+			if na(_lvl.ln)
+				_lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color=_lineClr, style=_ls, width=lq_lineWidth)
+			line.set_xy1(_lvl.ln, _x1, _lvl.price)
+			line.set_xy2(_lvl.ln, _x2, _lvl.price)
+			line.set_color(_lvl.ln, _lineClr)
+			line.set_style(_lvl.ln, _ls)
+			if lq_showLabels
+				if na(_lvl.lbl)
+					_lvl.lbl := label.new(_x2, _lvl.price, _txt, style=label.style_label_left, color=color.new(color.white, 100), textcolor=_lineClr, size=size.small)
+				label.set_xy(_lvl.lbl, _x2, _lvl.price)
+				label.set_text(_lvl.lbl, _txt)
+				label.set_textcolor(_lvl.lbl, _lineClr)
+
 _lq_draw(_show, _hi, _lo, _hClr, _lClr, _style, _hName, _lName) =>
 	var line _lnH = na, var line _lnL = na
 	var label _lbH = na, var label _lbL = na
