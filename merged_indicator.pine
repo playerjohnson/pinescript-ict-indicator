@@ -2650,8 +2650,25 @@ _lq_draw(_show, _hi, _lo, _hClr, _lClr, _style, _hName, _lName) =>
 				label.set_x(_lbL, bar_index + 30), label.set_y(_lbL, _lo), label.set_text(_lbL, _lTxt)
 				_lbL
 
-[_secWeekHi, _secWeekLo] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
-[_secMonthHi, _secMonthLo] = request.security(syminfo.tickerid, "M", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+[_secWeekHi, _secWeekLo, _secWeekT] = request.security(syminfo.tickerid, "W", [high[1], low[1], time[1]], lookahead = barmerge.lookahead_on)
+[_secMonthHi, _secMonthLo, _secMonthT] = request.security(syminfo.tickerid, "M", [high[1], low[1], time[1]], lookahead = barmerge.lookahead_on)
+
+var int _lqPrevWeekT = na
+var int _lqPrevMonthT = na
+int _lqLookbackMs = lq_lookbackDays * 86400000
+if ENABLE_LIQUIDITY
+	if not na(_secWeekHi) and (na(_lqPrevWeekT) or _secWeekT != _lqPrevWeekT)
+		lq_histWeekH.unshift(SHLevel.new(price = _secWeekHi, startBar = bar_index, priceTime = _secWeekT))
+		lq_histWeekL.unshift(SHLevel.new(price = _secWeekLo, startBar = bar_index, priceTime = _secWeekT))
+		f_lqPrune(lq_histWeekH, lq_maxWeekly, _lqLookbackMs)
+		f_lqPrune(lq_histWeekL, lq_maxWeekly, _lqLookbackMs)
+		_lqPrevWeekT := _secWeekT
+	if not na(_secMonthHi) and (na(_lqPrevMonthT) or _secMonthT != _lqPrevMonthT)
+		lq_histMonthH.unshift(SHLevel.new(price = _secMonthHi, startBar = bar_index, priceTime = _secMonthT))
+		lq_histMonthL.unshift(SHLevel.new(price = _secMonthLo, startBar = bar_index, priceTime = _secMonthT))
+		f_lqPrune(lq_histMonthH, lq_maxMonthly, _lqLookbackMs)
+		f_lqPrune(lq_histMonthL, lq_maxMonthly, _lqLookbackMs)
+		_lqPrevMonthT := _secMonthT
 
 var float _midDayHi=na
 var float _midDayLo=na
