@@ -2681,6 +2681,11 @@ if timeframe.isintraday and (ENABLE_LIQUIDITY or ENABLE_PDA_SCANNER)
 	if _isMidNY and not _wasMidnight
 		_prevMidDayHi := _midDayHi
 		_prevMidDayLo := _midDayLo
+		if ENABLE_LIQUIDITY and not na(_midDayHi)
+			lq_histDayH.unshift(SHLevel.new(price = _midDayHi, startBar = bar_index, priceTime = time))
+			lq_histDayL.unshift(SHLevel.new(price = _midDayLo, startBar = bar_index, priceTime = time))
+			f_lqPrune(lq_histDayH, lq_maxDaily, _lqLookbackMs)
+			f_lqPrune(lq_histDayL, lq_maxDaily, _lqLookbackMs)
 		_midDayHi := high
 		_midDayLo := low
 	else
