@@ -2606,8 +2606,7 @@ _lq_processHist(_show, array<SHLevel> _hist, _isHigh, _color, _style, _name) =>
 			string _ls = _lvl.mitigated ? line.style_dotted : f_get_line_style(_style)
 			if na(_lvl.ln)
 				_lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color=_lineClr, style=_ls, width=lq_lineWidth)
-			line.set_xy1(_lvl.ln, _x1, _lvl.price)
-			line.set_xy2(_lvl.ln, _x2, _lvl.price)
+			line.set_x2(_lvl.ln, _x2)
 			line.set_color(_lvl.ln, _lineClr)
 			line.set_style(_lvl.ln, _ls)
 			if lq_showLabels
