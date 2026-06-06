@@ -2617,39 +2617,6 @@ _lq_processHist(_show, array<SHLevel> _hist, _isHigh, _color, _style, _name) =>
 				label.set_text(_lvl.lbl, _txt)
 				label.set_textcolor(_lvl.lbl, _lineClr)
 
-_lq_draw(_show, _hi, _lo, _hClr, _lClr, _style, _hName, _lName) =>
-	var line _lnH = na, var line _lnL = na
-	var label _lbH = na, var label _lbL = na
-	var SweepState _swH = SweepState.new()
-	var SweepState _swL = SweepState.new()
-	if _show and not na(_hi)
-		if na(_lnH)
-			_lnH := line.new(bar_index - 1, _hi, bar_index + 30, _hi, color=_hClr, style=f_get_line_style(_style), width=lq_lineWidth)
-			_lnL := line.new(bar_index - 1, _lo, bar_index + 30, _lo, color=_lClr, style=f_get_line_style(_style), width=lq_lineWidth)
-		else
-			line.set_x1(_lnH, bar_index - 1), line.set_y1(_lnH, _hi), line.set_x2(_lnH, bar_index + 30), line.set_y2(_lnH, _hi)
-			line.set_x1(_lnL, bar_index - 1), line.set_y1(_lnL, _lo), line.set_x2(_lnL, bar_index + 30), line.set_y2(_lnL, _lo)
-			_lnL
-		if ENABLE_SWEEPS
-			if f_sweepTick(_swH, _hi, true, sweep_confirmBars)
-				f_sweepMark(_swH, _hName, true)
-			if f_sweepTick(_swL, _lo, false, sweep_confirmBars)
-				f_sweepMark(_swL, _lName, false)
-			if not na(_lnH)
-				line.set_color(_lnH, _swH.phase == 2 ? sweep_lineColor : _hClr)
-			if not na(_lnL)
-				line.set_color(_lnL, _swL.phase == 2 ? sweep_lineColor : _lClr)
-		if lq_showLabels
-			string _hTxt = _hName + " " + str.tostring(_hi, format.mintick)
-			string _lTxt = _lName + " " + str.tostring(_lo, format.mintick)
-			if na(_lbH)
-				_lbH := label.new(bar_index + 30, _hi, _hTxt, style=label.style_label_left, color=color.new(color.white, 100), textcolor=_hClr, size=size.small)
-				_lbL := label.new(bar_index + 30, _lo, _lTxt, style=label.style_label_left, color=color.new(color.white, 100), textcolor=_lClr, size=size.small)
-			else
-				label.set_x(_lbH, bar_index + 30), label.set_y(_lbH, _hi), label.set_text(_lbH, _hTxt)
-				label.set_x(_lbL, bar_index + 30), label.set_y(_lbL, _lo), label.set_text(_lbL, _lTxt)
-				_lbL
-
 [_secWeekHi, _secWeekLo, _secWeekT] = request.security(syminfo.tickerid, "W", [high[1], low[1], time[1]], lookahead = barmerge.lookahead_on)
 [_secMonthHi, _secMonthLo, _secMonthT] = request.security(syminfo.tickerid, "M", [high[1], low[1], time[1]], lookahead = barmerge.lookahead_on)
 
@@ -2698,9 +2665,12 @@ if timeframe.isintraday and (ENABLE_LIQUIDITY or ENABLE_PDA_SCANNER)
 	_wasMidnight := _isMidNY
 
 if ENABLE_LIQUIDITY
-	_lq_draw(lq_showPDH, _prevMidDayHi, _prevMidDayLo, lq_pdhColor, lq_pdlColor, lq_pdStyle, "PDH", "PDL")
-	_lq_draw(lq_showPWH, _secWeekHi, _secWeekLo, lq_pwhColor, lq_pwlColor, lq_pwStyle, "PWH", "PWL")
-	_lq_draw(lq_showPMH, _secMonthHi, _secMonthLo, lq_pmhColor, lq_pmlColor, lq_pmStyle, "PMH", "PML")
+	_lq_processHist(lq_showPDH, lq_histDayH,   true,  lq_pdhColor, lq_pdStyle, "PDH")
+	_lq_processHist(lq_showPDH, lq_histDayL,   false, lq_pdlColor, lq_pdStyle, "PDL")
+	_lq_processHist(lq_showPWH, lq_histWeekH,  true,  lq_pwhColor, lq_pwStyle, "PWH")
+	_lq_processHist(lq_showPWH, lq_histWeekL,  false, lq_pwlColor, lq_pwStyle, "PWL")
+	_lq_processHist(lq_showPMH, lq_histMonthH, true,  lq_pmhColor, lq_pmStyle, "PMH")
+	_lq_processHist(lq_showPMH, lq_histMonthL, false, lq_pmlColor, lq_pmStyle, "PML")
 
 var array<LiqPool> eqhPools = array.new<LiqPool>()
 var array<LiqPool> eqlPools = array.new<LiqPool>()
