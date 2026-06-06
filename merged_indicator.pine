@@ -2913,19 +2913,3 @@ if ENABLE_DASHBOARD and barstate.islast
 	table.cell(dashTbl, 0, 4, "Killzone",  text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 1, 4, _kzTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 
-var label _tfWarning=na
-if barstate.islast and not timeframe.isintraday
-	bool _anyIntraday = ENABLE_HOURLY_OPEN or ENABLE_IMBALANCES or ENABLE_KILLZONES or ENABLE_SESSION_HL
-	if _anyIntraday
-		if na(_tfWarning)
-			_tfWarning := label.new(bar_index, close, "⚠ Switch to intraday for: " +
-				 (ENABLE_HOURLY_OPEN ? "Hourly Open, " : "") +
-				 (ENABLE_IMBALANCES ? "Imbalances, " : "") +
-				 (ENABLE_KILLZONES ? "Killzones, " : "") +
-				 (ENABLE_SESSION_HL ? "Session H/L" : ""),
-				 style = label.style_label_down, color = color.new(#ff9800, 20),
-				 textcolor = color.white, size = size.normal)
-		else
-			label.set_x(_tfWarning, bar_index)
-			label.set_y(_tfWarning, close)
-
