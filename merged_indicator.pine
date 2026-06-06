@@ -319,6 +319,12 @@ var color lq_pmlColor=input.color(color.new(#ef5350, 0), "", group="⑳ Liquidit
 var string lq_pmStyle=input.string("⎯⎯⎯", "", options=['⎯⎯⎯', '----', '····'], group="⑳ Liquidity Levels", inline="lq3")
 var bool lq_showLabels=input.bool(true, "Show Labels", group="⑳ Liquidity Levels", inline="lq4")
 var int lq_lineWidth=input.int(1, "Width", 1, 4, group="⑳ Liquidity Levels", inline="lq4")
+var int   lq_lookbackDays = input.int(60, "History (days)", minval=1, maxval=365, group="⑳ Liquidity Levels", inline="lq5")
+var int   lq_maxDaily     = input.int(15, "Max D", minval=1, maxval=60, group="⑳ Liquidity Levels", inline="lq5")
+var int   lq_maxWeekly    = input.int(10, "Max W", minval=1, maxval=30, group="⑳ Liquidity Levels", inline="lq5")
+var int   lq_maxMonthly   = input.int(6, "Max M", minval=1, maxval=12, group="⑳ Liquidity Levels", inline="lq5")
+var bool  lq_showMit      = input.bool(true, "Show Mitigated", group="⑳ Liquidity Levels", inline="lq6")
+var color lq_mitColor     = input.color(color.new(color.gray, 50), "", group="⑳ Liquidity Levels", inline="lq6")
 
 var bool buimpfvgtouch=false
 var bool beimpfvgtouch=false
