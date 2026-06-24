@@ -2741,6 +2741,125 @@ if ENABLE_STRUCTURE
 		structLowResolved := false
 		bosL := BosState.new()
 
+// ═══════════ ㉗ SMT Divergences ═══════════
+// Re-architected from LuxAlgo "SMT Divergences" (Pine v5). Divergence technique credit: LuxAlgo.
+// Independent re-implementation in this file's idioms (SmtState UDT by-reference, like SweepState/BosState).
+var int    smt_pivotLen       = input.int(3, "Pivot Lookback", minval=2, group="㉗ SMT Divergences", inline="smt1")
+var bool   smt_useSym1        = input.bool(true, "Symbol 1", group="㉗ SMT Divergences", inline="smt2")
+var string smt_sym1           = input.symbol("CME_MINI_DL:ES1!", "", group="㉗ SMT Divergences", inline="smt2")
+var bool   smt_useSym2        = input.bool(true, "Symbol 2", group="㉗ SMT Divergences", inline="smt3")
+var string smt_sym2           = input.symbol("CBOT_MINI_DL:YM1!", "", group="㉗ SMT Divergences", inline="smt3")
+var color  smt_shColor        = input.color(#ff1100, "Swing-High Div", group="㉗ SMT Divergences", inline="smt4")
+var color  smt_slColor        = input.color(#2157f3, "Swing-Low Div", group="㉗ SMT Divergences", inline="smt4")
+var int    smt_maxDivergences = input.int(20, "Max Divergences", minval=1, maxval=100, group="㉗ SMT Divergences", inline="smt5")
+var string smt_labelSize      = input.string("Tiny", "Label Size", options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="㉗ SMT Divergences", inline="smt5")
+
+type SmtState
+	float y1    = na
+	float symY1 = na
+	int   x1    = na
+	int   count = 0
+	int   lastT = na
+
+var array<line>  smt_lines  = array.new<line>()
+var array<label> smt_labels = array.new<label>()
+var int      smt_phN = 0
+var int      smt_plN = 0
+var string   smt_tk1 = na
+var string   smt_tk2 = na
+var SmtState smt1H   = SmtState.new()
+var SmtState smt1L   = SmtState.new()
+var SmtState smt2H   = SmtState.new()
+var SmtState smt2L   = SmtState.new()
+
+// One (symbol, side) detector for one bar. Mutates st by-reference (like f_sweepTick/f_bosTick).
+// Draws the divergence line from the OLD anchor (st.x1/st.y1) BEFORE updating st, fires the webhook,
+// and RETURNS the new line (na if none) — the driver pushes it, sets flags, and builds the merged label.
+f_smtTick(SmtState st, bool _isHigh, float _y2, float _symY2, string _name) =>
+	line _out = na
+	if _y2 != _y2[1] and _symY2 != _symY2[1]
+		if (_y2 - st.y1) * (_symY2 - st.symY1) < 0
+			_out := line.new(st.x1, st.y1, bar_index - smt_pivotLen, _y2, color = _isHigh ? smt_shColor : smt_slColor, style = line.style_solid)
+			st.count := st.count + 1
+			st.lastT := time
+			if wh_enable and wh_smt
+				alert(_wh_json(_isHigh ? "SMT BEAR " + _name : "SMT BULL " + _name, _y2, _y2), alert.freq_once_per_bar_close)
+		st.symY1 := _symY2
+		st.y1 := _y2
+		st.x1 := bar_index - smt_pivotLen
+	else if (_isHigh and _y2 > _y2[1]) or (not _isHigh and _y2 < _y2[1])
+		st.symY1 := na
+		st.y1 := _y2
+		st.x1 := bar_index - smt_pivotLen
+	_out
+
+// Chart pivots — computed UNCONDITIONALLY (ta.* per-bar consistency, matches ㉓/㉔). fixnan holds the last pivot.
+float smt_ph = fixnan(ta.pivothigh(smt_pivotLen, smt_pivotLen))
+float smt_pl = fixnan(ta.pivotlow(smt_pivotLen, smt_pivotLen))
+smt_phN += smt_ph != smt_ph[1] ? 1 : 0
+smt_plN += smt_pl != smt_pl[1] ? 1 : 0
+bool smtBullFired = false
+bool smtBearFired = false
+
+if ENABLE_SMT
+	line _l1H = na
+	line _l1L = na
+	line _l2H = na
+	line _l2L = na
+	string _n1 = na
+	string _n2 = na
+	if smt_useSym1
+		[h1, l1, tk1] = request.security(smt_sym1, timeframe.period, [high, low, syminfo.ticker])
+		float _symPh1 = fixnan(ta.pivothigh(h1, smt_pivotLen, smt_pivotLen))
+		float _symPl1 = fixnan(ta.pivotlow(l1, smt_pivotLen, smt_pivotLen))
+		_n1 := tk1
+		smt_tk1 := tk1
+		_l1H := f_smtTick(smt1H, true, smt_ph, _symPh1, tk1)
+		_l1L := f_smtTick(smt1L, false, smt_pl, _symPl1, tk1)
+	if smt_useSym2
+		[h2, l2, tk2] = request.security(smt_sym2, timeframe.period, [high, low, syminfo.ticker])
+		float _symPh2 = fixnan(ta.pivothigh(h2, smt_pivotLen, smt_pivotLen))
+		float _symPl2 = fixnan(ta.pivotlow(l2, smt_pivotLen, smt_pivotLen))
+		_n2 := tk2
+		smt_tk2 := tk2
+		_l2H := f_smtTick(smt2H, true, smt_ph, _symPh2, tk2)
+		_l2L := f_smtTick(smt2L, false, smt_pl, _symPl2, tk2)
+	if not na(_l1H)
+		smt_lines.unshift(_l1H)
+		smtBearFired := true
+	if not na(_l2H)
+		smt_lines.unshift(_l2H)
+		smtBearFired := true
+	if not na(_l1L)
+		smt_lines.unshift(_l1L)
+		smtBullFired := true
+	if not na(_l2L)
+		smt_lines.unshift(_l2L)
+		smtBullFired := true
+	array<string> _hiNames = array.new<string>()
+	if not na(_l1H)
+		_hiNames.push(_n1)
+	if not na(_l2H)
+		_hiNames.push(_n2)
+	if _hiNames.size() > 0
+		label _lbH = label.new(bar_index - smt_pivotLen, smt_ph, array.join(_hiNames, " | "), style = label.style_label_down, color = color.new(color.white, 100), textcolor = smt_shColor, size = _ho_getSize(smt_labelSize))
+		smt_labels.unshift(_lbH)
+	array<string> _loNames = array.new<string>()
+	if not na(_l1L)
+		_loNames.push(_n1)
+	if not na(_l2L)
+		_loNames.push(_n2)
+	if _loNames.size() > 0
+		label _lbL = label.new(bar_index - smt_pivotLen, smt_pl, array.join(_loNames, " | "), style = label.style_label_up, color = color.new(color.white, 100), textcolor = smt_slColor, size = _ho_getSize(smt_labelSize))
+		smt_labels.unshift(_lbL)
+	while smt_lines.size() > smt_maxDivergences * 2
+		line.delete(smt_lines.pop())
+	while smt_labels.size() > smt_maxDivergences
+		label.delete(smt_labels.pop())
+
+alertcondition(smtBullFired, title="SMT Bull", message="SMT Bull {{ticker}} {{interval}}")
+alertcondition(smtBearFired, title="SMT Bear", message="SMT Bear {{ticker}} {{interval}}")
+
 var string pda_range=input.string("Previous Day", "Dealing Range", options=["Previous Day", "Previous Week", "Previous Month"], group="㉕ PD Array Scanner", tooltip="Range for EQ. Premium/Discount.")
 var bool pda_showEQ=input.bool(true, "EQ Line", group="㉕ PD Array Scanner", inline="pda1")
 var color pda_eqColor=input.color(color.new(color.white, 30), "", group="㉕ PD Array Scanner", inline="pda1")
