@@ -2742,119 +2742,112 @@ if ENABLE_STRUCTURE
 		bosL := BosState.new()
 
 // ═══════════ ㉗ SMT Divergences ═══════════
-// Re-architected from LuxAlgo "SMT Divergences" (Pine v5). Divergence technique credit: LuxAlgo.
-// Independent re-implementation in this file's idioms (SmtState UDT by-reference, like SweepState/BosState).
-var int    smt_pivotLen       = input.int(3, "Pivot Lookback", minval=2, group="㉗ SMT Divergences", inline="smt1")
-var bool   smt_useSym1        = input.bool(true, "Symbol 1", group="㉗ SMT Divergences", inline="smt2")
-var string smt_sym1           = input.symbol("CME_MINI_DL:ES1!", "", group="㉗ SMT Divergences", inline="smt2")
-var bool   smt_useSym2        = input.bool(true, "Symbol 2", group="㉗ SMT Divergences", inline="smt3")
-var string smt_sym2           = input.symbol("CBOT_MINI_DL:YM1!", "", group="㉗ SMT Divergences", inline="smt3")
-var color  smt_shColor        = input.color(#ff1100, "Swing-High Div", group="㉗ SMT Divergences", inline="smt4")
-var color  smt_slColor        = input.color(#2157f3, "Swing-Low Div", group="㉗ SMT Divergences", inline="smt4")
-var int    smt_maxDivergences = input.int(20, "Max Divergences", minval=1, maxval=100, group="㉗ SMT Divergences", inline="smt5")
-var string smt_labelSize      = input.string("Tiny", "Label Size", options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="㉗ SMT Divergences", inline="smt5")
+// Two-scale synchronized-pair SMT divergence (chart symbol vs up to 2 correlated symbols).
+// Technique inspired by LuxAlgo "SMT Divergences"; independent re-implementation: raw ta.pivot*
+// (na except on the confirm bar), pending-per-side pairing within a scale-proportional window,
+// divergence on consecutive synced swing points. SmtPair UDT threaded by-reference (like SweepState).
+var bool   smt_useSym1   = input.bool(true, "Symbol 1", group="㉗ SMT Divergences", inline="smt1")
+var string smt_sym1      = input.symbol("CME_MINI_DL:ES1!", "", group="㉗ SMT Divergences", inline="smt1")
+var bool   smt_useSym2   = input.bool(true, "Symbol 2", group="㉗ SMT Divergences", inline="smt2")
+var string smt_sym2      = input.symbol("CBOT_MINI_DL:YM1!", "", group="㉗ SMT Divergences", inline="smt2")
+var int    smt_lenShort  = input.int(5, "Pivot — short", minval=2, group="㉗ SMT Divergences", inline="smt3")
+var int    smt_lenLong   = input.int(25, "long", minval=2, group="㉗ SMT Divergences", inline="smt3")
+var float  smt_pairMult  = input.float(1.0, "Pair window ×len", minval=0.0, maxval=5.0, step=0.25, group="㉗ SMT Divergences", inline="smt3", tooltip="Two pivots pair if their bars are within (pivot length × this) bars. Scales per scale, so the long pass tolerates wider gaps.")
+var color  smt_shColor   = input.color(#ff1100, "Swing-High Div", group="㉗ SMT Divergences", inline="smt4")
+var color  smt_slColor   = input.color(#2157f3, "Swing-Low Div", group="㉗ SMT Divergences", inline="smt4")
+var int    smt_maxDiv    = input.int(20, "Max Divergences", minval=1, maxval=100, group="㉗ SMT Divergences", inline="smt5", tooltip="Per-array cap (lines and labels each capped at 2×). Shared across both scales and symbols.")
+var string smt_labelSize = input.string("Tiny", "Label", options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="㉗ SMT Divergences", inline="smt5")
 
-type SmtState
-	float y1    = na
-	float symY1 = na
-	int   x1    = na
-	int   count = 0
-	int   lastT = na
+type SmtPair
+	float chV     = na
+	int   chB     = na
+	float cmV     = na
+	int   cmB     = na
+	float chPrev  = na
+	int   chPrevB = na
+	float cmPrev  = na
+	int   count   = 0
+	int   lastT   = na
 
 var array<line>  smt_lines  = array.new<line>()
 var array<label> smt_labels = array.new<label>()
-var int      smt_phN = 0
-var int      smt_plN = 0
 var string   smt_tk1 = na
 var string   smt_tk2 = na
-var SmtState smt1H   = SmtState.new()
-var SmtState smt1L   = SmtState.new()
-var SmtState smt2H   = SmtState.new()
-var SmtState smt2L   = SmtState.new()
+var SmtPair smtS1H = SmtPair.new()
+var SmtPair smtS1L = SmtPair.new()
+var SmtPair smtS2H = SmtPair.new()
+var SmtPair smtS2L = SmtPair.new()
+var SmtPair smtL1H = SmtPair.new()
+var SmtPair smtL1L = SmtPair.new()
+var SmtPair smtL2H = SmtPair.new()
+var SmtPair smtL2L = SmtPair.new()
 
-// One (symbol, side) detector for one bar. Mutates st by-reference (like f_sweepTick/f_bosTick).
-// Draws the divergence line from the OLD anchor (st.x1/st.y1) BEFORE updating st, fires the webhook,
-// and RETURNS the new line (na if none) — the driver pushes it, sets flags, and builds the merged label.
-f_smtTick(SmtState st, bool _isHigh, float _y2, float _symY2, string _name) =>
-	line _out = na
-	if _y2 != _y2[1] and _symY2 != _symY2[1]
-		if (_y2 - st.y1) * (_symY2 - st.symY1) < 0
-			_out := line.new(st.x1, st.y1, bar_index - smt_pivotLen, _y2, color = _isHigh ? smt_shColor : smt_slColor, style = line.style_solid)
-			st.count := st.count + 1
-			st.lastT := time
-			if wh_enable and wh_smt
-				alert(_wh_json(_isHigh ? "SMT BEAR " + _name : "SMT BULL " + _name, _y2, _y2), alert.freq_once_per_bar_close)
-		st.symY1 := _symY2
-		st.y1 := _y2
-		st.x1 := bar_index - smt_pivotLen
-	else if (_isHigh and _y2 > _y2[1]) or (not _isHigh and _y2 < _y2[1])
-		st.symY1 := na
-		st.y1 := _y2
-		st.x1 := bar_index - smt_pivotLen
-	_out
+// One detector for one bar. Feed the chart + comparison raw pivots; when both pending slots are filled
+// and their pivot bars are within _win, they form a synced swing point — compared to the previous synced
+// point for a direction divergence. Draws the chart-price line + ticker label into the passed arrays,
+// mutates st by-reference, returns true on a fire (driver ORs that into the alert flags).
+f_smtPair(SmtPair st, array<line> _lns, array<label> _lbs, bool _chP, float _chV, int _chB, bool _cmP, float _cmV, int _cmB, int _win, bool _isHigh, string _name, int _width) =>
+	bool _fired = false
+	if _chP
+		st.chV := _chV
+		st.chB := _chB
+	if _cmP
+		st.cmV := _cmV
+		st.cmB := _cmB
+	if not na(st.chV) and not na(st.cmV) and math.abs(st.chB - st.cmB) <= _win
+		if not na(st.chPrev) and not na(st.cmPrev)
+			if (st.chV - st.chPrev) * (st.cmV - st.cmPrev) < 0
+				color _clr = _isHigh ? smt_shColor : smt_slColor
+				_lns.unshift(line.new(st.chPrevB, st.chPrev, st.chB, st.chV, color = _clr, style = line.style_solid, width = _width))
+				_lbs.unshift(label.new(st.chB, st.chV, _name, style = _isHigh ? label.style_label_down : label.style_label_up, color = color.new(color.white, 100), textcolor = _clr, size = _ho_getSize(smt_labelSize)))
+				st.count := st.count + 1
+				st.lastT := time
+				_fired := true
+				if wh_enable and wh_smt
+					alert(_wh_json(_isHigh ? "SMT BEAR " + _name : "SMT BULL " + _name, st.chV, st.chV), alert.freq_once_per_bar_close)
+		st.chPrev := st.chV
+		st.cmPrev := st.cmV
+		st.chPrevB := st.chB
+		st.chV := na
+		st.cmV := na
+	_fired
 
-// Chart pivots — computed UNCONDITIONALLY (ta.* per-bar consistency, matches ㉓/㉔). fixnan holds the last pivot.
-float smt_ph = fixnan(ta.pivothigh(smt_pivotLen, smt_pivotLen))
-float smt_pl = fixnan(ta.pivotlow(smt_pivotLen, smt_pivotLen))
-smt_phN += smt_ph != smt_ph[1] ? 1 : 0
-smt_plN += smt_pl != smt_pl[1] ? 1 : 0
+// Chart pivots per scale — computed UNCONDITIONALLY (ta.* per-bar consistency, matches ㉓/㉔). Raw: na except on the confirm bar.
+float _chPhS = ta.pivothigh(smt_lenShort, smt_lenShort)
+float _chPlS = ta.pivotlow(smt_lenShort, smt_lenShort)
+float _chPhL = ta.pivothigh(smt_lenLong, smt_lenLong)
+float _chPlL = ta.pivotlow(smt_lenLong, smt_lenLong)
+int _winS = int(math.round(smt_lenShort * smt_pairMult))
+int _winL = int(math.round(smt_lenLong * smt_pairMult))
 bool smtBullFired = false
 bool smtBearFired = false
 
 if ENABLE_SMT
-	line _l1H = na
-	line _l1L = na
-	line _l2H = na
-	line _l2L = na
-	string _n1 = na
-	string _n2 = na
 	if smt_useSym1
 		[h1, l1, tk1] = request.security(smt_sym1, timeframe.period, [high, low, syminfo.ticker])
-		float _symPh1 = fixnan(ta.pivothigh(h1, smt_pivotLen, smt_pivotLen))
-		float _symPl1 = fixnan(ta.pivotlow(l1, smt_pivotLen, smt_pivotLen))
-		_n1 := tk1
 		smt_tk1 := tk1
-		_l1H := f_smtTick(smt1H, true, smt_ph, _symPh1, tk1)
-		_l1L := f_smtTick(smt1L, false, smt_pl, _symPl1, tk1)
+		float _s1PhS = ta.pivothigh(h1, smt_lenShort, smt_lenShort)
+		float _s1PlS = ta.pivotlow(l1, smt_lenShort, smt_lenShort)
+		float _s1PhL = ta.pivothigh(h1, smt_lenLong, smt_lenLong)
+		float _s1PlL = ta.pivotlow(l1, smt_lenLong, smt_lenLong)
+		smtBearFired := f_smtPair(smtS1H, smt_lines, smt_labels, not na(_chPhS), _chPhS, bar_index - smt_lenShort, not na(_s1PhS), _s1PhS, bar_index - smt_lenShort, _winS, true,  tk1, 1) or smtBearFired
+		smtBullFired := f_smtPair(smtS1L, smt_lines, smt_labels, not na(_chPlS), _chPlS, bar_index - smt_lenShort, not na(_s1PlS), _s1PlS, bar_index - smt_lenShort, _winS, false, tk1, 1) or smtBullFired
+		smtBearFired := f_smtPair(smtL1H, smt_lines, smt_labels, not na(_chPhL), _chPhL, bar_index - smt_lenLong,  not na(_s1PhL), _s1PhL, bar_index - smt_lenLong,  _winL, true,  tk1, 2) or smtBearFired
+		smtBullFired := f_smtPair(smtL1L, smt_lines, smt_labels, not na(_chPlL), _chPlL, bar_index - smt_lenLong,  not na(_s1PlL), _s1PlL, bar_index - smt_lenLong,  _winL, false, tk1, 2) or smtBullFired
 	if smt_useSym2
 		[h2, l2, tk2] = request.security(smt_sym2, timeframe.period, [high, low, syminfo.ticker])
-		float _symPh2 = fixnan(ta.pivothigh(h2, smt_pivotLen, smt_pivotLen))
-		float _symPl2 = fixnan(ta.pivotlow(l2, smt_pivotLen, smt_pivotLen))
-		_n2 := tk2
 		smt_tk2 := tk2
-		_l2H := f_smtTick(smt2H, true, smt_ph, _symPh2, tk2)
-		_l2L := f_smtTick(smt2L, false, smt_pl, _symPl2, tk2)
-	if not na(_l1H)
-		smt_lines.unshift(_l1H)
-		smtBearFired := true
-	if not na(_l2H)
-		smt_lines.unshift(_l2H)
-		smtBearFired := true
-	if not na(_l1L)
-		smt_lines.unshift(_l1L)
-		smtBullFired := true
-	if not na(_l2L)
-		smt_lines.unshift(_l2L)
-		smtBullFired := true
-	array<string> _hiNames = array.new<string>()
-	if not na(_l1H)
-		_hiNames.push(_n1)
-	if not na(_l2H)
-		_hiNames.push(_n2)
-	if _hiNames.size() > 0
-		label _lbH = label.new(bar_index - smt_pivotLen, smt_ph, array.join(_hiNames, " | "), style = label.style_label_down, color = color.new(color.white, 100), textcolor = smt_shColor, size = _ho_getSize(smt_labelSize))
-		smt_labels.unshift(_lbH)
-	array<string> _loNames = array.new<string>()
-	if not na(_l1L)
-		_loNames.push(_n1)
-	if not na(_l2L)
-		_loNames.push(_n2)
-	if _loNames.size() > 0
-		label _lbL = label.new(bar_index - smt_pivotLen, smt_pl, array.join(_loNames, " | "), style = label.style_label_up, color = color.new(color.white, 100), textcolor = smt_slColor, size = _ho_getSize(smt_labelSize))
-		smt_labels.unshift(_lbL)
-	while smt_lines.size() > smt_maxDivergences * 2
+		float _s2PhS = ta.pivothigh(h2, smt_lenShort, smt_lenShort)
+		float _s2PlS = ta.pivotlow(l2, smt_lenShort, smt_lenShort)
+		float _s2PhL = ta.pivothigh(h2, smt_lenLong, smt_lenLong)
+		float _s2PlL = ta.pivotlow(l2, smt_lenLong, smt_lenLong)
+		smtBearFired := f_smtPair(smtS2H, smt_lines, smt_labels, not na(_chPhS), _chPhS, bar_index - smt_lenShort, not na(_s2PhS), _s2PhS, bar_index - smt_lenShort, _winS, true,  tk2, 1) or smtBearFired
+		smtBullFired := f_smtPair(smtS2L, smt_lines, smt_labels, not na(_chPlS), _chPlS, bar_index - smt_lenShort, not na(_s2PlS), _s2PlS, bar_index - smt_lenShort, _winS, false, tk2, 1) or smtBullFired
+		smtBearFired := f_smtPair(smtL2H, smt_lines, smt_labels, not na(_chPhL), _chPhL, bar_index - smt_lenLong,  not na(_s2PhL), _s2PhL, bar_index - smt_lenLong,  _winL, true,  tk2, 2) or smtBearFired
+		smtBullFired := f_smtPair(smtL2L, smt_lines, smt_labels, not na(_chPlL), _chPlL, bar_index - smt_lenLong,  not na(_s2PlL), _s2PlL, bar_index - smt_lenLong,  _winL, false, tk2, 2) or smtBullFired
+	while smt_lines.size() > smt_maxDiv * 2
 		line.delete(smt_lines.pop())
-	while smt_labels.size() > smt_maxDivergences
+	while smt_labels.size() > smt_maxDiv * 2
 		label.delete(smt_labels.pop())
 
 alertcondition(smtBullFired, title="SMT Bull", message="SMT Bull {{ticker}} {{interval}}")
@@ -3103,20 +3096,20 @@ if ENABLE_DASHBOARD and barstate.islast
 	if smt_useSym1
 		string _smtV1 = "—"
 		if ENABLE_SMT
-			int _smtT1 = math.max(nz(smt1H.lastT, 0), nz(smt1L.lastT, 0))
-			float _smtR1h = smt_phN > 0 ? smt1H.count * 1.0 / smt_phN : 0.0
-			float _smtR1l = smt_plN > 0 ? smt1L.count * 1.0 / smt_plN : 0.0
-			_smtV1 := str.format("SH {0} ({1, number, percent})  SL {2} ({3, number, percent})", smt1H.count, _smtR1h, smt1L.count, _smtR1l) + (_smtT1 > 0 ? " · " + str.format_time(_smtT1, "HH:mm", "America/New_York") : "")
+			int _sc1 = smtS1H.count + smtS1L.count
+			int _lc1 = smtL1H.count + smtL1L.count
+			int _smtT1 = math.max(math.max(nz(smtS1H.lastT, 0), nz(smtS1L.lastT, 0)), math.max(nz(smtL1H.lastT, 0), nz(smtL1L.lastT, 0)))
+			_smtV1 := str.format("S:{0} L:{1}", _sc1, _lc1) + (_smtT1 > 0 ? " · " + str.format_time(_smtT1, "HH:mm", "America/New_York") : "")
 		table.cell(dashTbl, 0, _smtRow, "SMT " + (na(smt_tk1) ? "1" : smt_tk1), text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
 		table.cell(dashTbl, 1, _smtRow, _smtV1, text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
 		_smtRow += 1
 	if smt_useSym2
 		string _smtV2 = "—"
 		if ENABLE_SMT
-			int _smtT2 = math.max(nz(smt2H.lastT, 0), nz(smt2L.lastT, 0))
-			float _smtR2h = smt_phN > 0 ? smt2H.count * 1.0 / smt_phN : 0.0
-			float _smtR2l = smt_plN > 0 ? smt2L.count * 1.0 / smt_plN : 0.0
-			_smtV2 := str.format("SH {0} ({1, number, percent})  SL {2} ({3, number, percent})", smt2H.count, _smtR2h, smt2L.count, _smtR2l) + (_smtT2 > 0 ? " · " + str.format_time(_smtT2, "HH:mm", "America/New_York") : "")
+			int _sc2 = smtS2H.count + smtS2L.count
+			int _lc2 = smtL2H.count + smtL2L.count
+			int _smtT2 = math.max(math.max(nz(smtS2H.lastT, 0), nz(smtS2L.lastT, 0)), math.max(nz(smtL2H.lastT, 0), nz(smtL2L.lastT, 0)))
+			_smtV2 := str.format("S:{0} L:{1}", _sc2, _lc2) + (_smtT2 > 0 ? " · " + str.format_time(_smtT2, "HH:mm", "America/New_York") : "")
 		table.cell(dashTbl, 0, _smtRow, "SMT " + (na(smt_tk2) ? "2" : smt_tk2), text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
 		table.cell(dashTbl, 1, _smtRow, _smtV2, text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
 		_smtRow += 1
