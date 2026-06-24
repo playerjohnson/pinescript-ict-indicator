@@ -3030,7 +3030,7 @@ _dashPosCnst = switch dash_pos
 	"Bottom Right" => position.bottom_right
 	"Bottom Left"  => position.bottom_left
 	=> position.top_right
-var table dashTbl = table.new(_dashPosCnst, 2, 5, border_width=1)
+var table dashTbl = table.new(_dashPosCnst, 2, 5 + (smt_useSym1 ? 1 : 0) + (smt_useSym2 ? 1 : 0), border_width=1)
 
 if ENABLE_DASHBOARD and barstate.islast
 	string _biasTxt = "—"
@@ -3099,4 +3099,25 @@ if ENABLE_DASHBOARD and barstate.islast
 	table.cell(dashTbl, 1, 3, _dnTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 0, 4, "Killzone",  text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 1, 4, _kzTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	int _smtRow = 5
+	if smt_useSym1
+		string _smtV1 = "—"
+		if ENABLE_SMT
+			int _smtT1 = math.max(nz(smt1H.lastT, 0), nz(smt1L.lastT, 0))
+			float _smtR1h = smt_phN > 0 ? smt1H.count * 1.0 / smt_phN : 0.0
+			float _smtR1l = smt_plN > 0 ? smt1L.count * 1.0 / smt_plN : 0.0
+			_smtV1 := str.format("SH {0} ({1, number, percent})  SL {2} ({3, number, percent})", smt1H.count, _smtR1h, smt1L.count, _smtR1l) + (_smtT1 > 0 ? " · " + str.format_time(_smtT1, "HH:mm", "America/New_York") : "")
+		table.cell(dashTbl, 0, _smtRow, "SMT " + (na(smt_tk1) ? "1" : smt_tk1), text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		table.cell(dashTbl, 1, _smtRow, _smtV1, text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		_smtRow += 1
+	if smt_useSym2
+		string _smtV2 = "—"
+		if ENABLE_SMT
+			int _smtT2 = math.max(nz(smt2H.lastT, 0), nz(smt2L.lastT, 0))
+			float _smtR2h = smt_phN > 0 ? smt2H.count * 1.0 / smt_phN : 0.0
+			float _smtR2l = smt_plN > 0 ? smt2L.count * 1.0 / smt_plN : 0.0
+			_smtV2 := str.format("SH {0} ({1, number, percent})  SL {2} ({3, number, percent})", smt2H.count, _smtR2h, smt2L.count, _smtR2l) + (_smtT2 > 0 ? " · " + str.format_time(_smtT2, "HH:mm", "America/New_York") : "")
+		table.cell(dashTbl, 0, _smtRow, "SMT " + (na(smt_tk2) ? "2" : smt_tk2), text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		table.cell(dashTbl, 1, _smtRow, _smtV2, text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		_smtRow += 1
 
