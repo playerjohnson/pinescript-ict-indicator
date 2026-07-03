@@ -690,7 +690,7 @@ if ENABLE_IMBALANCES and array.size(_bullishifvg) > 0 and extendfvgbox
 					else if low < _boxHigh and filterMitBOX
 						_applyMitStyle(_box, line(na), false)
 			_boxRight := box.get_right(_box)
-			if bar_index == _boxRight and ifvgmitigationtype == 'Engulf' and HighlightBox
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and ifvgmitigationtype == 'Engulf' and HighlightBox
 				if close >= _boxLow and low < _boxHigh
 					_applyHighlight(_box, ifvgBullColor)
 					buimpfvgtouch := true
@@ -717,7 +717,7 @@ if ENABLE_IMBALANCES and array.size(_bearishifvg) > 0 and extendfvgbox
 					else if high > _boxLow and filterMitBOX
 						_applyMitStyle(_box, line(na), false)
 			_boxRight := box.get_right(_box)
-			if bar_index == _boxRight and ifvgmitigationtype == 'Engulf' and HighlightBox
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and ifvgmitigationtype == 'Engulf' and HighlightBox
 				if close <= _boxHigh and high > _boxLow
 					_applyHighlight(_box, ifvgBearColor)
 					beimpfvgtouch := true
@@ -772,7 +772,7 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
 			_boxLow := box.get_bottom(_box)
 			_boxHigh := box.get_top(_box)
 			_boxRight := box.get_right(_box)
-			if bar_index == _boxRight and extendfvgbox and HighlightBox
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and extendfvgbox and HighlightBox
 				if fvgmitigationtype == 'Engulf'
 					if close >= _boxLow and low < _boxHigh
 						_applyHighlight(_box, fvgBullColor)
@@ -835,7 +835,7 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
 			_boxLow := box.get_bottom(_box)
 			_boxHigh := box.get_top(_box)
 			_boxRight := box.get_right(_box)
-			if bar_index == _boxRight and extendfvgbox and HighlightBox
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and extendfvgbox and HighlightBox
 				if fvgmitigationtype == 'Engulf'
 					if close <= _boxHigh and high > _boxLow
 						_applyHighlight(_box, fvgBearColor)
@@ -876,7 +876,7 @@ if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'En
 				box.delete(_box)
 				line.delete(_line)
 		_boxRight := box.get_right(_box)
-		if extendfvgbox and HighlightBox and bar_index == _boxRight
+		if extendfvgbox and HighlightBox and (bar_index == _boxRight or bar_index == _boxRight - 1)
 			if close >= _boxLow and low < _boxHigh
 				_applyHighlight(_box, buinvfvgcolor)
 				buinvfvgtouch := true
@@ -909,7 +909,7 @@ if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'En
 				box.delete(_box)
 				line.delete(_line)
 		_boxRight := box.get_right(_box)
-		if extendfvgbox and HighlightBox and bar_index == _boxRight
+		if extendfvgbox and HighlightBox and (bar_index == _boxRight or bar_index == _boxRight - 1)
 			if close <= _boxHigh and high > _boxLow
 				_applyHighlight(_box, beinvfvgcolor)
 				beinvfvgtouch := true
@@ -949,7 +949,7 @@ if ENABLE_IMBALANCES and array.size(_bullishvi) > 0 and extendvibox
 							alert(_wh_json("VI+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
 						buvitouch
 			_boxRight := box.get_right(_box)
-			if bar_index == _boxRight and vimitigationtype == 'Engulf' and HighlightBox
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and vimitigationtype == 'Engulf' and HighlightBox
 				if close >= _boxLow and low < _boxHigh
 					_applyHighlight(_box, bullimbalance)
 					buvitouch := true
@@ -980,7 +980,7 @@ if ENABLE_IMBALANCES and array.size(_bearishvi) > 0 and extendvibox
 							alert(_wh_json("VI- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
 						bevitouch
 			_boxRight := box.get_right(_box)
-			if bar_index == _boxRight and vimitigationtype == 'Engulf' and HighlightBox
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and vimitigationtype == 'Engulf' and HighlightBox
 				if close <= _boxHigh and high > _boxLow
 					_applyHighlight(_box, bearimbalance)
 					bevitouch := true
@@ -1018,7 +1018,7 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbu) > 0 and array.size(bugapce) > 
 			_boxLow := box.get_bottom(_box)
 			_boxHigh := box.get_top(_box)
 			_boxRight := box.get_right(_box)
-			if bar_index == _boxRight and HighlightBox
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and HighlightBox
 				if gapmitigationtype == 'Engulf'
 					if close >= _boxLow and open >= _boxLow and low < _boxHigh
 						_applyHighlight(_box, gapcolor)
@@ -1064,7 +1064,7 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbe) > 0 and array.size(begapce) > 
 			_boxLow := box.get_bottom(_box)
 			_boxHigh := box.get_top(_box)
 			_boxRight := box.get_right(_box)
-			if bar_index == _boxRight and HighlightBox
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and HighlightBox
 				if gapmitigationtype == 'Engulf'
 					if close <= _boxHigh and open <= _boxHigh and high > _boxLow
 						_applyHighlight(_box, gapcolor)
@@ -1092,16 +1092,16 @@ alertcondition(barstate.isconfirmed and isbuinversefvg, title = 'Inverse.FVG+', 
 alertcondition(barstate.isconfirmed and isbeinversefvg, title = 'Inverse.FVG-', message = 'Inverse.FVG- {{ticker}} {{interval}}')
 alertcondition(barstate.isconfirmed and bulv, title = 'LV+', message = 'LV+ {{ticker}} {{interval}}')
 alertcondition(barstate.isconfirmed and belv, title = 'LV-', message = 'LV- {{ticker}} {{interval}}')
-alertcondition(bugaptouch, title = 'GAP(+) Mitigation', message = 'GAP+ Mit {{ticker}} {{interval}}')
-alertcondition(begaptouch, title = 'GAP(-) Mitigation', message = 'GAP- Mit {{ticker}} {{interval}}')
-alertcondition(buimpfvgtouch, title = 'Implied.FVG(+) Mitigation', message = 'I.FVG+ Mit {{ticker}} {{interval}}')
-alertcondition(beimpfvgtouch, title = 'Implied.FVG(-) Mitigation', message = 'I.FVG- Mit {{ticker}} {{interval}}')
-alertcondition(bufvgtouch, title = 'FVG(+) Mitigation', message = 'FVG+ Mit {{ticker}} {{interval}}')
-alertcondition(befvgtouch, title = 'FVG(-) Mitigation', message = 'FVG- Mit {{ticker}} {{interval}}')
-alertcondition(buvitouch, title = 'VI(+) Mitigation', message = 'VI+ Mit {{ticker}} {{interval}}')
-alertcondition(bevitouch, title = 'VI(-) Mitigation', message = 'VI- Mit {{ticker}} {{interval}}')
-alertcondition(buinvfvgtouch, title = 'Inverse.FVG(+) Mitigation', message = 'Inv.FVG+ Mit {{ticker}} {{interval}}')
-alertcondition(beinvfvgtouch, title = 'Inverse.FVG(-) Mitigation', message = 'Inv.FVG- Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and bugaptouch, title = 'GAP(+) Mitigation', message = 'GAP+ Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and begaptouch, title = 'GAP(-) Mitigation', message = 'GAP- Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and buimpfvgtouch, title = 'Implied.FVG(+) Mitigation', message = 'I.FVG+ Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and beimpfvgtouch, title = 'Implied.FVG(-) Mitigation', message = 'I.FVG- Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and bufvgtouch, title = 'FVG(+) Mitigation', message = 'FVG+ Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and befvgtouch, title = 'FVG(-) Mitigation', message = 'FVG- Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and buvitouch, title = 'VI(+) Mitigation', message = 'VI+ Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and bevitouch, title = 'VI(-) Mitigation', message = 'VI- Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and buinvfvgtouch, title = 'Inverse.FVG(+) Mitigation', message = 'Inv.FVG+ Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and beinvfvgtouch, title = 'Inverse.FVG(-) Mitigation', message = 'Inv.FVG- Mit {{ticker}} {{interval}}')
 
 type NWOGHelper
 	string name
@@ -2326,11 +2326,21 @@ _sh_archive(_histH, _histL, _curH, _curL, _curBar, _curHT, _curLT) =>
 				label.delete(_old.sweep.marker)
 
 _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
-	if _show and array.size(_hist) > 0
+	if array.size(_hist) > 0
 		string _side = _isHigh ? "High - Buyside Liquidity " : "Low - Sellside Liquidity "
 		for i = 0 to array.size(_hist) - 1
 			SHLevel _lvl = array.get(_hist, i)
 			if na(_lvl.price)
+				continue
+			// Mitigation state is maintained even when the level class is hidden (the Dashboard reads it)
+			if not _lvl.mitigated and barstate.isconfirmed
+				bool _hit = _isHigh ? close > _lvl.price : close < _lvl.price
+				if _hit
+					_lvl.mitigated := true
+					if not na(_lvl.ln)
+						line.set_color(_lvl.ln, sh_mitColor)
+						line.set_style(_lvl.ln, f_get_line_style(sh_mitLineStyle))
+			if not _show
 				continue
 			if _lvl.mitigated and not sh_showMit
 				line.delete(_lvl.ln)
@@ -2346,13 +2356,6 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
 					_lvl.sweep := SweepState.new()
 				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
 					f_sweepMark(_lvl.sweep, _name, _isHigh)
-			if not _lvl.mitigated and barstate.isconfirmed
-				bool _hit = _isHigh ? close > _lvl.price : close < _lvl.price
-				if _hit
-					_lvl.mitigated := true
-					if not na(_lvl.ln)
-						line.set_color(_lvl.ln, sh_mitColor)
-						line.set_style(_lvl.ln, f_get_line_style(sh_mitLineStyle))
 			int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
 			int _x2 = bar_index + sh_lineExtend
 			bool _swept = ENABLE_SWEEPS and not na(_lvl.sweep) and _lvl.sweep.phase == 2
@@ -2567,7 +2570,7 @@ f_lqPrune(array<SHLevel> _arr, int _cap, int _lookbackMs) =>
 		label.delete(_o.lbl)
 		if not na(_o.sweep)
 			label.delete(_o.sweep.marker)
-	while _arr.size() > 0 and not na(_arr.last().priceTime) and (time - _arr.last().priceTime) > _lookbackMs
+	while _arr.size() > 1 and not na(_arr.last().priceTime) and (time - _arr.last().priceTime) > _lookbackMs
 		SHLevel _o = _arr.pop()
 		line.delete(_o.ln)
 		label.delete(_o.lbl)
@@ -2576,10 +2579,15 @@ f_lqPrune(array<SHLevel> _arr, int _cap, int _lookbackMs) =>
 
 // Draw/update one liquidity-level array: shared sweep detection, close-through mitigation, grey-out.
 _lq_processHist(_show, array<SHLevel> _hist, _isHigh, _color, _style, _name) =>
-	if _show and _hist.size() > 0
+	if _hist.size() > 0
 		for i = 0 to _hist.size() - 1
 			SHLevel _lvl = _hist.get(i)
 			if na(_lvl.price)
+				continue
+			// Mitigation state is maintained even when the level class is hidden (the Dashboard reads it)
+			if not _lvl.mitigated and barstate.isconfirmed and (_isHigh ? close > _lvl.price : close < _lvl.price)
+				_lvl.mitigated := true
+			if not _show
 				continue
 			if _lvl.mitigated and not lq_showMit
 				line.delete(_lvl.ln)
@@ -2595,10 +2603,6 @@ _lq_processHist(_show, array<SHLevel> _hist, _isHigh, _color, _style, _name) =>
 					_lvl.sweep := SweepState.new()
 				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
 					f_sweepMark(_lvl.sweep, _name, _isHigh)
-			if not _lvl.mitigated and barstate.isconfirmed
-				bool _hit = _isHigh ? close > _lvl.price : close < _lvl.price
-				if _hit
-					_lvl.mitigated := true
 			int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
 			int _x2 = bar_index + 30
 			bool _swept = ENABLE_SWEEPS and not na(_lvl.sweep) and _lvl.sweep.phase == 2
@@ -3084,13 +3088,11 @@ f_dashNear(DashAcc _acc, float _p, string _nm) =>
 			_acc.bP := _p
 			_acc.bN := _nm
 
-// Consider every un-mitigated level of an SHLevel history array.
+// Consider every un-tapped (neither close-through mitigated nor sweep-confirmed) level of an SHLevel history array.
 f_dashShArr(DashAcc _acc, array<SHLevel> _arr, string _nm) =>
-	if _arr.size() > 0
-		for i = 0 to _arr.size() - 1
-			SHLevel _l = _arr.get(i)
-			if not na(_l.price) and not _l.mitigated
-				f_dashNear(_acc, _l.price, _nm)
+	for _l in _arr
+		if not _l.mitigated and (na(_l.sweep) or _l.sweep.phase != 2)
+			f_dashNear(_acc, _l.price, _nm)
 
 _dashPosCnst = switch dash_pos
 	"Top Left"     => position.top_left
