@@ -9,6 +9,7 @@
 > 4. **Display toggles no longer gate signals**: hiding a session/level class (`sh_show*`, `lq_show*`) keeps its mitigation state, sweep detection, webhooks, and alertconditions running — only the drawings disappear. Ignore the "display toggles are signal toggles" warnings.
 > 5. **Bias row no longer breaks on gap opens**: outside yesterday's range it reads "Premium/Discount (gap)" from the Midnight Open side, exactly the manual rule Section 1 prescribes — the dashboard now does it for you.
 > 6. Short `lq_lookbackDays` values can no longer empty the weekly/monthly arrays (the newest level always survives the age-prune).
+> 7. **The indicator now scores the Core Loop itself** (`ENABLE_SETUP`, group ㉘): a Dashboard "Setup" row shows the live per-side score out of 5 (killzone + bias + fresh sweep + fresh SMT + structure trend), and `A+ Long Setup` / `A+ Short Setup` alertconditions + `SETUP LONG/SHORT` webhooks fire once per triggering sweep when the score reaches `setup_minScore` and a live same-direction FVG exists on the retrace side (the webhook carries its C.E. — your entry price). Section 1's manual assembly remains the definition of what the score measures; the "the trader is the confluence engine" framing below predates this.
 >
 > Still true and unchanged: level mitigation (your take-profit event) has **no alert**; NWOG/NDOG and killzones have no alerts; each level sweeps at most once; SMT correlation is your responsibility; all lag/repaint numbers in Section 5.
 
