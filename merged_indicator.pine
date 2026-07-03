@@ -2147,6 +2147,18 @@ type SweepState
 	int   sweepTime    = na
 	label marker       = na
 
+// Per-bar flags bridging sweep/structure confirms (which happen inside functions) to native
+// alertconditions. Non-var: a fresh object each execution, so flags reset per tick; sweeps and
+// breaks only confirm on barstate.isconfirmed, so these are only ever true at bar close.
+type AlertFlags
+	bool swpBsl  = false
+	bool swpSsl  = false
+	bool bosBull = false
+	bool bosBear = false
+	bool chBull  = false
+	bool chBear  = false
+AlertFlags alertFlags = AlertFlags.new()
+
 // Advances the sweep state machine for one level on one bar. Returns true on the
 // bar a Turtle Soup confirms. Mutates st in place (Pine objects are by-reference).
 f_sweepTick(SweepState st, float lvl, bool isHigh, int confirmBars) =>
@@ -2178,6 +2190,10 @@ f_sweepTick(SweepState st, float lvl, bool isHigh, int confirmBars) =>
 // Draws/updates the one marker label and fires the webhook alert. Does NOT recolor
 // the level line — each host module owns that.
 f_sweepMark(SweepState st, string name, bool isHigh) =>
+	if isHigh
+		alertFlags.swpBsl := true
+	else
+		alertFlags.swpSsl := true
 	if sweep_showMarker
 		string _tag = isHigh ? "TS↓" : "TS↑"
 		if na(st.marker)
@@ -2293,6 +2309,15 @@ f_structDrawBreak(float lvl, int swingBar, bool isChoch, bool isUp) =>
 		line.delete(struct_lines.pop())
 	while struct_labels.size() > struct_maxBreaks
 		label.delete(struct_labels.pop())
+	if isChoch
+		if isUp
+			alertFlags.chBull := true
+		else
+			alertFlags.chBear := true
+	else if isUp
+		alertFlags.bosBull := true
+	else
+		alertFlags.bosBear := true
 	if wh_enable and wh_structure
 		alert(_wh_json((isChoch ? "CHoCH " : "BOS ") + (isUp ? "BSL" : "SSL"), lvl, lvl), alert.freq_once_per_bar_close)
 
@@ -2745,6 +2770,15 @@ if ENABLE_STRUCTURE
 		structLowBar := bar_index - struct_pivotLen
 		structLowResolved := false
 		bosL := BosState.new()
+
+// Native alertconditions for sweep/structure confirms (webhook path unchanged). Placed after the
+// structure driver so every AlertFlags write this bar has already run.
+alertcondition(alertFlags.swpBsl, title="Sweep BSL", message="SWEEP BSL {{ticker}} {{interval}}")
+alertcondition(alertFlags.swpSsl, title="Sweep SSL", message="SWEEP SSL {{ticker}} {{interval}}")
+alertcondition(alertFlags.bosBull, title="BOS Bull", message="BOS BSL {{ticker}} {{interval}}")
+alertcondition(alertFlags.bosBear, title="BOS Bear", message="BOS SSL {{ticker}} {{interval}}")
+alertcondition(alertFlags.chBull, title="CHoCH Bull", message="CHoCH BSL {{ticker}} {{interval}}")
+alertcondition(alertFlags.chBear, title="CHoCH Bear", message="CHoCH SSL {{ticker}} {{interval}}")
 
 // ═══════════ ㉗ SMT Divergences ═══════════
 // Two-scale synchronized-pair SMT divergence (chart symbol vs up to 2 correlated symbols).
