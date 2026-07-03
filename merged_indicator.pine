@@ -2187,14 +2187,14 @@ f_sweepTick(SweepState st, float lvl, bool isHigh, int confirmBars) =>
 					st.confirmLevel := isHigh ? low : high
 	_justConfirmed
 
-// Draws/updates the one marker label and fires the webhook alert. Does NOT recolor
-// the level line — each host module owns that.
-f_sweepMark(SweepState st, string name, bool isHigh) =>
+// Sets the alert flags, fires the webhook, and (when draw is true) draws/updates the one marker
+// label. Does NOT recolor the level line — each host module owns that.
+f_sweepMark(SweepState st, string name, bool isHigh, bool draw) =>
 	if isHigh
 		alertFlags.swpBsl := true
 	else
 		alertFlags.swpSsl := true
-	if sweep_showMarker
+	if draw and sweep_showMarker
 		string _tag = isHigh ? "TS↓" : "TS↑"
 		if na(st.marker)
 			st.marker := label.new(st.sweepBar, st.levelPrice, _tag, xloc=xloc.bar_index, style=isHigh ? label.style_label_down : label.style_label_up, color=color.new(sweep_markerColor, 20), textcolor=color.white, size=sweep_markerSize)
@@ -2248,7 +2248,7 @@ f_eqhlProcess(array<LiqPool> pools, bool isHigh) =>
 				if na(_p.sweep)
 					_p.sweep := SweepState.new()
 				if f_sweepTick(_p.sweep, _p.price, isHigh, sweep_confirmBars)
-					f_sweepMark(_p.sweep, isHigh ? "EQH" : "EQL", isHigh)
+					f_sweepMark(_p.sweep, isHigh ? "EQH" : "EQL", isHigh, true)
 				line.set_color(_p.ln, _p.sweep.phase == 2 ? sweep_lineColor : eqhl_color)
 
 // ===== ㉔ Market Structure (BOS / CHoCH) =====
@@ -2365,6 +2365,12 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
 					if not na(_lvl.ln)
 						line.set_color(_lvl.ln, sh_mitColor)
 						line.set_style(_lvl.ln, f_get_line_style(sh_mitLineStyle))
+			// Sweep detection is also display-independent; only the TS marker draw is gated by _show
+			if ENABLE_SWEEPS
+				if na(_lvl.sweep)
+					_lvl.sweep := SweepState.new()
+				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
+					f_sweepMark(_lvl.sweep, _name, _isHigh, _show)
 			if not _show
 				continue
 			if _lvl.mitigated and not sh_showMit
@@ -2376,11 +2382,6 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
 					label.delete(_lvl.sweep.marker)
 					_lvl.sweep.marker := na
 				continue
-			if ENABLE_SWEEPS
-				if na(_lvl.sweep)
-					_lvl.sweep := SweepState.new()
-				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
-					f_sweepMark(_lvl.sweep, _name, _isHigh)
 			int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
 			int _x2 = bar_index + sh_lineExtend
 			bool _swept = ENABLE_SWEEPS and not na(_lvl.sweep) and _lvl.sweep.phase == 2
@@ -2612,6 +2613,12 @@ _lq_processHist(_show, array<SHLevel> _hist, _isHigh, _color, _style, _name) =>
 			// Mitigation state is maintained even when the level class is hidden (the Dashboard reads it)
 			if not _lvl.mitigated and barstate.isconfirmed and (_isHigh ? close > _lvl.price : close < _lvl.price)
 				_lvl.mitigated := true
+			// Sweep detection is also display-independent; only the TS marker draw is gated by _show
+			if ENABLE_SWEEPS
+				if na(_lvl.sweep)
+					_lvl.sweep := SweepState.new()
+				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
+					f_sweepMark(_lvl.sweep, _name, _isHigh, _show)
 			if not _show
 				continue
 			if _lvl.mitigated and not lq_showMit
@@ -2623,11 +2630,6 @@ _lq_processHist(_show, array<SHLevel> _hist, _isHigh, _color, _style, _name) =>
 					label.delete(_lvl.sweep.marker)
 					_lvl.sweep.marker := na
 				continue
-			if ENABLE_SWEEPS
-				if na(_lvl.sweep)
-					_lvl.sweep := SweepState.new()
-				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
-					f_sweepMark(_lvl.sweep, _name, _isHigh)
 			int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
 			int _x2 = bar_index + 30
 			bool _swept = ENABLE_SWEEPS and not na(_lvl.sweep) and _lvl.sweep.phase == 2
