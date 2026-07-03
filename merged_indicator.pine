@@ -3084,12 +3084,13 @@ f_dashNear(DashAcc _acc, float _p, string _nm) =>
 			_acc.bP := _p
 			_acc.bN := _nm
 
-// Consider the newest (index 0) level of a session-H/L array if present and un-mitigated.
+// Consider every un-mitigated level of an SHLevel history array.
 f_dashShArr(DashAcc _acc, array<SHLevel> _arr, string _nm) =>
 	if _arr.size() > 0
-		SHLevel _l = _arr.get(0)
-		if not na(_l.price) and not _l.mitigated
-			f_dashNear(_acc, _l.price, _nm)
+		for i = 0 to _arr.size() - 1
+			SHLevel _l = _arr.get(i)
+			if not na(_l.price) and not _l.mitigated
+				f_dashNear(_acc, _l.price, _nm)
 
 _dashPosCnst = switch dash_pos
 	"Top Left"     => position.top_left
@@ -3113,12 +3114,12 @@ if ENABLE_DASHBOARD and barstate.islast
 		_structCol := struct_trend == 1 ? color.new(color.green, 40) : color.new(color.red, 40)
 	DashAcc _acc = DashAcc.new()
 	if ENABLE_LIQUIDITY
-		f_dashNear(_acc, _prevMidDayHi, "PDH")
-		f_dashNear(_acc, _prevMidDayLo, "PDL")
-		f_dashNear(_acc, _secWeekHi, "PWH")
-		f_dashNear(_acc, _secWeekLo, "PWL")
-		f_dashNear(_acc, _secMonthHi, "PMH")
-		f_dashNear(_acc, _secMonthLo, "PML")
+		f_dashShArr(_acc, lq_histDayH,   "PDH")
+		f_dashShArr(_acc, lq_histDayL,   "PDL")
+		f_dashShArr(_acc, lq_histWeekH,  "PWH")
+		f_dashShArr(_acc, lq_histWeekL,  "PWL")
+		f_dashShArr(_acc, lq_histMonthH, "PMH")
+		f_dashShArr(_acc, lq_histMonthL, "PML")
 	if ENABLE_SESSION_HL
 		f_dashShArr(_acc, sh_histAsiaH, "Asia H")
 		f_dashShArr(_acc, sh_histAsiaL, "Asia L")
