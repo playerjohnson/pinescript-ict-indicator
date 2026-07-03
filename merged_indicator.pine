@@ -3124,6 +3124,7 @@ if ENABLE_PDA_SCANNER
 // ===== ㉘ Setup Signals — scores the playbook confluence per side, fires once per sweep =====
 var int setup_minScore = input.int(3, "Min score", minval=2, maxval=5, group="㉘ Setup Signals", inline="su1", tooltip="Points to fire: killzone + bias + fresh sweep + fresh SMT + structure trend (1 each). Disabled modules score 0, so 4+ needs Structure/SMT enabled.")
 var int setup_lookback = input.int(20, "Freshness (bars)", minval=1, maxval=200, group="㉘ Setup Signals", inline="su1", tooltip="A sweep/SMT confirm counts toward the score for this many bars.")
+var bool setup_showMarks = input.bool(true, "Chart markers", group="㉘ Setup Signals", tooltip="Print ▲/▼ 'A+' on the bar a setup fires (a chart-level signal that works without an alerts plan).")
 
 // Shared bias read (also feeds the ㉖ Bias row): +1 discount, -1 premium, 0 unknown; pct is na in gap/unknown states.
 int biasDir = 0
@@ -3184,6 +3185,10 @@ if ENABLE_SETUP
 
 alertcondition(setupLongFired, title="A+ Long Setup", message="A+ LONG {{ticker}} {{interval}}")
 alertcondition(setupShortFired, title="A+ Short Setup", message="A+ SHORT {{ticker}} {{interval}}")
+
+// On-chart fire markers (plotshape, not the box/line/label budget) — the notification path for no-alert plans.
+plotshape(setup_showMarks and setupLongFired,  title="A+ Long marker",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.green, 0), text="A+", textcolor=color.white, size=size.tiny)
+plotshape(setup_showMarks and setupShortFired, title="A+ Short marker", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),   text="A+", textcolor=color.white, size=size.tiny)
 
 // ===== ㉖ Dashboard =====
 var string dash_pos  = input.string("Top Right", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="㉖ Dashboard")
