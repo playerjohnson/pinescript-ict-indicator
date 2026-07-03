@@ -3142,9 +3142,15 @@ if ENABLE_DASHBOARD and barstate.islast
 	color _biasCol = dash_bg
 	if not na(_pdaHi) and _pdaHi > _pdaLo
 		float _pct = (close - _pdaLo) / (_pdaHi - _pdaLo) * 100
-		bool _prem = _pct >= 50
-		_biasTxt := (_prem ? "Premium " : "Discount ") + str.tostring(_pct, "#") + "%"
-		_biasCol := _prem ? color.new(color.red, 40) : color.new(color.green, 40)
+		if _pct >= 0 and _pct <= 100
+			bool _prem = _pct >= 50
+			_biasTxt := (_prem ? "Premium " : "Discount ") + str.tostring(_pct, "#") + "%"
+			_biasCol := _prem ? color.new(color.red, 40) : color.new(color.green, 40)
+		else
+			// Price gapped outside the dealing range: the % is degenerate — read bias vs the Midnight Open instead
+			bool _prem = ho_midPrices.size() > 0 ? close >= ho_midPrices.get(0) : _pct > 100
+			_biasTxt := (_prem ? "Premium" : "Discount") + " (gap)"
+			_biasCol := _prem ? color.new(color.red, 40) : color.new(color.green, 40)
 	string _structTxt = "—"
 	color _structCol = dash_bg
 	if ENABLE_STRUCTURE and struct_trend != 0
