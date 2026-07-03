@@ -3163,6 +3163,10 @@ if ENABLE_DASHBOARD and barstate.islast
 		f_dashShArr(_acc, sh_histLonL, "London L")
 		f_dashShArr(_acc, sh_histNyamH, "NY AM H")
 		f_dashShArr(_acc, sh_histNyamL, "NY AM L")
+		f_dashShArr(_acc, sh_histNypreH, "Pre-AM H")
+		f_dashShArr(_acc, sh_histNypreL, "Pre-AM L")
+		f_dashShArr(_acc, sh_histNylH, "Lunch H")
+		f_dashShArr(_acc, sh_histNylL, "Lunch L")
 		f_dashShArr(_acc, sh_histNypmH, "NY PM H")
 		f_dashShArr(_acc, sh_histNypmL, "NY PM L")
 	if ENABLE_EQHL
