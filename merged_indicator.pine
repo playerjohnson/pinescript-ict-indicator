@@ -328,16 +328,17 @@ var int   lq_maxMonthly   = input.int(6, "Max M", minval=1, maxval=12, group="�
 var bool  lq_showMit      = input.bool(true, "Show Mitigated", group="⑳ Liquidity Levels", inline="lq6")
 var color lq_mitColor     = input.color(color.new(color.gray, 50), "", group="⑳ Liquidity Levels", inline="lq6")
 
-var bool buimpfvgtouch=false
-var bool beimpfvgtouch=false
-var bool bufvgtouch=false
-var bool befvgtouch=false
-var bool buvitouch=false
-var bool bevitouch=false
-var bool bugaptouch=false
-var bool begaptouch=false
-var bool buinvfvgtouch=false
-var bool beinvfvgtouch=false
+// Per-bar touch flags (no `var`: reset each bar so the Mitigation alertconditions don't latch)
+bool buimpfvgtouch=false
+bool beimpfvgtouch=false
+bool bufvgtouch=false
+bool befvgtouch=false
+bool buvitouch=false
+bool bevitouch=false
+bool bugaptouch=false
+bool begaptouch=false
+bool buinvfvgtouch=false
+bool beinvfvgtouch=false
 
 bool isbuinversefvg = false
 bool isbeinversefvg = false
