@@ -31,7 +31,7 @@ var bool ENABLE_EQHL=input.bool(false, "Enable Equal Highs/Lows", group="⓪ Sec
 var bool ENABLE_STRUCTURE=input.bool(false, "Enable Market Structure (BOS/CHoCH)", group="⓪ Section Toggles")
 var bool ENABLE_DASHBOARD=input.bool(false, "Enable Dashboard", group="⓪ Section Toggles")
 var bool ENABLE_SMT=input.bool(false, "Enable SMT Divergences", group="⓪ Section Toggles")
-var bool ENABLE_SETUP=input.bool(false, "Enable Setup Signals", group="⓪ Section Toggles", tooltip="Scores the confluence stack (killzone + bias + fresh sweep + SMT + structure) per side; fires A+ Long/Short alerts once per sweep. Needs Sweeps ON and Imbalances ON with FVG 'Normal' + 'Extend Unmit.'; enable Structure/SMT to reach scores above 3. Intraday recommended.")
+var bool ENABLE_SETUP=input.bool(false, "Enable Setup Score", group="⓪ Section Toggles", tooltip="Adds a read-only 'Setup' row to the ㉖ Dashboard scoring the confluence stack per side (killzone + bias + fresh sweep + fresh SMT + structure, 1 pt each). No alerts, markers, or signals — the trade decision stays yours. Needs Sweeps ON for the sweep point; Structure/SMT add their points when enabled.")
 
 var bool wh_enable=input.bool(false, "Enable Webhook Alerts", group="㉑ Webhook Alerts", tooltip="JSON alerts via alert(). In TV alert dialog, select 'Any alert() function call'.")
 var bool wh_formations=input.bool(true, "Formation Alerts", group="㉑ Webhook Alerts", inline="wh1", tooltip="OB/FVG/VI/GAP formations")
@@ -39,7 +39,6 @@ var bool wh_mitigations=input.bool(true, "Mitigation Alerts", group="㉑ Webhook
 var bool wh_sweeps=input.bool(true, "Sweep Alerts", group="㉑ Webhook Alerts", tooltip="Liquidity sweep / Turtle Soup events")
 var bool wh_structure=input.bool(true, "Structure Alerts", group="㉑ Webhook Alerts", tooltip="BOS / CHoCH break events.")
 var bool wh_smt=input.bool(true, "SMT Alerts", group="㉑ Webhook Alerts", tooltip="SMT divergence events.")
-var bool wh_setups=input.bool(true, "Setup Alerts", group="㉑ Webhook Alerts", tooltip="A+ setup completion events (㉘).")
 
 _wh_json(string _event, float _high, float _low) =>
 	'{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '"}'
@@ -2161,15 +2160,12 @@ type AlertFlags
 	bool chBear  = false
 AlertFlags alertFlags = AlertFlags.new()
 
-// Persistent recency stamps + once-per-sweep latches for the ㉘ Setup engine.
-// The -1 latch sentinels are load-bearing: an na latch compared with != would block the first fire.
+// Persistent recency stamps for the ㉘ Setup score (freshness of the last sweep/SMT confirm per side).
 type SetupState
 	int swpBslBar = na
 	int swpSslBar = na
 	int smtBullBar = na
 	int smtBearBar = na
-	int firedLongSwp = -1
-	int firedShortSwp = -1
 var SetupState setupState = SetupState.new()
 
 // Advances the sweep state machine for one level on one bar. Returns true on the
@@ -3121,10 +3117,8 @@ f_pdaScanner() =>
 if ENABLE_PDA_SCANNER
 	f_pdaScanner()
 
-// ===== ㉘ Setup Signals — scores the playbook confluence per side, fires once per sweep =====
-var int setup_minScore = input.int(3, "Min score", minval=2, maxval=5, group="㉘ Setup Signals", inline="su1", tooltip="Points to fire: killzone + bias + fresh sweep + fresh SMT + structure trend (1 each). Disabled modules score 0, so 4+ needs Structure/SMT enabled.")
-var int setup_lookback = input.int(20, "Freshness (bars)", minval=1, maxval=200, group="㉘ Setup Signals", inline="su1", tooltip="A sweep/SMT confirm counts toward the score for this many bars.")
-var bool setup_showMarks = input.bool(true, "Chart markers", group="㉘ Setup Signals", tooltip="Print ▲/▼ 'A+' on the bar a setup fires (a chart-level signal that works without an alerts plan).")
+// ===== ㉘ Setup Score — read-only confluence checklist per side (feeds the ㉖ Setup row) =====
+var int setup_lookback = input.int(20, "Freshness (bars)", minval=1, maxval=200, group="㉘ Setup Score", tooltip="A sweep/SMT confirm counts toward the score for this many bars.")
 
 // Shared bias read (also feeds the ㉖ Bias row): +1 discount, -1 premium, 0 unknown; pct is na in gap/unknown states.
 int biasDir = 0
@@ -3138,57 +3132,17 @@ if (ENABLE_SETUP or ENABLE_DASHBOARD) and not na(_pdaHi) and _pdaHi > _pdaLo
 		// Price gapped outside the dealing range: the % is degenerate — read bias vs the Midnight Open instead
 		biasDir := (ho_midPrices.size() > 0 ? close >= ho_midPrices.get(0) : _p > 100) ? -1 : 1
 
-// Nearest live (extended, unmitigated) FVG C.E. on the retrace side of close; na if none.
-// The na(top) check is required: inverted/deleted FVGs leave na box handles in the arrays.
-f_setupFvg(array<box> _boxes, bool _isLong) =>
-	float _ce = na
-	for _b in _boxes
-		float _top = box.get_top(_b)
-		if not na(_top) and box.get_right(_b) >= bar_index
-			float _c = math.avg(_top, box.get_bottom(_b))
-			if (_isLong ? _c <= close : _c >= close) and (na(_ce) or (_isLong ? _c > _ce : _c < _ce))
-				_ce := _c
-	_ce
-
-// Score one side. Returns [score, sweepFresh] — the sweep component is mandatory for a fire.
+// Score one side: killzone + bias + fresh sweep + fresh SMT + structure trend, 1 pt each.
 f_setupScore(bool _isLong) =>
 	int _swpBar = _isLong ? setupState.swpSslBar : setupState.swpBslBar
-	bool _swpOk = not na(_swpBar) and bar_index - _swpBar <= setup_lookback
 	int _smtBar = _isLong ? setupState.smtBullBar : setupState.smtBearBar
-	int _s = (not na(kz_bg) ? 1 : 0) + (biasDir == (_isLong ? 1 : -1) ? 1 : 0) + (_swpOk ? 1 : 0) + (not na(_smtBar) and bar_index - _smtBar <= setup_lookback ? 1 : 0) + (struct_trend == (_isLong ? 1 : -1) ? 1 : 0)
-	[_s, _swpOk]
+	(not na(kz_bg) ? 1 : 0) + (biasDir == (_isLong ? 1 : -1) ? 1 : 0) + (not na(_swpBar) and bar_index - _swpBar <= setup_lookback ? 1 : 0) + (not na(_smtBar) and bar_index - _smtBar <= setup_lookback ? 1 : 0) + (struct_trend == (_isLong ? 1 : -1) ? 1 : 0)
 
 int setupLongScore = 0
 int setupShortScore = 0
-bool setupLongFired = false
-bool setupShortFired = false
 if ENABLE_SETUP
-	[_sL, _swpOkL] = f_setupScore(true)
-	[_sS, _swpOkS] = f_setupScore(false)
-	setupLongScore := _sL
-	setupShortScore := _sS
-	if barstate.isconfirmed
-		if _swpOkL and _sL >= setup_minScore and setupState.firedLongSwp != setupState.swpSslBar
-			float _ce = f_setupFvg(_bullBoxesFVG, true)
-			if not na(_ce)
-				setupLongFired := true
-				setupState.firedLongSwp := setupState.swpSslBar
-				if wh_enable and wh_setups
-					alert(_wh_json("SETUP LONG " + str.tostring(_sL) + "/5", _ce, _ce), alert.freq_once_per_bar)
-		if _swpOkS and _sS >= setup_minScore and setupState.firedShortSwp != setupState.swpBslBar
-			float _ce = f_setupFvg(_bearBoxesFVG, false)
-			if not na(_ce)
-				setupShortFired := true
-				setupState.firedShortSwp := setupState.swpBslBar
-				if wh_enable and wh_setups
-					alert(_wh_json("SETUP SHORT " + str.tostring(_sS) + "/5", _ce, _ce), alert.freq_once_per_bar)
-
-alertcondition(setupLongFired, title="A+ Long Setup", message="A+ LONG {{ticker}} {{interval}}")
-alertcondition(setupShortFired, title="A+ Short Setup", message="A+ SHORT {{ticker}} {{interval}}")
-
-// On-chart fire markers (plotshape, not the box/line/label budget) — the notification path for no-alert plans.
-plotshape(setup_showMarks and setupLongFired,  title="A+ Long marker",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.green, 0), text="A+", textcolor=color.white, size=size.tiny)
-plotshape(setup_showMarks and setupShortFired, title="A+ Short marker", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),   text="A+", textcolor=color.white, size=size.tiny)
+	setupLongScore := f_setupScore(true)
+	setupShortScore := f_setupScore(false)
 
 // ===== ㉖ Dashboard =====
 var string dash_pos  = input.string("Top Right", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="㉖ Dashboard")
@@ -3292,12 +3246,9 @@ if ENABLE_DASHBOARD and barstate.islast
 	table.cell(dashTbl, 1, 3, _dnTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 0, 4, "Killzone",  text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 1, 4, _kzTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
-	bool _suL = ENABLE_SETUP and setupLongScore >= setup_minScore and not na(setupState.swpSslBar) and bar_index - setupState.swpSslBar <= setup_lookback
-	bool _suS = ENABLE_SETUP and setupShortScore >= setup_minScore and not na(setupState.swpBslBar) and bar_index - setupState.swpBslBar <= setup_lookback
-	string _suTxt = not ENABLE_SETUP ? "—" : _suL ? "★ LONG " + str.tostring(setupLongScore) + "/5" : _suS ? "★ SHORT " + str.tostring(setupShortScore) + "/5" : "L " + str.tostring(setupLongScore) + "/5 · S " + str.tostring(setupShortScore) + "/5"
-	color _suCol = _suL ? color.new(color.green, 40) : _suS ? color.new(color.red, 40) : dash_bg
+	string _suTxt = not ENABLE_SETUP ? "—" : "L " + str.tostring(setupLongScore) + "/5 · S " + str.tostring(setupShortScore) + "/5"
 	table.cell(dashTbl, 0, 5, "Setup",     text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
-	table.cell(dashTbl, 1, 5, _suTxt,      text_color=color.white,  text_size=dash_size, bgcolor=_suCol)
+	table.cell(dashTbl, 1, 5, _suTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	int _smtRow = 6
 	if smt_useSym1
 		string _smtV1 = "—"
