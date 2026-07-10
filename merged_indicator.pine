@@ -2225,7 +2225,18 @@ f_sweepMark(SweepState st, string name, bool isHigh, bool draw) =>
 // captured from Bar A at re-arm time instead. Mirrors f_sweepTick's two-phase shape otherwise.
 f_wickTick(SweepState st, float extreme, float bodyEdge, float oppositeEdge, bool isHigh, int confirmBars) =>
 	bool _justConfirmed = false
-	if not na(extreme)
+	if barstate.isconfirmed and not na(st.levelPrice) and st.phase == 1
+		bool _confirmed = isHigh ? (close < st.confirmLevel) : (close > st.confirmLevel)
+		if _confirmed
+			st.phase := 2
+			_justConfirmed := true
+		else if bar_index - st.sweepBar >= confirmBars
+			st.phase := 0
+	// Skip re-arm on a bar that just confirmed: st.marker/levelPrice/sweepBar still belong to the
+	// just-confirmed candidate and f_sweepMark (called by the driver right after this returns) needs
+	// them intact. The new pivot is only ever non-na on this one bar, so on this rare collision it's
+	// missed rather than tracked early — preferable to corrupting the just-fired confirm's own data.
+	if not na(extreme) and not _justConfirmed
 		label.delete(st.marker)
 		st.marker := na
 		st.phase := 0
@@ -2233,19 +2244,11 @@ f_wickTick(SweepState st, float extreme, float bodyEdge, float oppositeEdge, boo
 		st.bodyEdge := bodyEdge
 		st.confirmLevel := oppositeEdge
 		st.sweepBar := na
-	if barstate.isconfirmed and not na(st.levelPrice)
-		if st.phase == 1
-			bool _confirmed = isHigh ? (close < st.confirmLevel) : (close > st.confirmLevel)
-			if _confirmed
-				st.phase := 2
-				_justConfirmed := true
-			else if bar_index - st.sweepBar >= confirmBars
-				st.phase := 0
-		if st.phase == 0
-			bool _wickClose = isHigh ? (close > st.bodyEdge and close <= st.levelPrice and high <= st.levelPrice) : (close < st.bodyEdge and close >= st.levelPrice and low >= st.levelPrice)
-			if _wickClose
-				st.phase := 1
-				st.sweepBar := bar_index
+	if barstate.isconfirmed and not na(st.levelPrice) and st.phase == 0
+		bool _wickClose = isHigh ? (close > st.bodyEdge and close <= st.levelPrice and high <= st.levelPrice) : (close < st.bodyEdge and close >= st.levelPrice and low >= st.levelPrice)
+		if _wickClose
+			st.phase := 1
+			st.sweepBar := bar_index
 	_justConfirmed
 
 // ===== ㉓ Equal Highs/Lows (resting liquidity pools) =====
@@ -3180,7 +3183,7 @@ if (ENABLE_SETUP or (ENABLE_DASHBOARD and barstate.islast)) and not na(_pdaHi) a
 f_setupScore(bool _isLong) =>
 	int _swpBar = _isLong ? setupState.swpSslBar : setupState.swpBslBar
 	int _smtBar = _isLong ? setupState.smtBullBar : setupState.smtBearBar
-	(not na(kz_bg) ? 1 : 0) + (biasDir == (_isLong ? 1 : -1) ? 1 : 0) + (not na(_swpBar) and bar_index - _swpBar <= setup_lookback ? 1 : 0) + (not na(_smtBar) and bar_index - _smtBar <= setup_lookback ? 1 : 0) + (struct_trend == (_isLong ? 1 : -1) ? 1 : 0)
+	(not na(kz_bg) ? 1 : 0) + (biasDir == (_isLong ? 1 : -1) ? 1 : 0) + (not na(_swpBar) and bar_index - _swpBar < setup_lookback ? 1 : 0) + (not na(_smtBar) and bar_index - _smtBar < setup_lookback ? 1 : 0) + (struct_trend == (_isLong ? 1 : -1) ? 1 : 0)
 
 int setupLongScore = 0
 int setupShortScore = 0
