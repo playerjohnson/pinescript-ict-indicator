@@ -2148,7 +2148,7 @@ type SweepState
 	float confirmLevel = na
 	int   sweepTime    = na
 	label marker       = na
-	float bodyEdge     = na   // ㉙ Wick Reversal only: Bar A's body edge (near side of its wick zone)
+	float bodyEdge         // ㉙ Wick Reversal only: Bar A's body edge (near side of its wick zone)
 
 // Per-bar flags bridging sweep/structure confirms (which happen inside functions) to native
 // alertconditions. Non-var: a fresh object each execution, so flags reset per tick; sweeps and
@@ -2164,10 +2164,10 @@ AlertFlags alertFlags = AlertFlags.new()
 
 // Persistent recency stamps for the ㉘ Setup score (freshness of the last sweep/SMT confirm per side).
 type SetupState
-	int swpBslBar = na
-	int swpSslBar = na
-	int smtBullBar = na
-	int smtBearBar = na
+	int swpBslBar
+	int swpSslBar
+	int smtBullBar
+	int smtBearBar
 var SetupState setupState = SetupState.new()
 
 // Advances the sweep state machine for one level on one bar. Returns true on the
@@ -2242,11 +2242,10 @@ f_wickTick(SweepState st, float extreme, float bodyEdge, float oppositeEdge, boo
 			else if bar_index - st.sweepBar >= confirmBars
 				st.phase := 0
 		if st.phase == 0
-			bool _wickClose = isHigh ? (close > st.bodyEdge and close <= st.levelPrice) : (close < st.bodyEdge and close >= st.levelPrice)
+			bool _wickClose = isHigh ? (close > st.bodyEdge and close <= st.levelPrice and high <= st.levelPrice) : (close < st.bodyEdge and close >= st.levelPrice and low >= st.levelPrice)
 			if _wickClose
 				st.phase := 1
 				st.sweepBar := bar_index
-				st.sweepTime := time
 	_justConfirmed
 
 // ===== ㉓ Equal Highs/Lows (resting liquidity pools) =====
@@ -3168,7 +3167,7 @@ var int setup_lookback = input.int(20, "Freshness (bars)", minval=1, maxval=200,
 // Shared bias read (also feeds the ㉖ Bias row): +1 discount, -1 premium, 0 unknown; pct is na in gap/unknown states.
 int biasDir = 0
 float biasPct = na
-if (ENABLE_SETUP or ENABLE_DASHBOARD) and not na(_pdaHi) and _pdaHi > _pdaLo
+if (ENABLE_SETUP or (ENABLE_DASHBOARD and barstate.islast)) and not na(_pdaHi) and _pdaHi > _pdaLo
 	float _p = (close - _pdaLo) / (_pdaHi - _pdaLo) * 100
 	if _p >= 0 and _p <= 100
 		biasDir := _p >= 50 ? -1 : 1
