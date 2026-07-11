@@ -40,6 +40,7 @@ var bool wh_mitigations=input.bool(true, "Mitigation Alerts", group="㉑ Webhook
 var bool wh_sweeps=input.bool(true, "Sweep Alerts", group="㉑ Webhook Alerts", tooltip="Liquidity sweep / Turtle Soup events")
 var bool wh_structure=input.bool(true, "Structure Alerts", group="㉑ Webhook Alerts", tooltip="BOS / CHoCH break events.")
 var bool wh_smt=input.bool(true, "SMT Alerts", group="㉑ Webhook Alerts", tooltip="SMT divergence events.")
+var bool wh_heartbeat=input.bool(false, "Context Heartbeat", group="㉑ Webhook Alerts", tooltip="One webhook per bar close: close price + ㉘ bias/scores + killzone flag. Feeds the tv_events outcome logger (supabase/README.md); enable Setup Score for meaningful bias/scores.")
 
 _wh_json(string _event, float _high, float _low) =>
 	'{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '"}'
@@ -3190,6 +3191,11 @@ int setupShortScore = 0
 if ENABLE_SETUP
 	setupLongScore := f_setupScore(true)
 	setupShortScore := f_setupScore(false)
+
+// ㉑ CTX heartbeat — one bar-close webhook with price + confluence context; the tv_events
+// outcome logger joins every other event against these bars (see supabase/README.md)
+if wh_enable and wh_heartbeat and barstate.isconfirmed
+	alert('{"event":"CTX","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '","bias_dir":' + str.tostring(biasDir) + ',"score_l":' + str.tostring(setupLongScore) + ',"score_s":' + str.tostring(setupShortScore) + ',"in_kz":' + (na(kz_bg) ? 'false' : 'true') + '}', alert.freq_once_per_bar_close)
 
 // ===== ㉖ Dashboard =====
 var string dash_pos  = input.string("Top Right", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="㉖ Dashboard")
