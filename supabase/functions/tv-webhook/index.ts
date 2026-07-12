@@ -4,7 +4,10 @@
 //   https://<ref>.supabase.co/functions/v1/tv-webhook?token=<token>
 // The token lives in public.tv_webhook_config (RLS locked, service-role only) — rotate it
 // with: update tv_webhook_config set token = replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
-// Deploy with verify_jwt = false (custom token auth replaces JWT).
+// Rotation self-heals: on a token mismatch the function re-reads the config once before
+// rejecting, so the new token works immediately (no redeploy). Caveat: warm instances keep
+// accepting the OLD token until the first request bearing the new one refreshes their cache.
+// Deploy with verify_jwt = false (custom token auth replaces JWT) — persisted in ../../config.toml.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -15,6 +18,14 @@ const supabase = createClient(
 
 let cachedToken: string | null = null;
 
+async function fetchToken(): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("tv_webhook_config")
+    .select("token")
+    .single();
+  return error || !data ? null : data.token;
+}
+
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
 
@@ -24,16 +35,19 @@ Deno.serve(async (req: Request) => {
   }
 
   if (!cachedToken) {
-    const { data, error } = await supabase
-      .from("tv_webhook_config")
-      .select("token")
-      .single();
-    if (error || !data) return new Response("config error", { status: 500 });
-    cachedToken = data.token;
+    cachedToken = await fetchToken();
+    if (!cachedToken) return new Response("config error", { status: 500 });
   }
   const token = new URL(req.url).searchParams.get("token") ?? "";
-  if (token.length === 0 || token !== cachedToken) {
+  if (token.length === 0) {
     return new Response("unauthorized", { status: 401 });
+  }
+  if (token !== cachedToken) {
+    // Token may have been rotated in tv_webhook_config — re-check once before rejecting.
+    cachedToken = (await fetchToken()) ?? cachedToken;
+    if (token !== cachedToken) {
+      return new Response("unauthorized", { status: 401 });
+    }
   }
 
   let payload: Record<string, unknown>;
@@ -63,6 +77,10 @@ Deno.serve(async (req: Request) => {
 
   const { error } = await supabase.from("tv_events").insert(row);
   if (error) {
+    if (error.code === "23505") {
+      // tv_events_ctx_bar_uidx: CTX already logged for this bar (duplicate alert/delivery) — not a failure
+      return new Response("duplicate ignored", { status: 200 });
+    }
     console.error("tv_events insert failed:", error.message);
     return new Response("insert failed", { status: 500 });
   }

@@ -1,0 +1,11 @@
+# Supabase CLI config. The critical line is verify_jwt = false: TradingView cannot send an
+# Authorization header, so the ?token= check inside the function IS the auth. A redeploy that
+# re-enables JWT verification 401s every webhook at the gateway and silently kills ingestion
+# (TradingView pauses alerts that error repeatedly). Keep this file authoritative — deploy with
+# `supabase functions deploy tv-webhook --project-ref jgvlpxbfvqavhkotggwj` (reads this config),
+# or if deploying via MCP/API, always pass verify_jwt: false explicitly.
+
+project_id = "jgvlpxbfvqavhkotggwj"
+
+[functions.tv-webhook]
+verify_jwt = false
