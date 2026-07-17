@@ -4,29 +4,33 @@ A comprehensive, performance-optimised Pine Script v6 indicator that merges mult
 
 ## Features
 
-| Section | Feature | Toggle |
-|---------|---------|--------|
-| A | Hourly Open & Session Separator | `ENABLE_HOURLY_OPEN` |
-| A2 | Hourly Order Blocks (bullish/bearish with mitigation) | `ENABLE_ORDER_BLOCKS` |
-| B | FVG, Volume Imbalance, GAPs, Implied FVG, Inverse FVG, Liquidity Voids | `ENABLE_IMBALANCES` |
-| C | NWOG / NDOG (New Week/Day Opening Gap) | `ENABLE_NWOG_NDOG` |
-| D | HTF Candles with traces & imbalances | `ENABLE_HTF_CANDLES` |
-| F | Killzones — Asian, London, NY AM/PM, Silver Bullet | `ENABLE_KILLZONES` |
-| G | Previous Session Highs/Lows (Asia, London, NY) | `ENABLE_SESSION_HL` |
-| H | PDH/PDL, PWH/PWL, PMH/PML Liquidity Levels | `ENABLE_LIQUIDITY` |
+| Feature | Toggle |
+|---------|--------|
+| Hourly Open & Session Separator | `ENABLE_HOURLY_OPEN` |
+| FVG, Volume Imbalance, GAPs, Implied/Inverse FVG, Liquidity Voids | `ENABLE_IMBALANCES` |
+| NWOG / NDOG (New Week/Day Opening Gap) | `ENABLE_NWOG_NDOG` |
+| HTF Candles with traces and imbalances | `ENABLE_HTF_CANDLES` |
+| Killzones — Asian, London, NY AM/PM/Lunch, Silver Bullet | `ENABLE_KILLZONES` |
+| Previous Session Highs/Lows | `ENABLE_SESSION_HL` |
+| PDH/PDL, PWH/PWL, PMH/PML Liquidity Levels | `ENABLE_LIQUIDITY` |
+| Liquidity Sweeps and Turtle Soup confirmations | `ENABLE_SWEEPS` |
+| Equal Highs/Lows and Wick Reversal | `ENABLE_EQHL`, `ENABLE_WICK_REV` |
+| Market Structure — BOS/CHoCH | `ENABLE_STRUCTURE` |
+| SMT Divergences | `ENABLE_SMT` |
+| PD Array Scanner, Setup Score, and Dashboard | `ENABLE_PDA_SCANNER`, `ENABLE_SETUP`, `ENABLE_DASHBOARD` |
 
 ## Settings
 
-21 input groups (`⓪`–`⑳`) with inline controls. Master toggles in group `⓪` disable entire sections at zero runtime cost.
+Numbered input groups (`⓪`–`㉘`) use compact inline controls. Master toggles in group `⓪` gate each feature's runtime work.
 
 ## Performance
 
-- **12 unified loops** in Section B (consolidated from 39 in the original)
+- **12 unified loops** in the imbalance section (consolidated from 39 in the original)
 - **Create-once, update-via-setters** pattern for Session H/L and Liquidity drawings (eliminates 48 delete+new ops per bar)
 - `barstate.isconfirmed` guards on all extend/mitigate loops
-- OrderBlock UDT consolidation with auto-prune
-- 8 master section toggles — disabled sections have zero per-bar cost
-- 7 `request.security` calls total (4 NWOG/NDOG + 3 Liquidity D/W/M)
+- Array-backed drawings are capped and pruned to stay within TradingView's 500-object limits
+- 15 master section toggles; expensive optional modules default off
+- 8 always-on `request.security` calls, plus up to 2 gated SMT comparison-symbol calls
 
 ## Installation
 

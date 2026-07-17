@@ -755,10 +755,13 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
 						array.push(beinvfvgce, beifvgceline)
 						box.delete(_box)
 						line.delete(_line)
+						array.remove(_bullBoxesFVG, i)
+						array.remove(_bufvgce, i)
 						isbeinversefvg := true
 						if wh_enable and wh_formations
 							alert(_wh_json("Inverse.FVG-", _boxHigh, _boxLow), alert.freq_once_per_bar_close)
 						isbeinversefvg
+						continue
 					else if close < _boxLow and filterMitBOX
 						_applyMitStyle(_box, _line, true)
 				else if fvgmitigationtype == 'Mitigate'
@@ -818,10 +821,13 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
 						array.push(buinvfvgce, buifvgceline)
 						box.delete(_box)
 						line.delete(_line)
+						array.remove(_bearBoxesFVG, i)
+						array.remove(_befvgce, i)
 						isbuinversefvg := true
 						if wh_enable and wh_formations
 							alert(_wh_json("Inverse.FVG+", _boxHigh, _boxLow), alert.freq_once_per_bar_close)
 						isbuinversefvg
+						continue
 					else if close > _boxHigh and filterMitBOX
 						_applyMitStyle(_box, _line, true)
 				else if fvgmitigationtype == 'Mitigate'
@@ -885,6 +891,9 @@ if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'En
 			else if close < _boxLow
 				box.delete(_box)
 				line.delete(_line)
+				array.remove(bullInvFVG, i)
+				array.remove(buinvfvgce, i)
+				continue
 		_boxRight := box.get_right(_box)
 		if extendfvgbox and HighlightBox and (bar_index == _boxRight or bar_index == _boxRight - 1)
 			if close >= _boxLow and low < _boxHigh
@@ -918,6 +927,9 @@ if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'En
 			else if close > _boxHigh
 				box.delete(_box)
 				line.delete(_line)
+				array.remove(bearInvFVG, i)
+				array.remove(beinvfvgce, i)
+				continue
 		_boxRight := box.get_right(_box)
 		if extendfvgbox and HighlightBox and (bar_index == _boxRight or bar_index == _boxRight - 1)
 			if close <= _boxHigh and high > _boxLow
@@ -927,13 +939,11 @@ if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'En
 					alert(_wh_json("Inv.FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
 				beinvfvgtouch
 
-if array.size(bullInvFVG) > invfvgMaxBoxSet
+while array.size(bullInvFVG) > invfvgMaxBoxSet
 	box.delete(array.shift(bullInvFVG))
-if array.size(bearInvFVG) > invfvgMaxBoxSet
-	box.delete(array.shift(bearInvFVG))
-if array.size(buinvfvgce) > invfvgMaxBoxSet
 	line.delete(array.shift(buinvfvgce))
-if array.size(beinvfvgce) > invfvgMaxBoxSet
+while array.size(bearInvFVG) > invfvgMaxBoxSet
+	box.delete(array.shift(bearInvFVG))
 	line.delete(array.shift(beinvfvgce))
 
 if ENABLE_IMBALANCES and array.size(_bullishvi) > 0 and extendvibox
@@ -2117,7 +2127,9 @@ f_inSession(_h, _m, _startH, _startM, _endH, _endM) =>
 	int _startTotal = _startH * 60 + _startM
 	int _endTotal = _endH * 60 + _endM
 	int _nowTotal = _h * 60 + _m
-	if _startTotal < _endTotal
+	if _startTotal == _endTotal
+		false
+	else if _startTotal < _endTotal
 		_nowTotal >= _startTotal and _nowTotal < _endTotal
 	else
 		_nowTotal >= _startTotal or _nowTotal < _endTotal
@@ -2126,24 +2138,42 @@ int kz_nyHour = hour(time, "America/New_York")
 int kz_nyMin  = minute(time, "America/New_York")
 
 color kz_bg = na
+var string kz_name = "—"
+bool kz_dashLast = ENABLE_DASHBOARD and barstate.islast
+if kz_dashLast
+	kz_name := ENABLE_KILLZONES and timeframe.isintraday ? "Dead" : "—"
 if ENABLE_KILLZONES and timeframe.isintraday
 	if kz_showAsian and f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
 		kz_bg := kz_asianColor
+		if kz_dashLast
+			kz_name := "Asian"
 	if kz_showLondon and f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
 		kz_bg := kz_londonColor
+		if kz_dashLast
+			kz_name := "London"
 	if kz_showNYAM and f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, kz_nyamEndM)
 		kz_bg := kz_nyamColor
+		if kz_dashLast
+			kz_name := "NY AM"
 	if kz_showNYPM and f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
 		kz_bg := kz_nypmColor
+		if kz_dashLast
+			kz_name := "NY PM"
 	if kz_showSBAM and f_inSession(kz_nyHour, kz_nyMin, kz_sbamStart, 0, kz_sbamEnd, 0)
 		kz_bg := kz_sbamColor
+		if kz_dashLast
+			kz_name := "Silver Bullet"
 	if kz_showSBPM and f_inSession(kz_nyHour, kz_nyMin, kz_sbpmStart, 0, kz_sbpmEnd, 0)
 		kz_bg := kz_sbpmColor
+		if kz_dashLast
+			kz_name := "Silver Bullet"
 
 color kz_lunchBg = na
 if ENABLE_KILLZONES and timeframe.isintraday and kz_showNYL and f_inSession(kz_nyHour, kz_nyMin, kz_nylStart, kz_nylStartM, kz_nylEnd, kz_nylEndM)
 	kz_lunchBg := kz_nylColor
 	kz_bg := na    // no-trade window: suppress the tradeable-killzone signal (㉘ Setup score / ㉑ heartbeat read kz_bg) even if a user configures lunch to overlap another session
+	if kz_dashLast
+		kz_name := "NY Lunch"
 
 bgcolor(kz_bg)
 bgcolor(kz_lunchBg)
@@ -2278,13 +2308,14 @@ type LiqPool
 	bool  mitigated = false
 	SweepState sweep = na
 
-// Register a new equal-high/low pool, deduped against the newest existing pool, pruned to cap.
+// Register a new equal-high/low pool, deduped against active existing pools, pruned to cap.
 f_eqhlAdd(array<LiqPool> pools, float price, float tol) =>
 	bool _dup = false
 	if pools.size() > 0
-		LiqPool _last = pools.get(0)
-		if math.abs(_last.price - price) <= tol
-			_dup := true
+		for i = 0 to pools.size() - 1
+			LiqPool _p = pools.get(i)
+			if not _dup and not _p.mitigated and (na(_p.sweep) or _p.sweep.phase != 2) and math.abs(_p.price - price) <= tol
+				_dup := true
 	if not _dup
 		pools.unshift(LiqPool.new(price = price))
 		while pools.size() > eqhl_maxPools
@@ -3296,22 +3327,7 @@ if ENABLE_DASHBOARD and barstate.islast
 					f_dashNear(_acc, _p.price, "EQL")
 	string _upTxt = na(_acc.aP) ? "—" : "↑ " + _acc.aN + " " + str.tostring(_acc.aP, format.mintick)
 	string _dnTxt = na(_acc.bP) ? "—" : "↓ " + _acc.bN + " " + str.tostring(_acc.bP, format.mintick)
-	string _kzTxt = "Dead"
-	if timeframe.isintraday
-		if kz_showAsian and f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
-			_kzTxt := "Asian"
-		if kz_showLondon and f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
-			_kzTxt := "London"
-		if kz_showNYAM and f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, kz_nyamEndM)
-			_kzTxt := "NY AM"
-		if kz_showNYPM and f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
-			_kzTxt := "NY PM"
-		if kz_showNYL and f_inSession(kz_nyHour, kz_nyMin, kz_nylStart, kz_nylStartM, kz_nylEnd, kz_nylEndM)
-			_kzTxt := "NY Lunch"
-		if kz_showSBAM and f_inSession(kz_nyHour, kz_nyMin, kz_sbamStart, 0, kz_sbamEnd, 0)
-			_kzTxt := "Silver Bullet"
-		if kz_showSBPM and f_inSession(kz_nyHour, kz_nyMin, kz_sbpmStart, 0, kz_sbpmEnd, 0)
-			_kzTxt := "Silver Bullet"
+	string _kzTxt = kz_name
 	table.cell(dashTbl, 0, 0, "Bias",      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 1, 0, _biasTxt,    text_color=color.white,  text_size=dash_size, bgcolor=_biasCol)
 	table.cell(dashTbl, 0, 1, "Structure", text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)

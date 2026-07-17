@@ -44,7 +44,9 @@ CLAUDE.md flags the script as near the ~100K compiled-token limit. 24 `plot()` s
 
 ## Pre-existing findings (whole file)
 
-### 🟠 P1 — Stale deleted-drawing references left in arrays (Inverse FVG and FVG→Inverse paths)
+### 🟠 P1 (RESOLVED 2026-07-16) — Stale deleted-drawing references left in arrays (Inverse FVG and FVG→Inverse paths)
+**Resolved:** converted and mitigated FVGs now remove both paired array entries and continue the reverse loop before any further drawing getters run; inverse-FVG caps also prune box/line pairs together.
+
 In several mitigation branches a box/line drawing is deleted **without removing its element from the backing array**:
 - Bull/Bear Inverse FVG: `box.delete(_box); line.delete(_line)` at ~lines 864–866 and ~897–899 — element stays in `bullInvFVG`/`buinvfvgce` (and bear equivalents).
 - FVG→Inverse conversion: original FVG box deleted at ~735 and ~798 but not removed from `_bullBoxesFVG`/`_bearBoxesFVG`.
