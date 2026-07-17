@@ -28,9 +28,11 @@ var bool ENABLE_LIQUIDITY=input.bool(true, "Enable PDH/PDL/PWH/PWL", group="⓪ 
 var bool ENABLE_PDA_SCANNER=input.bool(false, "Enable PD Array Scanner", group="⓪ Section Toggles")
 var bool ENABLE_SWEEPS=input.bool(true, "Enable Liquidity Sweeps", group="⓪ Section Toggles")
 var bool ENABLE_EQHL=input.bool(false, "Enable Equal Highs/Lows", group="⓪ Section Toggles")
+var bool ENABLE_WICK_REV=input.bool(false, "Enable Wick Reversal", group="⓪ Section Toggles", tooltip="Marks a reversal when a bar closes back inside a recent swing's wick (not a new extreme), then price breaks the swing's opposite edge. Swing sensitivity uses the Equal Highs/Lows pivot length (㉓); confirm window uses the Liquidity Sweeps confirm-bars setting (㉒) — both apply even if those sections are disabled.")
 var bool ENABLE_STRUCTURE=input.bool(false, "Enable Market Structure (BOS/CHoCH)", group="⓪ Section Toggles")
 var bool ENABLE_DASHBOARD=input.bool(false, "Enable Dashboard", group="⓪ Section Toggles")
 var bool ENABLE_SMT=input.bool(false, "Enable SMT Divergences", group="⓪ Section Toggles")
+var bool ENABLE_SETUP=input.bool(false, "Enable Setup Score", group="⓪ Section Toggles", tooltip="Adds a read-only 'Setup' row to the ㉖ Dashboard scoring the confluence stack per side (killzone + bias + fresh sweep + fresh SMT + structure, 1 pt each). No alerts, markers, or signals — the trade decision stays yours. Needs Sweeps ON for the sweep point; Structure/SMT add their points when enabled.")
 
 var bool wh_enable=input.bool(false, "Enable Webhook Alerts", group="㉑ Webhook Alerts", tooltip="JSON alerts via alert(). In TV alert dialog, select 'Any alert() function call'.")
 var bool wh_formations=input.bool(true, "Formation Alerts", group="㉑ Webhook Alerts", inline="wh1", tooltip="OB/FVG/VI/GAP formations")
@@ -38,6 +40,7 @@ var bool wh_mitigations=input.bool(true, "Mitigation Alerts", group="㉑ Webhook
 var bool wh_sweeps=input.bool(true, "Sweep Alerts", group="㉑ Webhook Alerts", tooltip="Liquidity sweep / Turtle Soup events")
 var bool wh_structure=input.bool(true, "Structure Alerts", group="㉑ Webhook Alerts", tooltip="BOS / CHoCH break events.")
 var bool wh_smt=input.bool(true, "SMT Alerts", group="㉑ Webhook Alerts", tooltip="SMT divergence events.")
+var bool wh_heartbeat=input.bool(false, "Context Heartbeat", group="㉑ Webhook Alerts", tooltip="One webhook per bar close: close price + ㉘ bias/scores + killzone flag. Feeds the tv_events outcome logger (supabase/README.md); enable Setup Score for meaningful bias/scores.")
 
 _wh_json(string _event, float _high, float _low) =>
 	'{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '"}'
@@ -255,12 +258,19 @@ var bool kz_showNYAM=input.bool(true, "New York AM", group="⑱ Killzones", inli
 var color kz_nyamColor=input.color(color.new(#ff9800, 90), "", group="⑱ Killzones", inline="kz3")
 var int kz_nyamStart=input.int(9, "Start", 0, 23, group="⑱ Killzones", inline="kz3")
 var int kz_nyamStartM=input.int(30, ":", 0, 59, group="⑱ Killzones", inline="kz3")
-var int kz_nyamEnd=input.int(12, "End", 0, 23, group="⑱ Killzones", inline="kz3")
+var int kz_nyamEnd=input.int(11, "End", 0, 23, group="⑱ Killzones", inline="kz3")
+var int kz_nyamEndM=input.int(30, ":", 0, 59, group="⑱ Killzones", inline="kz3")
 var bool kz_showNYPM=input.bool(true, "New York PM", group="⑱ Killzones", inline="kz4")
 var color kz_nypmColor=input.color(color.new(#e91e63, 90), "", group="⑱ Killzones", inline="kz4")
 var int kz_nypmStart=input.int(13, "Start", 0, 23, group="⑱ Killzones", inline="kz4")
 var int kz_nypmStartM=input.int(30, ":", 0, 59, group="⑱ Killzones", inline="kz4")
 var int kz_nypmEnd=input.int(16, "End", 0, 23, group="⑱ Killzones", inline="kz4")
+var bool kz_showNYL=input.bool(true, "New York Lunch", group="⑱ Killzones", inline="kzL")
+var color kz_nylColor=input.color(color.new(color.gray, 90), "", group="⑱ Killzones", inline="kzL")
+var int kz_nylStart=input.int(11, "Start", 0, 23, group="⑱ Killzones", inline="kzL")
+var int kz_nylStartM=input.int(30, ":", 0, 59, group="⑱ Killzones", inline="kzL")
+var int kz_nylEnd=input.int(13, "End", 0, 23, group="⑱ Killzones", inline="kzL")
+var int kz_nylEndM=input.int(30, ":", 0, 59, group="⑱ Killzones", inline="kzL")
 var bool kz_showSBAM=input.bool(false, "Silver Bullet AM", group="⑱ Killzones", inline="kz5")
 var color kz_sbamColor=input.color(color.new(#c0ca33, 88), "", group="⑱ Killzones", inline="kz5")
 var int kz_sbamStart=input.int(10, "Start", 0, 23, group="⑱ Killzones", inline="kz5")
@@ -745,10 +755,13 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
 						array.push(beinvfvgce, beifvgceline)
 						box.delete(_box)
 						line.delete(_line)
+						array.remove(_bullBoxesFVG, i)
+						array.remove(_bufvgce, i)
 						isbeinversefvg := true
 						if wh_enable and wh_formations
 							alert(_wh_json("Inverse.FVG-", _boxHigh, _boxLow), alert.freq_once_per_bar_close)
 						isbeinversefvg
+						continue
 					else if close < _boxLow and filterMitBOX
 						_applyMitStyle(_box, _line, true)
 				else if fvgmitigationtype == 'Mitigate'
@@ -808,10 +821,13 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
 						array.push(buinvfvgce, buifvgceline)
 						box.delete(_box)
 						line.delete(_line)
+						array.remove(_bearBoxesFVG, i)
+						array.remove(_befvgce, i)
 						isbuinversefvg := true
 						if wh_enable and wh_formations
 							alert(_wh_json("Inverse.FVG+", _boxHigh, _boxLow), alert.freq_once_per_bar_close)
 						isbuinversefvg
+						continue
 					else if close > _boxHigh and filterMitBOX
 						_applyMitStyle(_box, _line, true)
 				else if fvgmitigationtype == 'Mitigate'
@@ -875,6 +891,9 @@ if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'En
 			else if close < _boxLow
 				box.delete(_box)
 				line.delete(_line)
+				array.remove(bullInvFVG, i)
+				array.remove(buinvfvgce, i)
+				continue
 		_boxRight := box.get_right(_box)
 		if extendfvgbox and HighlightBox and (bar_index == _boxRight or bar_index == _boxRight - 1)
 			if close >= _boxLow and low < _boxHigh
@@ -908,6 +927,9 @@ if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'En
 			else if close > _boxHigh
 				box.delete(_box)
 				line.delete(_line)
+				array.remove(bearInvFVG, i)
+				array.remove(beinvfvgce, i)
+				continue
 		_boxRight := box.get_right(_box)
 		if extendfvgbox and HighlightBox and (bar_index == _boxRight or bar_index == _boxRight - 1)
 			if close <= _boxHigh and high > _boxLow
@@ -917,13 +939,11 @@ if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'En
 					alert(_wh_json("Inv.FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
 				beinvfvgtouch
 
-if array.size(bullInvFVG) > invfvgMaxBoxSet
+while array.size(bullInvFVG) > invfvgMaxBoxSet
 	box.delete(array.shift(bullInvFVG))
-if array.size(bearInvFVG) > invfvgMaxBoxSet
-	box.delete(array.shift(bearInvFVG))
-if array.size(buinvfvgce) > invfvgMaxBoxSet
 	line.delete(array.shift(buinvfvgce))
-if array.size(beinvfvgce) > invfvgMaxBoxSet
+while array.size(bearInvFVG) > invfvgMaxBoxSet
+	box.delete(array.shift(bearInvFVG))
 	line.delete(array.shift(beinvfvgce))
 
 if ENABLE_IMBALANCES and array.size(_bullishvi) > 0 and extendvibox
@@ -2107,7 +2127,9 @@ f_inSession(_h, _m, _startH, _startM, _endH, _endM) =>
 	int _startTotal = _startH * 60 + _startM
 	int _endTotal = _endH * 60 + _endM
 	int _nowTotal = _h * 60 + _m
-	if _startTotal < _endTotal
+	if _startTotal == _endTotal
+		false
+	else if _startTotal < _endTotal
 		_nowTotal >= _startTotal and _nowTotal < _endTotal
 	else
 		_nowTotal >= _startTotal or _nowTotal < _endTotal
@@ -2116,21 +2138,45 @@ int kz_nyHour = hour(time, "America/New_York")
 int kz_nyMin  = minute(time, "America/New_York")
 
 color kz_bg = na
+var string kz_name = "—"
+bool kz_dashLast = ENABLE_DASHBOARD and barstate.islast
+if kz_dashLast
+	kz_name := ENABLE_KILLZONES and timeframe.isintraday ? "Dead" : "—"
 if ENABLE_KILLZONES and timeframe.isintraday
 	if kz_showAsian and f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
 		kz_bg := kz_asianColor
+		if kz_dashLast
+			kz_name := "Asian"
 	if kz_showLondon and f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
 		kz_bg := kz_londonColor
-	if kz_showNYAM and f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, 0)
+		if kz_dashLast
+			kz_name := "London"
+	if kz_showNYAM and f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, kz_nyamEndM)
 		kz_bg := kz_nyamColor
+		if kz_dashLast
+			kz_name := "NY AM"
 	if kz_showNYPM and f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
 		kz_bg := kz_nypmColor
+		if kz_dashLast
+			kz_name := "NY PM"
 	if kz_showSBAM and f_inSession(kz_nyHour, kz_nyMin, kz_sbamStart, 0, kz_sbamEnd, 0)
 		kz_bg := kz_sbamColor
+		if kz_dashLast
+			kz_name := "Silver Bullet"
 	if kz_showSBPM and f_inSession(kz_nyHour, kz_nyMin, kz_sbpmStart, 0, kz_sbpmEnd, 0)
 		kz_bg := kz_sbpmColor
+		if kz_dashLast
+			kz_name := "Silver Bullet"
+
+color kz_lunchBg = na
+if ENABLE_KILLZONES and timeframe.isintraday and kz_showNYL and f_inSession(kz_nyHour, kz_nyMin, kz_nylStart, kz_nylStartM, kz_nylEnd, kz_nylEndM)
+	kz_lunchBg := kz_nylColor
+	kz_bg := na    // no-trade window: suppress the tradeable-killzone signal (㉘ Setup score / ㉑ heartbeat read kz_bg) even if a user configures lunch to overlap another session
+	if kz_dashLast
+		kz_name := "NY Lunch"
 
 bgcolor(kz_bg)
+bgcolor(kz_lunchBg)
 
 // ===== ㉒ Liquidity Sweep engine (shared by Session H/L, PD/PW/PM, EQH/EQL) =====
 var int    sweep_confirmBars = input.int(2, "Confirm bars", minval=1, maxval=5, group="㉒ Liquidity Sweeps", inline="sw1", tooltip="A reversal must confirm within this many bars after the wick-reject, or the sweep re-arms.")
@@ -2146,6 +2192,7 @@ type SweepState
 	float confirmLevel = na
 	int   sweepTime    = na
 	label marker       = na
+	float bodyEdge         // ㉙ Wick Reversal only: Bar A's body edge (near side of its wick zone)
 
 // Per-bar flags bridging sweep/structure confirms (which happen inside functions) to native
 // alertconditions. Non-var: a fresh object each execution, so flags reset per tick; sweeps and
@@ -2158,6 +2205,14 @@ type AlertFlags
 	bool chBull  = false
 	bool chBear  = false
 AlertFlags alertFlags = AlertFlags.new()
+
+// Persistent recency stamps for the ㉘ Setup score (freshness of the last sweep/SMT confirm per side).
+type SetupState
+	int swpBslBar
+	int swpSslBar
+	int smtBullBar
+	int smtBearBar
+var SetupState setupState = SetupState.new()
 
 // Advances the sweep state machine for one level on one bar. Returns true on the
 // bar a Turtle Soup confirms. Mutates st in place (Pine objects are by-reference).
@@ -2192,8 +2247,10 @@ f_sweepTick(SweepState st, float lvl, bool isHigh, int confirmBars) =>
 f_sweepMark(SweepState st, string name, bool isHigh, bool draw) =>
 	if isHigh
 		alertFlags.swpBsl := true
+		setupState.swpBslBar := bar_index
 	else
 		alertFlags.swpSsl := true
+		setupState.swpSslBar := bar_index
 	if draw and sweep_showMarker
 		string _tag = isHigh ? "TS↓" : "TS↑"
 		if na(st.marker)
@@ -2203,6 +2260,40 @@ f_sweepMark(SweepState st, string name, bool isHigh, bool draw) =>
 			label.set_text(st.marker, _tag)
 	if wh_enable and wh_sweeps
 		alert(_wh_json("SWEEP " + name + (isHigh ? " BSL" : " SSL"), st.levelPrice, st.levelPrice), alert.freq_once_per_bar)
+
+// ㉙ Wick Reversal: Bar A (a fresh swing pivot) prints a wick; Bar B later closes back inside that
+// wick zone (between A's body edge and its extreme, without exceeding it); confirmed when price
+// closes past A's opposite edge. NOT a call into f_sweepTick — that function derives confirmLevel
+// from the bare-condition bar's own opposite extreme (same bar as the level there); here Bar A
+// (the level source) and Bar B (the bare-condition bar) are different bars, so confirmLevel must be
+// captured from Bar A at re-arm time instead. Mirrors f_sweepTick's two-phase shape otherwise.
+f_wickTick(SweepState st, float extreme, float bodyEdge, float oppositeEdge, bool isHigh, int confirmBars) =>
+	bool _justConfirmed = false
+	if barstate.isconfirmed and not na(st.levelPrice) and st.phase == 1
+		bool _confirmed = isHigh ? (close < st.confirmLevel) : (close > st.confirmLevel)
+		if _confirmed
+			st.phase := 2
+			_justConfirmed := true
+		else if bar_index - st.sweepBar >= confirmBars
+			st.phase := 0
+	// Skip re-arm on a bar that just confirmed: st.marker/levelPrice/sweepBar still belong to the
+	// just-confirmed candidate and f_sweepMark (called by the driver right after this returns) needs
+	// them intact. The new pivot is only ever non-na on this one bar, so on this rare collision it's
+	// missed rather than tracked early — preferable to corrupting the just-fired confirm's own data.
+	if not na(extreme) and not _justConfirmed
+		label.delete(st.marker)
+		st.marker := na
+		st.phase := 0
+		st.levelPrice := extreme
+		st.bodyEdge := bodyEdge
+		st.confirmLevel := oppositeEdge
+		st.sweepBar := na
+	if barstate.isconfirmed and not na(st.levelPrice) and st.phase == 0
+		bool _wickClose = isHigh ? (close > st.bodyEdge and close <= st.levelPrice and high <= st.levelPrice) : (close < st.bodyEdge and close >= st.levelPrice and low >= st.levelPrice)
+		if _wickClose
+			st.phase := 1
+			st.sweepBar := bar_index
+	_justConfirmed
 
 // ===== ㉓ Equal Highs/Lows (resting liquidity pools) =====
 var int    eqhl_pivotLen = input.int(5, "Pivot length", minval=2, maxval=50, group="㉓ Equal Highs/Lows", inline="eq1", tooltip="Bars each side for swing pivots; pivots confirm this many bars late.")
@@ -2214,15 +2305,17 @@ type LiqPool
 	float price
 	line  ln = na
 	label lbl = na
+	bool  mitigated = false
 	SweepState sweep = na
 
-// Register a new equal-high/low pool, deduped against the newest existing pool, pruned to cap.
+// Register a new equal-high/low pool, deduped against active existing pools, pruned to cap.
 f_eqhlAdd(array<LiqPool> pools, float price, float tol) =>
 	bool _dup = false
 	if pools.size() > 0
-		LiqPool _last = pools.get(0)
-		if math.abs(_last.price - price) <= tol
-			_dup := true
+		for i = 0 to pools.size() - 1
+			LiqPool _p = pools.get(i)
+			if not _dup and not _p.mitigated and (na(_p.sweep) or _p.sweep.phase != 2) and math.abs(_p.price - price) <= tol
+				_dup := true
 	if not _dup
 		pools.unshift(LiqPool.new(price = price))
 		while pools.size() > eqhl_maxPools
@@ -2232,7 +2325,7 @@ f_eqhlAdd(array<LiqPool> pools, float price, float tol) =>
 			if not na(_old.sweep)
 				label.delete(_old.sweep.marker)
 
-// Draw/update each pool's line+label, run sweep detection through the shared engine.
+// Draw/update each pool's line+label, run close-through mitigation + sweep detection through the shared engine.
 f_eqhlProcess(array<LiqPool> pools, bool isHigh) =>
 	if pools.size() > 0
 		for i = 0 to pools.size() - 1
@@ -2240,16 +2333,23 @@ f_eqhlProcess(array<LiqPool> pools, bool isHigh) =>
 			int _x2 = bar_index + 30
 			if na(_p.ln)
 				_p.ln := line.new(bar_index - 1, _p.price, _x2, _p.price, color=eqhl_color, style=line.style_dashed, width=1)
-			line.set_x2(_p.ln, _x2)
 			if na(_p.lbl)
 				_p.lbl := label.new(_x2, _p.price, isHigh ? "EQH" : "EQL", style=label.style_label_left, color=color.new(color.white, 100), textcolor=eqhl_color, size=size.tiny)
-			label.set_x(_p.lbl, _x2)
-			if ENABLE_SWEEPS
-				if na(_p.sweep)
-					_p.sweep := SweepState.new()
-				if f_sweepTick(_p.sweep, _p.price, isHigh, sweep_confirmBars)
-					f_sweepMark(_p.sweep, isHigh ? "EQH" : "EQL", isHigh, true)
-				line.set_color(_p.ln, _p.sweep.phase == 2 ? sweep_lineColor : eqhl_color)
+			// Close-through mitigation (display-independent of ENABLE_SWEEPS, matches SHLevel/lq): freeze the line at this bar + dim ONCE, then stop tracking (no extend, no sweep, no TS marker).
+			if not _p.mitigated and barstate.isconfirmed and (isHigh ? close > _p.price : close < _p.price)
+				_p.mitigated := true
+				line.set_x2(_p.ln, bar_index)
+				line.set_color(_p.ln, color.new(eqhl_color, 70))
+				label.set_x(_p.lbl, bar_index)
+			if not _p.mitigated
+				line.set_x2(_p.ln, _x2)
+				label.set_x(_p.lbl, _x2)
+				if ENABLE_SWEEPS
+					if na(_p.sweep)
+						_p.sweep := SweepState.new()
+					if f_sweepTick(_p.sweep, _p.price, isHigh, sweep_confirmBars)
+						f_sweepMark(_p.sweep, isHigh ? "EQH" : "EQL", isHigh, true)
+					line.set_color(_p.ln, _p.sweep.phase == 2 ? sweep_lineColor : eqhl_color)
 
 // ===== ㉔ Market Structure (BOS / CHoCH) =====
 var int    struct_pivotLen  = input.int(5, "Pivot length", minval=2, maxval=50, group="㉔ Market Structure", inline="ms1", tooltip="Swing pivots use this many bars each side; pivots confirm this many bars late. Independent of ㉓.")
@@ -2470,9 +2570,9 @@ var bool sh_inNYAM=false, var bool sh_inNYPre=false, var bool sh_inNYL=false, va
 if ENABLE_SESSION_HL and timeframe.isintraday
 	bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
 	bool _isLon = f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
-	bool _isNYAM = f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, 0)
+	bool _isNYAM = f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, kz_nyamEndM)
 	bool _isNYPre = f_inSession(kz_nyHour, kz_nyMin, 7, 0, 9, 30)
-	bool _isNYL = f_inSession(kz_nyHour, kz_nyMin, 12, 0, 13, 30)
+	bool _isNYL = f_inSession(kz_nyHour, kz_nyMin, kz_nylStart, kz_nylStartM, kz_nylEnd, kz_nylEndM)
 	bool _isNYPM = f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
 
 	if _isAsia and not sh_inAsia
@@ -2736,6 +2836,17 @@ if ENABLE_EQHL
 	f_eqhlProcess(eqhPools, true)
 	f_eqhlProcess(eqlPools, false)
 
+// ㉙ Wick Reversal driver — single current-pivot-per-side (no array/pruning), reuses the
+// ㉓ pivot calc above (_eqhlPh/_eqhlPl, already computed unconditionally) and the ㉒ sweep
+// engine's marker/alert/webhook/Setup-Score plumbing via f_sweepMark.
+var SweepState wickRevH = SweepState.new()
+var SweepState wickRevL = SweepState.new()
+if ENABLE_WICK_REV
+	if f_wickTick(wickRevH, _eqhlPh, math.max(close[eqhl_pivotLen], open[eqhl_pivotLen]), low[eqhl_pivotLen], true, sweep_confirmBars)
+		f_sweepMark(wickRevH, "WR", true, true)
+	if f_wickTick(wickRevL, _eqhlPl, math.min(close[eqhl_pivotLen], open[eqhl_pivotLen]), high[eqhl_pivotLen], false, sweep_confirmBars)
+		f_sweepMark(wickRevL, "WR", false, true)
+
 // ㉔ Market Structure driver — pivots computed unconditionally (ta.* consistency); gated logic below
 float _structPh = ta.pivothigh(struct_pivotLen, struct_pivotLen)
 float _structPl = ta.pivotlow(struct_pivotLen, struct_pivotLen)
@@ -2963,6 +3074,11 @@ if ENABLE_SMT
 	while smt_labels.size() > smt_maxDiv * 2
 		label.delete(smt_labels.pop())
 
+if smtBullFired
+	setupState.smtBullBar := bar_index
+if smtBearFired
+	setupState.smtBearBar := bar_index
+
 alertcondition(smtBullFired, title="SMT Bull", message="SMT Bull {{ticker}} {{interval}}")
 alertcondition(smtBearFired, title="SMT Bear", message="SMT Bear {{ticker}} {{interval}}")
 
@@ -3101,6 +3217,38 @@ f_pdaScanner() =>
 if ENABLE_PDA_SCANNER
 	f_pdaScanner()
 
+// ===== ㉘ Setup Score — read-only confluence checklist per side (feeds the ㉖ Setup row) =====
+var int setup_lookback = input.int(20, "Freshness (bars)", minval=1, maxval=200, group="㉘ Setup Score", tooltip="A sweep/SMT confirm counts toward the score for this many bars.")
+
+// Shared bias read (also feeds the ㉖ Bias row): +1 discount, -1 premium, 0 unknown; pct is na in gap/unknown states.
+int biasDir = 0
+float biasPct = na
+if (ENABLE_SETUP or (ENABLE_DASHBOARD and barstate.islast)) and not na(_pdaHi) and _pdaHi > _pdaLo
+	float _p = (close - _pdaLo) / (_pdaHi - _pdaLo) * 100
+	if _p >= 0 and _p <= 100
+		biasDir := _p >= 50 ? -1 : 1
+		biasPct := _p
+	else
+		// Price gapped outside the dealing range: the % is degenerate — read bias vs the Midnight Open instead
+		biasDir := (ho_midPrices.size() > 0 ? close >= ho_midPrices.get(0) : _p > 100) ? -1 : 1
+
+// Score one side: killzone + bias + fresh sweep + fresh SMT + structure trend, 1 pt each.
+f_setupScore(bool _isLong) =>
+	int _swpBar = _isLong ? setupState.swpSslBar : setupState.swpBslBar
+	int _smtBar = _isLong ? setupState.smtBullBar : setupState.smtBearBar
+	(not na(kz_bg) ? 1 : 0) + (biasDir == (_isLong ? 1 : -1) ? 1 : 0) + (not na(_swpBar) and bar_index - _swpBar < setup_lookback ? 1 : 0) + (not na(_smtBar) and bar_index - _smtBar < setup_lookback ? 1 : 0) + (struct_trend == (_isLong ? 1 : -1) ? 1 : 0)
+
+int setupLongScore = 0
+int setupShortScore = 0
+if ENABLE_SETUP
+	setupLongScore := f_setupScore(true)
+	setupShortScore := f_setupScore(false)
+
+// ㉑ CTX heartbeat — one bar-close webhook with price + confluence context; the tv_events
+// outcome logger joins every other event against these bars (see supabase/README.md)
+if wh_enable and wh_heartbeat and barstate.isconfirmed
+	alert('{"event":"CTX","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '","bias_dir":' + str.tostring(biasDir) + ',"score_l":' + str.tostring(setupLongScore) + ',"score_s":' + str.tostring(setupShortScore) + ',"in_kz":' + (na(kz_bg) ? 'false' : 'true') + '}', alert.freq_once_per_bar_close)
+
 // ===== ㉖ Dashboard =====
 var string dash_pos  = input.string("Top Right", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="㉖ Dashboard")
 var string dash_size = input.string(size.small, "Text size", options=[size.tiny, size.small, size.normal], group="㉖ Dashboard")
@@ -3135,22 +3283,11 @@ _dashPosCnst = switch dash_pos
 	"Bottom Right" => position.bottom_right
 	"Bottom Left"  => position.bottom_left
 	=> position.top_right
-var table dashTbl = table.new(_dashPosCnst, 2, 5 + (smt_useSym1 ? 1 : 0) + (smt_useSym2 ? 1 : 0), border_width=1)
+var table dashTbl = table.new(_dashPosCnst, 2, 6 + (smt_useSym1 ? 1 : 0) + (smt_useSym2 ? 1 : 0), border_width=1)
 
 if ENABLE_DASHBOARD and barstate.islast
-	string _biasTxt = "—"
-	color _biasCol = dash_bg
-	if not na(_pdaHi) and _pdaHi > _pdaLo
-		float _pct = (close - _pdaLo) / (_pdaHi - _pdaLo) * 100
-		if _pct >= 0 and _pct <= 100
-			bool _prem = _pct >= 50
-			_biasTxt := (_prem ? "Premium " : "Discount ") + str.tostring(_pct, "#") + "%"
-			_biasCol := _prem ? color.new(color.red, 40) : color.new(color.green, 40)
-		else
-			// Price gapped outside the dealing range: the % is degenerate — read bias vs the Midnight Open instead
-			bool _prem = ho_midPrices.size() > 0 ? close >= ho_midPrices.get(0) : _pct > 100
-			_biasTxt := (_prem ? "Premium" : "Discount") + " (gap)"
-			_biasCol := _prem ? color.new(color.red, 40) : color.new(color.green, 40)
+	string _biasTxt = biasDir == 0 ? "—" : (biasDir == -1 ? "Premium" : "Discount") + (na(biasPct) ? " (gap)" : " " + str.tostring(biasPct, "#") + "%")
+	color _biasCol = biasDir == 0 ? dash_bg : color.new(biasDir == -1 ? color.red : color.green, 40)
 	string _structTxt = "—"
 	color _structCol = dash_bg
 	if ENABLE_STRUCTURE and struct_trend != 0
@@ -3181,29 +3318,16 @@ if ENABLE_DASHBOARD and barstate.islast
 		if eqhPools.size() > 0
 			for i = 0 to eqhPools.size() - 1
 				LiqPool _p = eqhPools.get(i)
-				if na(_p.sweep) or _p.sweep.phase != 2
+				if not _p.mitigated and (na(_p.sweep) or _p.sweep.phase != 2)
 					f_dashNear(_acc, _p.price, "EQH")
 		if eqlPools.size() > 0
 			for i = 0 to eqlPools.size() - 1
 				LiqPool _p = eqlPools.get(i)
-				if na(_p.sweep) or _p.sweep.phase != 2
+				if not _p.mitigated and (na(_p.sweep) or _p.sweep.phase != 2)
 					f_dashNear(_acc, _p.price, "EQL")
 	string _upTxt = na(_acc.aP) ? "—" : "↑ " + _acc.aN + " " + str.tostring(_acc.aP, format.mintick)
 	string _dnTxt = na(_acc.bP) ? "—" : "↓ " + _acc.bN + " " + str.tostring(_acc.bP, format.mintick)
-	string _kzTxt = "Dead"
-	if timeframe.isintraday
-		if kz_showAsian and f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
-			_kzTxt := "Asian"
-		if kz_showLondon and f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
-			_kzTxt := "London"
-		if kz_showNYAM and f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, 0)
-			_kzTxt := "NY AM"
-		if kz_showNYPM and f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
-			_kzTxt := "NY PM"
-		if kz_showSBAM and f_inSession(kz_nyHour, kz_nyMin, kz_sbamStart, 0, kz_sbamEnd, 0)
-			_kzTxt := "Silver Bullet"
-		if kz_showSBPM and f_inSession(kz_nyHour, kz_nyMin, kz_sbpmStart, 0, kz_sbpmEnd, 0)
-			_kzTxt := "Silver Bullet"
+	string _kzTxt = kz_name
 	table.cell(dashTbl, 0, 0, "Bias",      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 1, 0, _biasTxt,    text_color=color.white,  text_size=dash_size, bgcolor=_biasCol)
 	table.cell(dashTbl, 0, 1, "Structure", text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
@@ -3214,7 +3338,10 @@ if ENABLE_DASHBOARD and barstate.islast
 	table.cell(dashTbl, 1, 3, _dnTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 0, 4, "Killzone",  text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 1, 4, _kzTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
-	int _smtRow = 5
+	string _suTxt = not ENABLE_SETUP ? "—" : "L " + str.tostring(setupLongScore) + "/5 · S " + str.tostring(setupShortScore) + "/5"
+	table.cell(dashTbl, 0, 5, "Setup",     text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 5, _suTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	int _smtRow = 6
 	if smt_useSym1
 		string _smtV1 = "—"
 		if ENABLE_SMT
