@@ -42,6 +42,7 @@ var bool wh_heartbeat=input.bool(false, "Context Heartbeat", group="㉑ Webhook 
 
 var bool ENABLE_WEEKLY_POWER3=input.bool(false, 'Enable Weekly Power 3', group='⓪ Section Toggles', tooltip='Current and historical weekly opens, live weekly range, weekday labels, and the Tuesday London to Wednesday New York best-odds window.')
 var bool ENABLE_ECON_CAL=input.bool(false, 'Enable Economic Calendar', group='⓪ Section Toggles', tooltip='Forex Factory calendar supplied by pinned toodegrees Pine libraries and Pine Seed feeds. Supported on 30-second through daily charts.')
+var bool ENABLE_PLAYBOOK_GUARD=input.bool(false, 'Enable Playbook Guard', group='⓪ Section Toggles', tooltip='Read-only weekly workflow and named-event risk guard. Adds dashboard status, optional manual weekly draw tracking, and an optional Friday 20–30% retracement band. It never creates a trade signal.')
 
 _wh_json(string _event, float _high, float _low) =>
 	'{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '"}'
@@ -388,9 +389,9 @@ var array<label> wp_dayHistory=array.new_label()
 var array<label> wp_weekDays=array.new_label()
 
 bool wp_newWeek=timeframe.change('W')
-if ENABLE_WEEKLY_POWER3 and timeframe.in_seconds() <= 86400
+if (ENABLE_WEEKLY_POWER3 or ENABLE_PLAYBOOK_GUARD) and timeframe.in_seconds() <= 86400
 	if wp_newWeek or na(wp_weekOpen)
-		if not na(wp_weekOpen)
+		if ENABLE_WEEKLY_POWER3 and not na(wp_weekOpen)
 			if not na(wp_openLine)
 				line.set_x2(wp_openLine, time)
 				wp_openHistory.push(wp_openLine)
@@ -433,7 +434,7 @@ if ENABLE_WEEKLY_POWER3 and timeframe.in_seconds() <= 86400
 			wp_weekLow := low
 			wp_lowBar := bar_index
 
-	if wp_showOpen
+	if ENABLE_WEEKLY_POWER3 and wp_showOpen
 		if na(wp_openLine)
 			wp_openLine := line.new(x1=wp_weekStart, y1=wp_weekOpen, x2=time, y2=wp_weekOpen, xloc=xloc.bar_time, color=wp_openColor, style=line_style(wp_openStyle), width=wp_openWidth)
 		line.set_x2(wp_openLine, time)
@@ -441,7 +442,7 @@ if ENABLE_WEEKLY_POWER3 and timeframe.in_seconds() <= 86400
 		line.set_style(wp_openLine, line_style(wp_openStyle))
 		line.set_width(wp_openLine, wp_openWidth)
 
-	if wp_showRange
+	if ENABLE_WEEKLY_POWER3 and wp_showRange
 		if na(wp_highLine)
 			wp_highLine := line.new(x1=wp_weekStart, y1=wp_weekHigh, x2=time, y2=wp_weekHigh, xloc=xloc.bar_time, color=wp_highColor, style=line_style(wp_rangeStyle), width=wp_rangeWidth)
 			wp_lowLine := line.new(x1=wp_weekStart, y1=wp_weekLow, x2=time, y2=wp_weekLow, xloc=xloc.bar_time, color=wp_lowColor, style=line_style(wp_rangeStyle), width=wp_rangeWidth)
@@ -461,7 +462,7 @@ if ENABLE_WEEKLY_POWER3 and timeframe.in_seconds() <= 86400
 	int _wpNyMinutes=kz_nyHour * 60 + kz_nyMin
 	int _wpDayKey=year(time, 'America/New_York') * 10000 + month(time, 'America/New_York') * 100 + dayofmonth(time, 'America/New_York')
 	bool _wpWeekday=_wpNyDow >= dayofweek.monday and _wpNyDow <= dayofweek.friday
-	if wp_showDays and timeframe.isintraday and _wpWeekday and _wpNyMinutes >= 240 and (na(wp_lastDayKey) or _wpDayKey != wp_lastDayKey)
+	if ENABLE_WEEKLY_POWER3 and wp_showDays and timeframe.isintraday and _wpWeekday and _wpNyMinutes >= 240 and (na(wp_lastDayKey) or _wpDayKey != wp_lastDayKey)
 		string _wpDayText=switch _wpNyDow
 			dayofweek.monday => 'Monday'
 			dayofweek.tuesday => 'Tuesday'
@@ -476,7 +477,7 @@ if ENABLE_WEEKLY_POWER3 and timeframe.in_seconds() <= 86400
 		f_wpPruneLabels(wp_dayHistory, wp_historyWeeks * 5)
 		wp_lastDayKey := _wpDayKey
 
-	if wp_showDays and wp_weekDays.size() > 0
+	if ENABLE_WEEKLY_POWER3 and wp_showDays and wp_weekDays.size() > 0
 		float _wpRange=math.max(wp_weekHigh - wp_weekLow, syminfo.mintick)
 		float _wpDayY=wp_dayPosition == 'Above' ? wp_weekHigh + _wpRange * wp_dayBufferPct / 100.0 : wp_weekLow - _wpRange * wp_dayBufferPct / 100.0
 		for i=0 to wp_weekDays.size() - 1
@@ -485,7 +486,7 @@ if ENABLE_WEEKLY_POWER3 and timeframe.in_seconds() <= 86400
 	int _wpPrevDow=dayofweek(time[1], 'America/New_York')
 	int _wpPrevMinutes=hour(time[1], 'America/New_York') * 60 + minute(time[1], 'America/New_York')
 	int _wpLondonOpen=kz_londonStart * 60
-	bool _wpOddsStart=timeframe.isintraday and not wp_oddsMade and _wpNyDow == dayofweek.tuesday and _wpNyMinutes >= _wpLondonOpen and (_wpPrevDow != dayofweek.tuesday or _wpPrevMinutes < _wpLondonOpen)
+	bool _wpOddsStart=ENABLE_WEEKLY_POWER3 and timeframe.isintraday and not wp_oddsMade and _wpNyDow == dayofweek.tuesday and _wpNyMinutes >= _wpLondonOpen and (_wpPrevDow != dayofweek.tuesday or _wpPrevMinutes < _wpLondonOpen)
 	if _wpOddsStart
 		int _wpOddsStartTime=timestamp('America/New_York', year(time, 'America/New_York'), month(time, 'America/New_York'), dayofmonth(time, 'America/New_York'), kz_londonStart, 0)
 		int _wpOddsEnd=timestamp('America/New_York', year(time, 'America/New_York'), month(time, 'America/New_York'), dayofmonth(time, 'America/New_York') + 1, kz_nyamStart, kz_nyamStartM)
@@ -1771,6 +1772,7 @@ var ec_tableLocation=ffUtil.boxLoc(ec_tableX, ec_tableY)
 var ec_impactFilter=ffUtil.impFilter(ec_holiday, ec_lowImpact, ec_medImpact, ec_highImpact)
 var ec_currencyFilter=ffUtil.curFilter(ec_autoCurrency, ec_AUD, ec_CAD, ec_CHF, ec_CNY, ec_EUR, ec_GBP, ec_JPY, ec_NZD, ec_USD)
 var array<ffUtil.News> ec_currentWeek=array.new<ffUtil.News>()
+var array<ffUtil.News> ec_rawCurrentWeek=array.new<ffUtil.News>()
 var array<ffUtil.News> ec_nextWeek=array.new<ffUtil.News>()
 var array<ffUtil.News> ec_currentDay=array.new<ffUtil.News>()
 var array<line> ec_chartLines=array.new_line()
@@ -1784,7 +1786,7 @@ bool ec_supportedTf=not na(ec_tfSeconds) and ec_tfSeconds >= 30 and ec_tfSeconds
 string ec_timezone=ec_customTimezone ? 'UTC' + (ec_timezoneH >= 0 ? '+' : '-') + str.tostring(math.abs(ec_timezoneH)) + (ec_timezoneM == 0 ? '' : ':' + (ec_timezoneM < 10 ? '0' : '') + str.tostring(ec_timezoneM)) : 'America/New_York'
 int ec_dayKey=year(time, ec_timezone) * 10000 + month(time, ec_timezone) * 100 + dayofmonth(time, ec_timezone)
 bool ec_newDay=not na(ec_dayKey[1]) and ec_dayKey != ec_dayKey[1]
-if ENABLE_ECON_CAL and ec_supportedTf
+if (ENABLE_ECON_CAL or ENABLE_PLAYBOOK_GUARD) and ec_supportedTf
 	string _ecChartMode=timeframe.isdaily and ec_onChartMode == 'Today' ? 'This Week' : ec_onChartMode
 	string _ecTableMode=timeframe.isdaily ? 'This Week' : ec_tableMode
 	color _ecTableBorder=ec_tableBorder ? (ec_borderAuto ? chart.fg_color : ec_borderColor) : na
@@ -1793,6 +1795,7 @@ if ENABLE_ECON_CAL and ec_supportedTf
 	[_ecSlot1, _ecSlot2, _ecSlot3, _ecSlot4, _ecSlot5, _ecSlot6, _ecSlot7, _ecSlot8, _ecSlot9]=ec_requestData()
 	if timeframe.change('W')
 		ec_nextWeek := ffUtil.bubbleSort_News(ec_nextWeek)
+		ec_rawCurrentWeek := f_ecCloneNews(ec_nextWeek)
 		if ec_customTimezone
 			ec_nextWeek := ffUtil.adjustTimezone(ec_nextWeek, ec_timezoneH, ec_timezoneM)
 		if ec_timeFormat == 'AM/PM'
@@ -1805,7 +1808,7 @@ if ENABLE_ECON_CAL and ec_supportedTf
 	ec_nextWeek.ec_processData(_ecSlot1, _ecSlot2, _ecSlot3, _ecSlot4, _ecSlot5, _ecSlot6, _ecSlot7, _ecSlot8, _ecSlot9)
 	if timeframe.isdaily and timeframe.change('W')
 		ec_nextWeek.ec_processData(_ecSlot1, _ecSlot2, _ecSlot3, _ecSlot4, _ecSlot5, _ecSlot6, _ecSlot7, _ecSlot8, _ecSlot9)
-	if ec_currentWeek.size() > 0 and ec_showTable
+	if ENABLE_ECON_CAL and ec_currentWeek.size() > 0 and ec_showTable
 		if _ecTableMode == 'Today'
 			if ec_newDay or na(ec_table)
 				if not na(ec_table)
@@ -1824,14 +1827,89 @@ if ENABLE_ECON_CAL and ec_supportedTf
 		table.delete(ec_table)
 		ec_table := table(na)
 	f_ecPruneDrawings(ec_chartLines, ec_chartLineTimes, ec_chartLabels, ec_chartLabelTimes, _ecChartMode, ec_onChartDays, ec_lineTime, ec_timezone)
-	if ec_showLines
+	if ENABLE_ECON_CAL and ec_showLines
 		if _ecChartMode != 'Today' and timeframe.change('W')
 			f_ecDrawLines(ec_currentWeek, ec_chartLines, ec_chartLineTimes, ec_lineTransparency, ec_lineStyle, ec_maxChartDrawings)
 		else if _ecChartMode == 'Today' and ec_newDay
 			f_ecDrawLines(ec_currentDay, ec_chartLines, ec_chartLineTimes, ec_lineTransparency, ec_lineStyle, ec_maxChartDrawings)
-	if ec_showLabels
+	if ENABLE_ECON_CAL and ec_showLabels
 		f_ecDrawLabel(ec_currentWeek, ec_chartLabels, ec_chartLabelTimes, ec_labelY, ec_labelSize, ec_labelOutline, ec_maxChartDrawings)
 	f_ecPruneDrawings(ec_chartLines, ec_chartLineTimes, ec_chartLabels, ec_chartLabelTimes, _ecChartMode, ec_onChartDays, ec_lineTime, ec_timezone)
+
+// ===== ㉜ Playbook Guard =====
+const string PB_GROUP='㉜ Playbook Guard'
+var int pb_lockBefore=input.int(15, 'Event lockout before', minval=0, maxval=120, group=PB_GROUP, inline='pb1')
+var int pb_lockAfter=input.int(15, 'after', minval=0, maxval=120, group=PB_GROUP, inline='pb1', tooltip='Minutes before/after named USD CPI, PPI, FOMC, NFP, and Fed-speaker events. Uses the raw calendar feed; Economic Calendar display filters do not affect safety.')
+var int pb_postNewsMinutes=input.int(30, 'Post-news window', minval=0, maxval=180, group=PB_GROUP)
+var bool pb_manualThesis=input.bool(false, 'Manual weekly thesis', group=PB_GROUP, inline='pb2')
+var string pb_thesis=input.string('Bullish', '', options=['Bullish', 'Bearish'], group=PB_GROUP, inline='pb2')
+var float pb_drawPrice=input.float(0.0, 'Weekly draw price', minval=0.0, group=PB_GROUP, tooltip='Bullish is delivered when the weekly high touches this price; bearish is delivered when the weekly low touches it. Zero leaves the draw unset.')
+var bool pb_showTgif=input.bool(true, 'Friday 20–30% band', group=PB_GROUP, inline='pb3')
+var color pb_tgifColor=input.color(color.new(#7e57c2, 0), '', group=PB_GROUP, inline='pb3', tooltip='After the manual draw is delivered, one Friday band projects 20–30% of the live weekly range and updates through Friday.')
+
+f_pbEventKind(string _title) =>
+	string _t=str.lower(_title)
+	bool _speaker=(str.contains(_t, 'speaks') or str.contains(_t, 'speech') or str.contains(_t, 'testifies')) and (str.contains(_t, 'fed') or str.contains(_t, 'fomc'))
+	_speaker ? 'FED' : str.contains(_t, 'cpi') ? 'CPI' : str.contains(_t, 'ppi') ? 'PPI' : (str.contains(_t, 'fomc') or str.contains(_t, 'federal funds rate')) ? 'FOMC' : (not str.contains(_t, 'adp') and (str.contains(_t, 'non-farm') or str.contains(_t, 'nonfarm payroll'))) ? 'NFP' : ''
+
+bool pb_eventLockout=false
+bool pb_postNews=false
+bool pb_fedSpeechToday=false
+string pb_eventName=''
+string pb_postNewsName=''
+int pb_now=barstate.isrealtime ? timenow : nz(time_close, time)
+int pb_nyYear=year(pb_now, 'America/New_York')
+int pb_nyMonth=month(pb_now, 'America/New_York')
+int pb_nyDay=dayofmonth(pb_now, 'America/New_York')
+bool pb_calendarAvailable=ec_supportedTf and ec_rawCurrentWeek.size() > 0
+if ENABLE_PLAYBOOK_GUARD and pb_calendarAvailable
+	for i=0 to ec_rawCurrentWeek.size() - 1
+		ffUtil.News _pbEvent=ec_rawCurrentWeek.get(i)
+		string _pbKind=f_pbEventKind(_pbEvent.ttl)
+		if _pbKind != '' and str.upper(_pbEvent.cur) == 'USD' and not na(_pbEvent.tmst)
+			bool _pbSameDay=year(_pbEvent.tmst, 'America/New_York') == pb_nyYear and month(_pbEvent.tmst, 'America/New_York') == pb_nyMonth and dayofmonth(_pbEvent.tmst, 'America/New_York') == pb_nyDay
+			pb_fedSpeechToday := pb_fedSpeechToday or (_pbSameDay and _pbKind == 'FED')
+			int _pbStart=_pbEvent.tmst - pb_lockBefore * 60000
+			int _pbEnd=_pbEvent.tmst + pb_lockAfter * 60000
+			if pb_now >= _pbStart and pb_now < _pbEnd
+				pb_eventLockout := true
+				pb_eventName := _pbKind
+			else if pb_postNewsMinutes > 0 and pb_now >= _pbEnd and pb_now < _pbEnd + pb_postNewsMinutes * 60000
+				pb_postNews := true
+				pb_postNewsName := _pbKind
+
+int pb_nyDow=dayofweek(pb_now, 'America/New_York')
+int pb_waitStart=timestamp('America/New_York', pb_nyYear, pb_nyMonth, pb_nyDay, 9, 30)
+int pb_waitEnd=timestamp('America/New_York', pb_nyYear, pb_nyMonth, pb_nyDay, 10, 0)
+int pb_mondayCutoff=timestamp('America/New_York', pb_nyYear, pb_nyMonth, pb_nyDay, 10, 10)
+bool pb_fedWait=ENABLE_PLAYBOOK_GUARD and timeframe.isintraday and pb_fedSpeechToday and pb_now >= pb_waitStart and pb_now < pb_waitEnd
+bool pb_guardLockout=ENABLE_PLAYBOOK_GUARD and (not pb_calendarAvailable or pb_eventLockout or pb_fedWait)
+bool pb_monday=ENABLE_PLAYBOOK_GUARD and pb_nyDow == dayofweek.monday and pb_now < pb_mondayCutoff
+bool pb_mondayClosed=ENABLE_PLAYBOOK_GUARD and pb_nyDow == dayofweek.monday and pb_now >= pb_mondayCutoff
+bool pb_tgif=ENABLE_PLAYBOOK_GUARD and pb_nyDow == dayofweek.friday
+string pb_guardState=not ENABLE_PLAYBOOK_GUARD ? '—' : not pb_calendarAvailable ? 'CALENDAR UNAVAILABLE' : pb_eventLockout ? 'EVENT LOCKOUT · ' + pb_eventName : pb_fedWait ? 'WAIT UNTIL 10:00 · FED' : pb_postNews ? 'POST-NEWS · ' + pb_postNewsName : pb_monday ? 'MONDAY PROBE' : pb_mondayClosed ? 'MONDAY PROBE CLOSED' : pb_tgif ? 'TGIF' : 'NORMAL'
+
+var bool pb_drawTouched=false
+var bool pb_tgifMade=false
+var box pb_tgifBox=na
+if wp_newWeek
+	pb_drawTouched := false
+	pb_tgifMade := false
+	box.delete(pb_tgifBox)
+	pb_tgifBox := box(na)
+if ENABLE_PLAYBOOK_GUARD and pb_manualThesis and pb_drawPrice > 0
+	if not pb_drawTouched and (pb_thesis == 'Bullish' ? high >= pb_drawPrice : low <= pb_drawPrice)
+		pb_drawTouched := true
+	if pb_tgif and pb_drawTouched and pb_showTgif and not na(wp_weekHigh) and not na(wp_weekLow) and wp_weekHigh > wp_weekLow
+		float _pbRange=wp_weekHigh - wp_weekLow
+		float _pb20=pb_thesis == 'Bullish' ? wp_weekHigh - _pbRange * 0.20 : wp_weekLow + _pbRange * 0.20
+		float _pb30=pb_thesis == 'Bullish' ? wp_weekHigh - _pbRange * 0.30 : wp_weekLow + _pbRange * 0.30
+		if not pb_tgifMade
+			pb_tgifBox := box.new(left=time, top=math.max(_pb20, _pb30), right=time_close, bottom=math.min(_pb20, _pb30), xloc=xloc.bar_time, extend=extend.right, border_color=pb_tgifColor, bgcolor=color.new(pb_tgifColor, 85))
+			pb_tgifMade := true
+		else
+			box.set_top(pb_tgifBox, math.max(_pb20, _pb30))
+			box.set_bottom(pb_tgifBox, math.min(_pb20, _pb30))
 
 // ===== ㉖ Dashboard =====
 var string dash_pos  = input.string("Top Right", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="㉖ Dashboard")
@@ -1867,7 +1945,7 @@ _dashPosCnst = switch dash_pos
 	"Bottom Right" => position.bottom_right
 	"Bottom Left"  => position.bottom_left
 	=> position.top_right
-var table dashTbl = table.new(_dashPosCnst, 2, 6 + (smt_useSym1 ? 1 : 0) + (smt_useSym2 ? 1 : 0), border_width=1)
+var table dashTbl = table.new(_dashPosCnst, 2, 6 + (ENABLE_PLAYBOOK_GUARD ? 2 : 0) + (smt_useSym1 ? 1 : 0) + (smt_useSym2 ? 1 : 0), border_width=1)
 
 if ENABLE_DASHBOARD and barstate.islast
 	string _biasTxt = biasDir == 0 ? "—" : (biasDir == -1 ? "Premium" : "Discount") + (na(biasPct) ? " (gap)" : " " + str.tostring(biasPct, "#") + "%")
@@ -1922,10 +2000,22 @@ if ENABLE_DASHBOARD and barstate.islast
 	table.cell(dashTbl, 1, 3, _dnTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 0, 4, "Killzone",  text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 1, 4, _kzTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
-	string _suTxt = not ENABLE_SETUP ? "—" : "L " + str.tostring(setupLongScore) + "/5 · S " + str.tostring(setupShortScore) + "/5"
+	string _rawScores="L " + str.tostring(setupLongScore) + "/5 · S " + str.tostring(setupShortScore) + "/5"
+	string _suTxt = pb_guardLockout ? "BLOCKED · " + _rawScores : not ENABLE_SETUP ? "—" : _rawScores
+	color _suBg = pb_guardLockout ? color.new(color.red, 15) : dash_bg
 	table.cell(dashTbl, 0, 5, "Setup",     text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
-	table.cell(dashTbl, 1, 5, _suTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
-	int _smtRow = 6
+	table.cell(dashTbl, 1, 5, _suTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=_suBg)
+	if ENABLE_PLAYBOOK_GUARD
+		color _pbStateBg=pb_guardLockout ? color.new(color.red, 15) : pb_postNews ? color.new(color.orange, 35) : pb_monday ? color.new(color.yellow, 55) : pb_tgif ? color.new(pb_tgifColor, 35) : dash_bg
+		string _pbStateTxt=pb_guardState + (pb_tgifMade ? " · 20–30%" : "")
+		string _pbSide=pb_thesis == "Bullish" ? "Bull ↑ " : "Bear ↓ "
+		string _pbThesisTxt=not pb_manualThesis ? "—" : pb_drawPrice <= 0 ? _pbSide + "Set draw" : _pbSide + str.tostring(pb_drawPrice, format.mintick) + (pb_drawTouched ? " · Touched" : " · Δ " + str.tostring(math.abs(pb_drawPrice - close), format.mintick))
+		color _pbThesisBg=not pb_manualThesis or pb_drawPrice <= 0 ? dash_bg : pb_drawTouched ? color.new(color.green, 40) : color.new(color.orange, 45)
+		table.cell(dashTbl, 0, 6, "Guard", text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		table.cell(dashTbl, 1, 6, _pbStateTxt, text_color=dash_txt, text_size=dash_size, bgcolor=_pbStateBg)
+		table.cell(dashTbl, 0, 7, "Thesis", text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		table.cell(dashTbl, 1, 7, _pbThesisTxt, text_color=dash_txt, text_size=dash_size, bgcolor=_pbThesisBg)
+	int _smtRow = 6 + (ENABLE_PLAYBOOK_GUARD ? 2 : 0)
 	if smt_useSym1
 		string _smtV1 = "—"
 		if ENABLE_SMT

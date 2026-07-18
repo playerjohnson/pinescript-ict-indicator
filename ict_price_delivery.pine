@@ -104,6 +104,7 @@ mitBOXColor=input.color(color.new(color.gray, 92), group='⑦ Box Style', inline
 MitBoxLabelColor=input.color(color.rgb(161, 163, 171, 88), title='Lbl', group='⑦ Box Style', inline='bx4')
 gradeQuartiles=input.bool(false, '25/75% Grades', group='⑦ Box Style', inline='bx5', tooltip='Adds 25% and 75% lines to CE-enabled GAP, FVG/LV, implied/inverse/VI-anchored FVG, NWOG/NDOG, projected HTF-candle FVG, and selected-HTF FVG zones. Uses two extra line IDs per graded zone.')
 gradeMaxZones=input.int(30, 'Max Graded', minval=1, maxval=100, group='⑦ Box Style', inline='bx5', tooltip='Combined 25/75% drawing budget across all supported gap families. C.E. lines do not count toward this limit.')
+fvgQuality=input.bool(false, 'FVG Residency', group='⑦ Box Style', inline='bx6', tooltip='Informational body-residency grade for normal chart and selected-HTF FVGs: 1 Conviction, 2-3 Normal, 4-5 Hesitation, above 5 Failed/Stale. Consecutive confirmed body overlaps only; resets outside the zone. Chart FVG residency requires Extend Unmit.; selected-HTF zones extend automatically.')
 
 // Per-bar touch flags (no `var`: reset each bar so the Mitigation alertconditions don't latch)
 bool buimpfvgtouch=false
@@ -128,6 +129,7 @@ type GradeLines
 	line ce = na
 	line q75 = na
 	bool pinned = false
+	int residency = 0
 
 var array<GradeLines> gradeQueue=array.new<GradeLines>()
 
@@ -190,7 +192,7 @@ f_gradeAttach(GradeLines _g, float _top, float _bottom) =>
 	_g
 
 f_gradeBuild(line _ce, float _top, float _bottom, bool _pinned) =>
-	GradeLines _g = GradeLines.new(na, _ce, na, _pinned)
+	GradeLines _g = GradeLines.new(na, _ce, na, _pinned, 0)
 	f_gradeAttach(_g, _top, _bottom)
 
 f_gradeNew(line _ce, float _top, float _bottom) =>
@@ -207,7 +209,18 @@ f_gradeEnsureOpen(GradeLines _g, float _top, float _bottom) =>
 
 f_gradePromote(GradeLines _g, float _top, float _bottom) =>
 	f_gradeDrop(_g)
+	_g.residency := 0
 	f_gradeAttach(_g, _top, _bottom)
+
+f_fvgQualityText(int _count) =>
+	_count == 1 ? '1 · Conviction' : _count <= 3 ? str.tostring(_count) + ' · Normal' : _count <= 5 ? str.tostring(_count) + ' · Hesitation' : str.tostring(_count) + ' · Failed/Stale'
+
+f_fvgQualityTick(GradeLines _g, box _bx, string _base) =>
+	float _bodyTop = math.max(open, close)
+	float _bodyBottom = math.min(open, close)
+	bool _overlap = _bodyTop > box.get_bottom(_bx) and _bodyBottom < box.get_top(_bx)
+	_g.residency := _overlap ? _g.residency + 1 : 0
+	box.set_text(_bx, _g.residency > 0 ? (_base == '' ? '' : _base + '\n') + f_fvgQualityText(_g.residency) : _base)
 
 
 f_gradeDelete(GradeLines _g) =>
@@ -339,12 +352,12 @@ if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
 		alert(_wh_json("VI+", math.max(open, close[1]), math.min(open, close[1])), alert.freq_once_per_bar_close)
 
 if isBeVItype3(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
-	box _bearboxVI = box.new(left = bar_index - 1, top = math.min(open, close[1]), right = bar_index + 1, bottom = math.max(open, close[1]), bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	box _bearboxVI = box.new(left = bar_index - 1, top = math.max(open, close[1]), right = bar_index + 1, bottom = math.min(open, close[1]), bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	if array.size(_bearishvi) >= viMaxBoxSet
 		box.delete(array.shift(_bearishvi))
 	array.push(_bearishvi, _bearboxVI)
 	if wh_enable and wh_formations and barstate.isconfirmed
-		alert(_wh_json("VI-", math.min(open, close[1]), math.max(open, close[1])), alert.freq_once_per_bar_close)
+		alert(_wh_json("VI-", math.max(open, close[1]), math.min(open, close[1])), alert.freq_once_per_bar_close)
 
 if extendallvis
 	_controlBox2(_bullishvi)
@@ -650,6 +663,8 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
 						box.set_right(_box, bar_index + 1)
 					else if close < _boxLow and Inversefvgmode
 						box beifvgbox = box.copy(_box)
+						if fvgQuality
+							box.set_text(beifvgbox, plotBoxLabel ? 'I.FVG-' : '')
 						array.push(bearInvFVG, beifvgbox)
 						array.push(beinvfvgce, _grade)
 						f_gradePromote(_grade, _boxHigh, _boxLow)
@@ -695,6 +710,8 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
 						if wh_enable and wh_mitigations
 							alert(_wh_json("FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
 						bufvgtouch
+			if fvgQuality and plotFVG and barstate.isconfirmed and extendfvgbox
+				f_fvgQualityTick(_grade, _box, plotBoxLabel ? 'FVG+' : '')
 
 if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) > 0
 	for i = array.size(_bearBoxesFVG) - 1 to 0 by 1
@@ -710,6 +727,8 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
 						box.set_right(_box, bar_index + 1)
 					else if close > _boxHigh and Inversefvgmode
 						box buifvgbox = box.copy(_box)
+						if fvgQuality
+							box.set_text(buifvgbox, plotBoxLabel ? 'I.FVG+' : '')
 						array.push(bullInvFVG, buifvgbox)
 						array.push(buinvfvgce, _grade)
 						f_gradePromote(_grade, _boxHigh, _boxLow)
@@ -755,6 +774,8 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
 						if wh_enable and wh_mitigations
 							alert(_wh_json("FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
 						befvgtouch
+			if fvgQuality and plotFVG and barstate.isconfirmed and extendfvgbox
+				f_fvgQualityTick(_grade, _box, plotBoxLabel ? 'FVG-' : '')
 
 if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'Engulf' and Inversefvgmode
 	for i = array.size(bullInvFVG) - 1 to 0 by 1
@@ -1069,11 +1090,16 @@ var OpenGap NDOGrth=OpenGap.new()
 NDOGrth.gaps := ndogrth_gaps
 NDOGrth.settings := NWOGSettings.new()
 
+var settlementrth_gaps=array.new<Gap>()
+var OpenGap SettlementRTH=OpenGap.new()
+SettlementRTH.gaps := settlementrth_gaps
+SettlementRTH.settings := NDOGrth.settings
+
 var NWOGHelper nwogHelper=NWOGHelper.new()
 
 NWOG_Group                  = "⑧ NWOG"
 NDOG_Group                  = "⑨ NDOG ETH"
-NDOGrth_Group               = "⑩ NDOG RTH"
+NDOGrth_Group               = "⑩ Settlement Gaps"
 
 NWOG.settings.show         := input.bool(true, "NWOG", group=NWOG_Group, inline="1")
 NWOG.settings.color_new    := input.color(color.new(color.purple,0), '', group=NWOG_Group, inline='1')
@@ -1121,7 +1147,7 @@ NDOG.settings.label_size    := input.string(size.small, "", [size.auto, size.tin
 
 NDOG.settings.max_count     := input.int(5, "Show Above/Below", 1, 10, group=NDOG_Group)
 
-NDOGrth.settings.show         := input.bool(true, "NDOG RTH", group=NDOGrth_Group, inline='1')
+NDOGrth.settings.show         := input.bool(true, 'Settlement → ETH', group=NDOGrth_Group, inline='1')
 NDOGrth.settings.color_new    := input.color(color.new(color.orange,0), '', group=NDOGrth_Group, inline='1')
 NDOGrth.settings.color        := input.color(color.new(color.red,0), '', group=NDOGrth_Group, inline='1')
 NDOGrth.settings.style        := input.string('⎯⎯⎯', '', options=['⎯⎯⎯', '----', '····'], group=NDOGrth_Group, inline='1')
@@ -1141,6 +1167,8 @@ NDOGrth.settings.label_size    := input.string(size.small, "", [size.auto, size.
 
 NDOGrth.settings.max_count    := input.int(5, "Show Above/Below", 1, 10, group=NDOGrth_Group)
 
+bool showSettlementRTH=input.bool(false, 'Settlement → RTH', group=NDOGrth_Group, inline='6', tooltip='Gap from the prior 16:14 New York settlement close to the next 09:30 RTH open. Shares the Settlement gap style and uses the same per-family Show Above/Below cap.')
+
 buffer=input.int(10, "Buffer - Number of candles to extend by", minval=0, group="⑪ Advanced (NWOG/NDOG)")+1
 
 dt = time - time[1]
@@ -1155,7 +1183,7 @@ float spacing = ta.sma(ta.sma(median.median(), length), length) *.5
 method render(Gap gap, NWOGSettings settings) =>
 	int e = time + (dt*buffer)
 	float middle = (gap.open+gap.close)/2
-	if not (str.contains(gap.name, "NDOG") and gap.is_sunday and NWOG.settings.show)
+	if not ((str.contains(gap.name, "NDOG") or str.contains(gap.name, 'Settlement → ETH')) and gap.is_sunday and NWOG.settings.show)
 		if na(gap.gbox)
 			gap.gbox := GapBox.new()
 			gap.gbox.top := line.new(gap.open_time, math.max(gap.open, gap.close), e, math.max(gap.open, gap.close), xloc=xloc.bar_time, color=gap.is_current ? settings.color_new : settings.color, width = settings.size, style=f_get_line_style(settings.style))
@@ -1318,28 +1346,30 @@ getCloseAtTime() =>
 	[closed, closedtime]
 
 getOpenAtTime() =>
-	float opened = na
-	int openedtime = 0
+	float ethOpened = na
+	int ethTime = 0
+	float rthOpened = na
+	int rthTime = 0
 	if timeframe.isseconds
 		if ta.change(time("1")) != 0
-			[isopened, openAt, openedAtTime] = request.security(syminfo.tickerid, "1", [(hour(time[1], "America/New_York") == 18 and minute(time[1], "America/New_York") == 0), open[1], time[1]], lookahead=barmerge.lookahead_on)
-			if isopened
-				opened := openAt
-				openedtime := openedAtTime
+			[isEthOpen, isRthOpen, openAt, openedAtTime] = request.security(syminfo.tickerid, "1", [(hour(time[1], "America/New_York") == 18 and minute(time[1], "America/New_York") == 0), (hour(time[1], "America/New_York") == 9 and minute(time[1], "America/New_York") == 30), open[1], time[1]], lookahead=barmerge.lookahead_on)
+			if isEthOpen
+				ethOpened := openAt
+				ethTime := openedAtTime
+			if isRthOpen
+				rthOpened := openAt
+				rthTime := openedAtTime
 	else
-		[isopened, openAt, openedAtTime] = request.security_lower_tf(syminfo.tickerid, "1", [(hour(time[1], "America/New_York") == 18 and minute(time[1], "America/New_York") == 0), open[1], time[1]])
-		int index = na
-		if isopened.size() > 0
-			for i = 0 to isopened.size() - 1
-				if isopened.get(i)
-					index := i
-					break
-			if not na(index)
-				if openAt.size() > index
-					opened := openAt.get(index)
-				if openedAtTime.size() > index
-					openedtime := openedAtTime.get(index)
-	[opened, openedtime]
+		[isEthOpen, isRthOpen, openAt, openedAtTime] = request.security_lower_tf(syminfo.tickerid, "1", [(hour(time[1], "America/New_York") == 18 and minute(time[1], "America/New_York") == 0), (hour(time[1], "America/New_York") == 9 and minute(time[1], "America/New_York") == 30), open[1], time[1]])
+		if isEthOpen.size() > 0
+			for i = 0 to isEthOpen.size() - 1
+				if isEthOpen.get(i)
+					ethOpened := openAt.get(i)
+					ethTime := openedAtTime.get(i)
+				if isRthOpen.get(i)
+					rthOpened := openAt.get(i)
+					rthTime := openedAtTime.get(i)
+	[ethOpened, ethTime, rthOpened, rthTime]
 
 [_nwogOpen, _nwogPrevClose, _nwogTime] = request.security(syminfo.tickerid, "W", [open, close[1], time], lookahead = barmerge.lookahead_on)
 [_ndogOpen, _ndogPrevClose, _ndogTime] = request.security(syminfo.tickerid, "D", [open, close[1], time], lookahead = barmerge.lookahead_on)
@@ -1357,29 +1387,46 @@ if ENABLE_NWOG_NDOG
 			if na(_prevNdogOpen) or _ndogOpen != _prevNdogOpen
 				NDOG.Add("NDOG ETH", _ndogOpen, _ndogPrevClose, _ndogTime, _ndogTime, _ndogTime)
 				_prevNdogOpen := _ndogOpen
-		if NDOGrth.settings.show and timeframe.isintraday
-			var float nwog_closed=na
-			var int nwog_closedtime=0
-			var float nwog_opened=na
-			var int nwog_openedtime=0
-			if na(nwog_closed)
-				[closedAt, closedAttime] = getCloseAtTime()
-				if not na(closedAt)
-					nwog_closed := closedAt
-					nwog_closedtime := closedAttime
-			[openedAt, openedAttime] = getOpenAtTime()
-			nwog_opened := openedAt
-			nwog_openedtime := openedAttime
-			if not na(nwog_opened)
-				NDOGrth.Add("NDOG RTH", nwog_closed, nwog_opened, nwog_closedtime, nwog_openedtime, nwog_closedtime)
-				nwog_closed := na
-				nwog_opened := na
+	if (NDOGrth.settings.show or showSettlementRTH) and timeframe.isintraday
+		var float settlementClose=na
+		var int settlementTime=0
+		var int lastEthOpenTime=0
+		var int lastRthOpenTime=0
+		var int lastEthSettlementTime=0
+		var int lastRthSettlementTime=0
+		[closedAt, closedAttime] = getCloseAtTime()
+		[ethOpened, ethOpenedtime, rthOpened, rthOpenedtime] = getOpenAtTime()
+		bool newEthOpen = not na(ethOpened) and ethOpenedtime != lastEthOpenTime
+		bool newRthOpen = not na(rthOpened) and rthOpenedtime != lastRthOpenTime
+		bool ethBeforeClose = newEthOpen and not na(closedAt) and ethOpenedtime < closedAttime
+		bool rthBeforeClose = newRthOpen and not na(closedAt) and rthOpenedtime < closedAttime
+		if ethBeforeClose and NDOGrth.settings.show and not na(settlementClose) and settlementTime != lastEthSettlementTime
+			NDOGrth.Add('Settlement → ETH', settlementClose, ethOpened, settlementTime, ethOpenedtime, settlementTime)
+			lastEthSettlementTime := settlementTime
+		if rthBeforeClose and showSettlementRTH and not na(settlementClose) and settlementTime != lastRthSettlementTime
+			SettlementRTH.Add('Settlement → RTH', settlementClose, rthOpened, settlementTime, rthOpenedtime, settlementTime)
+			lastRthSettlementTime := settlementTime
+		if not na(closedAt) and closedAttime != settlementTime
+			settlementClose := closedAt
+			settlementTime := closedAttime
+		if newEthOpen and not ethBeforeClose and NDOGrth.settings.show and not na(settlementClose) and settlementTime != lastEthSettlementTime
+			NDOGrth.Add('Settlement → ETH', settlementClose, ethOpened, settlementTime, ethOpenedtime, settlementTime)
+			lastEthSettlementTime := settlementTime
+		if newRthOpen and not rthBeforeClose and showSettlementRTH and not na(settlementClose) and settlementTime != lastRthSettlementTime
+			SettlementRTH.Add('Settlement → RTH', settlementClose, rthOpened, settlementTime, rthOpenedtime, settlementTime)
+			lastRthSettlementTime := settlementTime
+		if newEthOpen
+			lastEthOpenTime := ethOpenedtime
+		if newRthOpen
+			lastRthOpenTime := rthOpenedtime
 	if NWOG.settings.show
 		NWOG.Redraw()
 	if NDOG.settings.show
 		NDOG.Redraw()
 	if NDOGrth.settings.show and timeframe.isintraday
 		NDOGrth.Redraw()
+	if showSettlementRTH and timeframe.isintraday
+		SettlementRTH.Redraw()
 
 type Candle
 	float o
@@ -2187,8 +2234,7 @@ if ENABLE_MTF_FVG and timeframe.in_seconds(mtf_fvgTf) > timeframe.in_seconds()
 						color _invClr = _z.bull ? buinvfvgcolor : beinvfvgcolor
 						box.set_bgcolor(_z.bx, _invClr)
 						box.set_border_color(_z.bx, color.new(_invClr, BorderTransparency))
-						if plotBoxLabel
-							box.set_text(_z.bx, _htf_HTFName(mtf_fvgTf) + " Inv.FVG" + (_z.bull ? "+" : "-"))
+						box.set_text(_z.bx, plotBoxLabel ? _htf_HTFName(mtf_fvgTf) + " Inv.FVG" + (_z.bull ? "+" : "-") : '')
 						f_gradePromote(_z.grade, _top, _bottom)
 						f_gradeColor(_z.grade, color.new(_invClr, cetransparency))
 				else
@@ -2205,3 +2251,5 @@ if ENABLE_MTF_FVG and timeframe.in_seconds(mtf_fvgTf) > timeframe.in_seconds()
 			if HighlightBox and _entered
 				color _touchClr = _z.kind == 1 ? (_z.bull ? ifvgBullColor : ifvgBearColor) : _z.kind == 2 ? (_z.bull ? buinvfvgcolor : beinvfvgcolor) : (_z.bull ? mtf_fvgBullColor : mtf_fvgBearColor)
 				_applyHighlight(_z.bx, _touchClr)
+			if fvgQuality and barstate.isconfirmed and _z.kind == 0
+				f_fvgQualityTick(_z.grade, _z.bx, plotBoxLabel ? _htf_HTFName(mtf_fvgTf) + ' FVG' + (_z.bull ? '+' : '-') : '')

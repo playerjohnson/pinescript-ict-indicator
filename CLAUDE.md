@@ -6,8 +6,8 @@ This file provides development guidance for the Pine Script indicators in this r
 
 The product is a two-overlay Pine Script v6 suite for TradingView:
 
-- `ict_price_delivery.pine` - imbalances, opening gaps, HTF candles, selected-HTF FVGs, and gap grading.
-- `ict_liquidity_context.pine` - sessions, liquidity, sweeps, structure, SMT, PDA, Setup Score, and Dashboard.
+- `ict_price_delivery.pine` - imbalances, opening/settlement gaps, FVG residency, HTF candles, selected-HTF FVGs, and gap grading.
+- `ict_liquidity_context.pine` - sessions, liquidity, sweeps, structure, SMT, Weekly Power 3, Economic Calendar, Playbook Guard, PDA, Setup Score, and Dashboard.
 
 `merged_indicator.pine` is a legacy comparison source. Its compiled form exceeded TradingView's token ceiling and it is no longer the shipping installation target. Do not add new product functionality only to the monolith.
 
@@ -38,7 +38,7 @@ Keep these together in `ict_price_delivery.pine`:
 
 - Volume Imbalances, GAPs, normal FVGs, Liquidity Voids, Implied FVGs, Inverse FVGs, and VI Anchor.
 - `GradeLines` and the full 25/50/75 lifecycle.
-- NWOG, NDOG ETH, NDOG RTH, their settings/types, and their request calls.
+- NWOG, NDOG ETH, Settlement → ETH, Settlement → RTH, their settings/types, and their request calls.
 - HTF candle rendering and traces.
 - Fit-live HTF compaction must retain at least four candles when projected FVG detection is enabled (two for raw VI), preserving one completed projected FVG across the next rollover even if that slightly exceeds the requested projection span.
 - Selected-HTF FVG overlay.
@@ -53,6 +53,7 @@ Keep these together in `ict_liquidity_context.pine`:
 - Sweep engine, EQH/EQL, Wick Reversal, and BOS/CHoCH.
 - PDH/PDL, PWH/PWL, and PMH/PML history.
 - SMT, PDA Scanner, Setup Score, heartbeat, and Dashboard.
+- Weekly Power 3, Economic Calendar, and the calendar-backed Playbook Guard/manual weekly thesis.
 - Sweep/structure/SMT/context webhooks and alertconditions.
 
 Do not move only part of the Hourly Open engine to Delivery. Dashboard gap-bias fallback reads `ho_midPrices`. Setup and Dashboard otherwise have no dependency on Delivery's FVG/NWOG/HTF arrays.
@@ -65,7 +66,7 @@ Only small stateless helpers such as `_wh_json` and `f_get_line_style` are inten
 
 ## Quartile grading invariants
 
-- `GradeLines` owns `q25`, `ce`, and `q75` line references.
+- `GradeLines` owns `q25`, `ce`, and `q75` line references plus the normal-FVG residency counter; keeping that state on the existing owner avoids a third parallel array.
 - The existing CE toggle controls whether the zone has a 50% line; 25%/75% grades require that CE line.
 - `gradeQuartiles` enables only the optional lines. `gradeMaxZones` caps active quartile owners across all Delivery gap families.
 - `f_gradeNew` must enforce both the FIFO cap and the live `line.all` safety guard; `f_gradePinnedNew` reserves that same capped budget for selected-HTF zones ahead of generic lower-timeframe churn.
@@ -73,13 +74,13 @@ Only small stateless helpers such as `_wh_json` and `f_get_line_style` are inten
 - `f_gradeSync` must follow both edges of moving projected boxes plus any right-edge extension or Rebalance geometry change.
 - Normal-to-inverse conversion transfers the same `GradeLines` object, refreshes its FIFO age, and must not leave duplicate CE/quartile lines.
 - Chart Implied FVG boxes and their `_buifvgce`/`_beifvgce` arrays are parallel and must be inserted, pruned, and indexed together.
-- NWOG/NDOG store grading in `GapBox.grade`; `reset()` must delete it before the box is discarded.
+- NWOG/NDOG and settlement gaps store grading in `GapBox.grade`; `reset()` must delete it before the box is discarded.
 - NWOG/NDOG rendering updates geometry only; it must not continuously reacquire evicted quartiles and starve later FVG families.
 - Projected HTF-candle FVGs store grading in `Imbalance.grade`; raw projected volume imbalances remain box-only.
 - Selected-HTF zones store pinned grading in `MtfFvgZone.grade`; deletion and inverse color conversion must update the whole grade.
 - VI Anchor changes the owning FVG geometry, so it automatically changes its 25/50/75 prices; it is not a separate drawing family.
 
-Supported graded families are GAP, FVG/LV, implied/inverse/VI-anchored FVG, NWOG, NDOG ETH/RTH, projected HTF-candle FVG, and selected-HTF normal/implied/inverse FVG.
+Supported graded families are GAP, FVG/LV, implied/inverse/VI-anchored FVG, NWOG, NDOG ETH, Settlement → ETH/RTH, projected HTF-candle FVG, and selected-HTF normal/implied/inverse FVG.
 
 ## Context invariants
 
@@ -89,6 +90,8 @@ Supported graded families are GAP, FVG/LV, implied/inverse/VI-anchored FVG, NWOG
 - Resolve pending BOS/CHoCH breaks before ingesting fresh pivots.
 - Daily dealing-range tracking must run when any of Liquidity, PDA Scanner, Setup, or Dashboard needs it.
 - Dashboard remains read-only and does not draw or signal trades.
+- Playbook Guard safety reads a raw calendar copy before display currency/impact/timezone filtering; missing feed data must remain fail-closed as `CALENDAR UNAVAILABLE`.
+- The manual weekly thesis is informational. Its TGIF projection owns at most one box, resets weekly, and updates rather than recreates that box through Friday.
 
 ## Drawing and array patterns
 

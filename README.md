@@ -6,8 +6,8 @@ The indicator is delivered as two Pine Script v6 overlays. The original combined
 
 | File | Purpose |
 |---|---|
-| `ict_price_delivery.pine` | Chart and selected-HTF FVGs, implied/inverse FVGs, VI anchoring, liquidity voids, GAPs, NWOG/NDOG, HTF candles, and optional 25/50/75 gap grading |
-| `ict_liquidity_context.pine` | Hourly/Midnight and weekly opens, Weekly Power 3, killzones, session and higher-period liquidity, sweeps, EQH/EQL, Wick Reversal, BOS/CHoCH, SMT, Economic Calendar, PDA Scanner, Setup Score, and Dashboard |
+| `ict_price_delivery.pine` | Chart and selected-HTF FVGs, optional FVG residency, implied/inverse FVGs, VI anchoring, liquidity voids, GAPs, NWOG/NDOG and settlement gaps, HTF candles, and optional 25/50/75 gap grading |
+| `ict_liquidity_context.pine` | Hourly/Midnight and weekly opens, Weekly Power 3, Playbook Guard, killzones, session and higher-period liquidity, sweeps, EQH/EQL, Wick Reversal, BOS/CHoCH, SMT, Economic Calendar, PDA Scanner, Setup Score, and Dashboard |
 
 `merged_indicator.pine` remains a legacy comparison/reference file. It is not the installation target because its compiled form is over TradingView's token limit.
 
@@ -24,7 +24,7 @@ Quartiles are supported for:
 - Normal FVG and Liquidity Void
 - Implied and Inverse FVG
 - VI-anchored FVG geometry
-- NWOG, NDOG ETH, and NDOG RTH
+- NWOG, NDOG ETH, Settlement → ETH, and Settlement → RTH
 - Projected HTF-candle FVG zones, including the 15-minute candle set
 - Selected-HTF normal, implied, and inverse FVG zones
 
@@ -50,6 +50,14 @@ Both additions live in the Context indicator and default off under `⓪ Section 
 - `Enable Economic Calendar` adds impact/currency filters, current-day or current-week tables, event labels, and event lines. Calendar drawings are kept in module-owned arrays and pruned independently, so they cannot delete liquidity, structure, open, or Weekly Power 3 drawings.
 
 The calendar is supported from 30-second through daily charts and depends on the pinned `toodegrees` Forex Factory utility/decoder libraries plus their nine Pine Seed feeds. On index symbols where automatic currency detection is empty, disable `Automatic currencies` and select `USD`. If the Calendar and Dashboard are enabled together, choose distinct table positions. The calendar has its own line/label cap, but all modules still share TradingView's 500-object limits.
+
+## Playbook Guard and delivery quality
+
+The Context indicator's `Enable Playbook Guard` toggle defaults off. When enabled it reuses an unfiltered copy of the existing calendar feed for named USD CPI, PPI, FOMC, NFP, and Fed-speaker lockouts; calendar display filters cannot disable the safety state. The Dashboard adds Guard and manual weekly-thesis rows, marks Setup as blocked during lockouts or missing calendar data, closes the Monday probe at 10:10 New York time, and can maintain one live Friday 20–30% TGIF retracement box after the declared weekly draw is touched. Enabling the Guard without calendar visuals still activates the same nine Pine Seed requests because the risk state depends on them.
+
+The Delivery indicator keeps the former 16:14-to-18:00 gap as `Settlement → ETH` and adds a separate, default-off `Settlement → RTH` gap from the prior 16:14 New York settlement close to the next 09:30 open. Both use the existing OpenGap rendering, cap, CE, and optional 25/75% grading lifecycle.
+
+`FVG Residency` is also default off. For normal chart FVGs and selected-HTF normal FVGs it annotates consecutive confirmed candle-body overlaps as 1 Conviction, 2–3 Normal, 4–5 Hesitation, and above 5 Failed/Stale. The counter resets when the body leaves the zone and creates no additional drawing objects or alerts.
 
 ## Alerts
 
