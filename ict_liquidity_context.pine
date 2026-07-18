@@ -1,0 +1,1948 @@
+// ICT SESSIONS + LIQUIDITY CONTEXT
+// Context/liquidity companion extracted from the merged ICT indicator within TradingView token limits.
+// Contains Hourly/Midnight Opens, sessions, liquidity, sweeps, structure, SMT, PDA, Setup Score, and Dashboard.
+// "Hourly Open & Separator" original author unknown; remaining context modules evolved in the merged indicator.
+// Licence: Mozilla Public License 2.0
+// Economic calendar integration uses MPL-2.0 libraries by © toodegrees.
+// Weekly Power 3 concept reviewed from work by © Infinity_Trading_; implementation here is original and bounded.
+
+//@version=6
+import toodegrees/forex_factory_utility/17 as ffUtil
+import toodegrees/forex_factory_decoding/44 as ffDec
+
+indicator(
+	 "ICT Sessions + Liquidity Context",
+	 shorttitle = "ICT Liquidity Context",
+	 overlay = true,
+	 max_boxes_count = 500,
+	 max_lines_count = 500,
+	 max_labels_count = 500,
+	 max_bars_back = 5000,
+	 behind_chart = true,
+	 dynamic_requests = true)
+
+var bool ENABLE_HOURLY_OPEN=input.bool(true, "Enable Hourly Open & Separator", group="⓪ Section Toggles")
+var bool ENABLE_KILLZONES=input.bool(true, "Enable Killzones", group="⓪ Section Toggles")
+var bool ENABLE_SESSION_HL=input.bool(true, "Enable Session Highs/Lows", group="⓪ Section Toggles")
+var bool ENABLE_LIQUIDITY=input.bool(true, "Enable PDH/PDL/PWH/PWL", group="⓪ Section Toggles")
+var bool ENABLE_PDA_SCANNER=input.bool(false, "Enable PD Array Scanner", group="⓪ Section Toggles")
+var bool ENABLE_SWEEPS=input.bool(true, "Enable Liquidity Sweeps", group="⓪ Section Toggles")
+var bool ENABLE_EQHL=input.bool(false, "Enable Equal Highs/Lows", group="⓪ Section Toggles")
+var bool ENABLE_WICK_REV=input.bool(false, "Enable Wick Reversal", group="⓪ Section Toggles", tooltip="Marks a reversal when a bar closes back inside a recent swing's wick (not a new extreme), then price breaks the swing's opposite edge. Swing sensitivity uses the Equal Highs/Lows pivot length (㉓); confirm window uses the Liquidity Sweeps confirm-bars setting (㉒) — both apply even if those sections are disabled.")
+var bool ENABLE_STRUCTURE=input.bool(false, "Enable Market Structure (BOS/CHoCH)", group="⓪ Section Toggles")
+var bool ENABLE_DASHBOARD=input.bool(false, "Enable Dashboard", group="⓪ Section Toggles")
+var bool ENABLE_SMT=input.bool(false, "Enable SMT Divergences", group="⓪ Section Toggles")
+var bool ENABLE_SETUP=input.bool(false, "Enable Setup Score", group="⓪ Section Toggles", tooltip="Adds a read-only 'Setup' row to the ㉖ Dashboard scoring the confluence stack per side (killzone + bias + fresh sweep + fresh SMT + structure, 1 pt each). No alerts, markers, or signals — the trade decision stays yours. Needs Sweeps ON for the sweep point; Structure/SMT add their points when enabled.")
+
+var bool wh_enable=input.bool(false, "Enable Webhook Alerts", group="㉑ Webhook Alerts", tooltip="JSON alerts via alert(). In TV alert dialog, select 'Any alert() function call'.")
+var bool wh_sweeps=input.bool(true, "Sweep Alerts", group="㉑ Webhook Alerts", tooltip="Liquidity sweep / Turtle Soup events")
+var bool wh_structure=input.bool(true, "Structure Alerts", group="㉑ Webhook Alerts", tooltip="BOS / CHoCH break events.")
+var bool wh_smt=input.bool(true, "SMT Alerts", group="㉑ Webhook Alerts", tooltip="SMT divergence events.")
+var bool wh_heartbeat=input.bool(false, "Context Heartbeat", group="㉑ Webhook Alerts", tooltip="One webhook per bar close: close price + ㉘ bias/scores + killzone flag. Feeds the tv_events outcome logger (supabase/README.md); enable Setup Score for meaningful bias/scores.")
+
+var bool ENABLE_WEEKLY_POWER3=input.bool(false, 'Enable Weekly Power 3', group='⓪ Section Toggles', tooltip='Current and historical weekly opens, live weekly range, weekday labels, and the Tuesday London to Wednesday New York best-odds window.')
+var bool ENABLE_ECON_CAL=input.bool(false, 'Enable Economic Calendar', group='⓪ Section Toggles', tooltip='Forex Factory calendar supplied by pinned toodegrees Pine libraries and Pine Seed feeds. Supported on 30-second through daily charts.')
+
+_wh_json(string _event, float _high, float _low) =>
+	'{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '"}'
+
+var color ho_lineColor=input.color(color.black , "Hourly Line" , group="① Hourly Open", inline="ho1")
+var string ho_styleInput=input.string("Solid" , "", options=["Solid","Dotted","Dashed","Arrow Left","Arrow Right","Arrow Both"], group="① Hourly Open", inline="ho1")
+var int ho_width=input.int(1 , "", 1, 4, group="① Hourly Open", inline="ho1")
+var bool ho_extendMidnight=input.bool(true , "Extend Midnight" , group="① Hourly Open", inline="ho2")
+var bool ho_showMidnightLbl=input.bool(true , "Show Label", group="① Hourly Open", inline="ho2")
+var color ho_midColor=input.color(color.purple , "Midnight Line", group="① Hourly Open", inline="ho3")
+var string ho_midStyleInput=input.string("Solid" , "", options=["Solid","Dotted","Dashed","Arrow Left","Arrow Right","Arrow Both"], group="① Hourly Open", inline="ho3")
+var int ho_midWidth=input.int(1 , "", 1, 4, group="① Hourly Open", inline="ho3")
+var int ho_midDays=input.int(5, "Midnight Days", 1, 20, group="① Hourly Open", inline="ho3b", tooltip="Midnight opens to show (1-20).")
+var color ho_midLblColor=input.color(color.purple, "Label", group="① Hourly Open", inline="ho3b")
+var string ho_midLblSize=input.string("Small", "", options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="① Hourly Open", inline="ho3b")
+var int ho_maxLines=input.int(50, "Max Lines", 1, 100, group="① Hourly Open")
+
+var bool ho_highlightFirst10=input.bool(false , "First 10 Min", group="① Hourly Open", inline="ho4")
+var color ho_firstClr=input.color(color.red , "", group="① Hourly Open", inline="ho4")
+var bool ho_highlightLast10=input.bool(false , "Last 10 Min" , group="① Hourly Open", inline="ho5")
+var color ho_lastClr=input.color(color.red , "" , group="① Hourly Open", inline="ho5")
+var int ho_highlightWidth=input.int(2 , "", 1, 4, group="① Hourly Open", inline="ho5")
+
+var color hs_lineColor=input.color(color.new(color.red,0),"Separator Line", group="② Hourly Separator", inline="hs1")
+var string hs_lineStyleOpt=input.string("Dotted","", options=["Solid","Dashed","Dotted"], group="② Hourly Separator", inline="hs1")
+var string hs_lineWidthOpt=input.string("1","", options=["1","2","3"], group="② Hourly Separator", inline="hs1")
+var int hs_maxLines=input.int(50,"Max Lines", 1,100, group="② Hourly Separator")
+
+line_style(_opt) =>
+	switch _opt
+		"Solid"       => line.style_solid
+		"Dotted"      => line.style_dotted
+		"Dashed"      => line.style_dashed
+		"Arrow Left"  => line.style_arrow_left
+		"Arrow Right" => line.style_arrow_right
+		"Arrow Both"  => line.style_arrow_both
+		=> line.style_solid
+
+f_get_line_style(style) =>
+	out = switch style
+		'⎯⎯⎯'  => line.style_solid
+		'----' => line.style_dashed
+		'····' => line.style_dotted
+		=> line.style_solid
+
+var line[] ho_lines=array.new_line()
+var line[] hs_lines=array.new_line()
+
+var float[] ho_midPrices=array.new_float()
+var int[] ho_midBars=array.new_int()
+var int[] ho_midTimes=array.new_int()
+var line[] ho_midLines=array.new_line()
+var label[] ho_midLabels=array.new_label()
+var bool ho_wasMidnight=false
+
+_ho_getSize(_s) =>
+	_s == "Auto" ? size.auto : _s == "Small" ? size.small : _s == "Normal" ? size.normal : _s == "Large" ? size.large : _s == "Huge" ? size.huge : size.tiny
+
+int _midnHour = syminfo.timezone == "America/Chicago" ? 23 : 0
+
+if timeframe.isintraday and ENABLE_HOURLY_OPEN
+	bool _isMidnight = hour == _midnHour and minute == 0
+	if _isMidnight and not ho_wasMidnight
+		array.unshift(ho_midPrices, open)
+		array.unshift(ho_midBars, bar_index)
+		array.unshift(ho_midTimes, time)
+		array.unshift(ho_midLines, line(na))
+		array.unshift(ho_midLabels, label(na))
+		while array.size(ho_midPrices) > ho_midDays
+			array.pop(ho_midPrices)
+			array.pop(ho_midBars)
+			array.pop(ho_midTimes)
+			line.delete(array.pop(ho_midLines))
+			label.delete(array.pop(ho_midLabels))
+	ho_wasMidnight := _isMidnight
+
+	if ho_extendMidnight and array.size(ho_midPrices) > 0
+		string _midSz = _ho_getSize(ho_midLblSize)
+		for i = 0 to array.size(ho_midPrices) - 1
+			float _price = array.get(ho_midPrices, i)
+			int _startBar = array.get(ho_midBars, i)
+			int _startTime = array.get(ho_midTimes, i)
+			int _x2 = bar_index + 20
+			string _dayStr = str.format_time(_startTime, "EEE MM/dd", "America/New_York")
+			string _txt = "Midnight Open " + str.tostring(_price, format.mintick) + " (" + _dayStr + ")"
+			line _ln = array.get(ho_midLines, i)
+			if na(_ln)
+				_ln := line.new(_startBar, _price, _x2, _price, color = ho_midColor, style = line_style(ho_midStyleInput), width = ho_midWidth)
+				array.set(ho_midLines, i, _ln)
+			line.set_x2(_ln, _x2)
+			line.set_color(_ln, ho_midColor)
+			line.set_width(_ln, ho_midWidth)
+			line.set_style(_ln, line_style(ho_midStyleInput))
+			if ho_showMidnightLbl
+				label _lbl = array.get(ho_midLabels, i)
+				if na(_lbl)
+					_lbl := label.new(_x2, _price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = ho_midLblColor, size = _midSz)
+					array.set(ho_midLabels, i, _lbl)
+				label.set_x(_lbl, _x2)
+				label.set_text(_lbl, _txt)
+				label.set_textcolor(_lbl, ho_midLblColor)
+				label.set_size(_lbl, _midSz)
+
+	if minute == 0 and second == 0 and hour != _midnHour
+		int segStart = time
+		int segFirstEnd = time + 10*60*1000
+		int segLastStart = time + 50*60*1000
+		int segEnd = time + 60*60*1000
+
+		line _main = line.new(segStart, open, segEnd, open,
+								xloc.bar_time, color=ho_lineColor,
+								style=line_style(ho_styleInput),
+								width=ho_width)
+		array.push(ho_lines, _main)
+
+		if ho_highlightFirst10
+			array.push(ho_lines,
+					   line.new(segStart, open, segFirstEnd, open, xloc.bar_time,
+								color=ho_firstClr, style=line_style(ho_styleInput), width=ho_highlightWidth))
+		if ho_highlightLast10
+			array.push(ho_lines,
+					   line.new(segLastStart, open, segEnd, open, xloc.bar_time,
+								color=ho_lastClr , style=line_style(ho_styleInput), width=ho_highlightWidth))
+
+while array.size(ho_lines) > ho_maxLines
+	line.delete(array.shift(ho_lines))
+
+bool hs_newHour = minute == 0 and minute[1] > 0
+if hs_newHour and ENABLE_HOURLY_OPEN
+	line _sep = line.new(bar_index, low - ta.tr, bar_index, high + ta.tr,
+						 xloc.bar_index, extend.both,
+						 hs_lineColor,
+						 hs_lineStyleOpt=="Solid"?line.style_solid:hs_lineStyleOpt=="Dashed"?line.style_dashed:line.style_dotted,
+						 hs_lineWidthOpt=="3"?3:hs_lineWidthOpt=="2"?2:1)
+	array.push(hs_lines, _sep)
+
+while array.size(hs_lines) > hs_maxLines
+	line.delete(array.shift(hs_lines))
+
+var bool kz_showAsian=input.bool(true, "Asian", group="⑱ Killzones", inline="kz1")
+var color kz_asianColor=input.color(color.new(#2962ff, 90), "", group="⑱ Killzones", inline="kz1")
+var int kz_asianStart=input.int(20, "Start", 0, 23, group="⑱ Killzones", inline="kz1", tooltip="NY 24h")
+var int kz_asianEnd=input.int(0, "End", 0, 23, group="⑱ Killzones", inline="kz1")
+var bool kz_showLondon=input.bool(true, "London", group="⑱ Killzones", inline="kz2")
+var color kz_londonColor=input.color(color.new(#00bcd4, 90), "", group="⑱ Killzones", inline="kz2")
+var int kz_londonStart=input.int(2, "Start", 0, 23, group="⑱ Killzones", inline="kz2")
+var int kz_londonEnd=input.int(5, "End", 0, 23, group="⑱ Killzones", inline="kz2")
+var bool kz_showNYAM=input.bool(true, "New York AM", group="⑱ Killzones", inline="kz3")
+var color kz_nyamColor=input.color(color.new(#ff9800, 90), "", group="⑱ Killzones", inline="kz3")
+var int kz_nyamStart=input.int(9, "Start", 0, 23, group="⑱ Killzones", inline="kz3")
+var int kz_nyamStartM=input.int(30, ":", 0, 59, group="⑱ Killzones", inline="kz3")
+var int kz_nyamEnd=input.int(11, "End", 0, 23, group="⑱ Killzones", inline="kz3")
+var int kz_nyamEndM=input.int(30, ":", 0, 59, group="⑱ Killzones", inline="kz3")
+var bool kz_showNYPM=input.bool(true, "New York PM", group="⑱ Killzones", inline="kz4")
+var color kz_nypmColor=input.color(color.new(#e91e63, 90), "", group="⑱ Killzones", inline="kz4")
+var int kz_nypmStart=input.int(13, "Start", 0, 23, group="⑱ Killzones", inline="kz4")
+var int kz_nypmStartM=input.int(30, ":", 0, 59, group="⑱ Killzones", inline="kz4")
+var int kz_nypmEnd=input.int(16, "End", 0, 23, group="⑱ Killzones", inline="kz4")
+var bool kz_showNYL=input.bool(true, "New York Lunch", group="⑱ Killzones", inline="kzL")
+var color kz_nylColor=input.color(color.new(color.gray, 90), "", group="⑱ Killzones", inline="kzL")
+var int kz_nylStart=input.int(11, "Start", 0, 23, group="⑱ Killzones", inline="kzL")
+var int kz_nylStartM=input.int(30, ":", 0, 59, group="⑱ Killzones", inline="kzL")
+var int kz_nylEnd=input.int(13, "End", 0, 23, group="⑱ Killzones", inline="kzL")
+var int kz_nylEndM=input.int(30, ":", 0, 59, group="⑱ Killzones", inline="kzL")
+var bool kz_showSBAM=input.bool(false, "Silver Bullet AM", group="⑱ Killzones", inline="kz5")
+var color kz_sbamColor=input.color(color.new(#c0ca33, 88), "", group="⑱ Killzones", inline="kz5")
+var int kz_sbamStart=input.int(10, "Start", 0, 23, group="⑱ Killzones", inline="kz5")
+var int kz_sbamEnd=input.int(11, "End", 0, 23, group="⑱ Killzones", inline="kz5")
+var bool kz_showSBPM=input.bool(false, "Silver Bullet PM", group="⑱ Killzones", inline="kz6")
+var color kz_sbpmColor=input.color(color.new(#c0ca33, 88), "", group="⑱ Killzones", inline="kz6")
+var int kz_sbpmStart=input.int(14, "Start", 0, 23, group="⑱ Killzones", inline="kz6")
+var int kz_sbpmEnd=input.int(15, "End", 0, 23, group="⑱ Killzones", inline="kz6")
+
+var bool sh_showAsian=input.bool(true, "Asia H/L", group="⑲ Session Highs/Lows", inline="sh1")
+var color sh_asianHColor=input.color(color.new(#ff9800, 20), "", group="⑲ Session Highs/Lows", inline="sh1")
+var color sh_asianLColor=input.color(color.new(#ff9800, 20), "", group="⑲ Session Highs/Lows", inline="sh1")
+var string sh_asianStyle=input.string("⎯⎯⎯", "", options=['⎯⎯⎯', '----', '····'], group="⑲ Session Highs/Lows", inline="sh1")
+var bool sh_showLondon=input.bool(true, "London H/L", group="⑲ Session Highs/Lows", inline="sh2")
+var color sh_londonHColor=input.color(color.new(#00bcd4, 20), "", group="⑲ Session Highs/Lows", inline="sh2")
+var color sh_londonLColor=input.color(color.new(#00bcd4, 20), "", group="⑲ Session Highs/Lows", inline="sh2")
+var string sh_londonStyle=input.string("⎯⎯⎯", "", options=['⎯⎯⎯', '----', '····'], group="⑲ Session Highs/Lows", inline="sh2")
+var bool sh_showNYAM=input.bool(true, "NY AM H/L", group="⑲ Session Highs/Lows", inline="sh3")
+var color sh_nyamHColor=input.color(color.new(#ef5350, 20), "", group="⑲ Session Highs/Lows", inline="sh3")
+var color sh_nyamLColor=input.color(color.new(#ef5350, 20), "", group="⑲ Session Highs/Lows", inline="sh3")
+var string sh_nyamStyle=input.string("⎯⎯⎯", "", options=['⎯⎯⎯', '----', '····'], group="⑲ Session Highs/Lows", inline="sh3")
+var bool sh_showNYPre=input.bool(true, "NY Pre-AM H/L", group="⑲ Session Highs/Lows", inline="sh3a")
+var color sh_nypreHColor=input.color(color.new(#ffeb3b, 20), "", group="⑲ Session Highs/Lows", inline="sh3a")
+var color sh_nypreLColor=input.color(color.new(#ffeb3b, 20), "", group="⑲ Session Highs/Lows", inline="sh3a")
+var string sh_nypreStyle=input.string("⎯⎯⎯", "", options=['⎯⎯⎯', '----', '····'], group="⑲ Session Highs/Lows", inline="sh3a")
+var bool sh_showNYLunch=input.bool(true, "NY Lunch H/L", group="⑲ Session Highs/Lows", inline="sh3b")
+var color sh_nylHColor=input.color(color.new(#ab47bc, 20), "", group="⑲ Session Highs/Lows", inline="sh3b")
+var color sh_nylLColor=input.color(color.new(#ab47bc, 20), "", group="⑲ Session Highs/Lows", inline="sh3b")
+var string sh_nylStyle=input.string("⎯⎯⎯", "", options=['⎯⎯⎯', '----', '····'], group="⑲ Session Highs/Lows", inline="sh3b")
+var bool sh_showNYPM=input.bool(true, "NY PM H/L", group="⑲ Session Highs/Lows", inline="sh3c")
+var color sh_nypmHColor=input.color(color.new(#4caf50, 20), "", group="⑲ Session Highs/Lows", inline="sh3c")
+var color sh_nypmLColor=input.color(color.new(#4caf50, 20), "", group="⑲ Session Highs/Lows", inline="sh3c")
+var string sh_nypmStyle=input.string("⎯⎯⎯", "", options=['⎯⎯⎯', '----', '····'], group="⑲ Session Highs/Lows", inline="sh3c")
+var bool sh_showLabels=input.bool(true, "Show Labels", group="⑲ Session Highs/Lows", inline="sh4")
+var int sh_lineWidth=input.int(1, "Width", 1, 4, group="⑲ Session Highs/Lows", inline="sh4")
+var string sh_labelSize=input.string("Tiny", "Label Size", options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="⑲ Session Highs/Lows", inline="sh4b")
+var bool sh_showCurrent=input.bool(false, "Show Current Session H/L", group="⑲ Session Highs/Lows", tooltip="Show live session H/L.")
+var int sh_lineExtend=input.int(50, "Line Extend Bars", 10, 200, group="⑲ Session Highs/Lows", inline="sh10")
+var int sh_historyCount=input.int(5, "Sessions to Show", 1, 20, group="⑲ Session Highs/Lows", inline="sh11", tooltip="Sessions to show (1-20). Uses ⑱.")
+var bool sh_showMit=input.bool(true, "Show Mitigated", group="⑲ Session Highs/Lows", inline="sh12")
+var color sh_mitColor=input.color(color.new(color.gray, 60), "Line", group="⑲ Session Highs/Lows", inline="sh12")
+var color sh_mitLblColor=input.color(color.new(color.gray, 70), "Lbl", group="⑲ Session Highs/Lows", inline="sh12")
+var int sh_mitLineWidth=input.int(1, "Width", 1, 4, group="⑲ Session Highs/Lows", inline="sh12")
+var string sh_mitLineStyle=input.string("····", "", options=['⎯⎯⎯', '----', '····'], group="⑲ Session Highs/Lows", inline="sh12", tooltip="Mitigated styling.")
+var string sh_mitLabelSize=input.string("Tiny", "Mit Label Size", options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="⑲ Session Highs/Lows", inline="sh12b")
+
+var bool lq_showPDH=input.bool(true, "PDH / PDL", group="⑳ Liquidity Levels", inline="lq1")
+var color lq_pdhColor=input.color(color.new(#26a69a, 20), "", group="⑳ Liquidity Levels", inline="lq1")
+var color lq_pdlColor=input.color(color.new(#ef5350, 20), "", group="⑳ Liquidity Levels", inline="lq1")
+var string lq_pdStyle=input.string("----", "", options=['⎯⎯⎯', '----', '····'], group="⑳ Liquidity Levels", inline="lq1")
+var bool lq_showPWH=input.bool(true, "PWH / PWL", group="⑳ Liquidity Levels", inline="lq2")
+var color lq_pwhColor=input.color(color.new(#26a69a, 10), "", group="⑳ Liquidity Levels", inline="lq2")
+var color lq_pwlColor=input.color(color.new(#ef5350, 10), "", group="⑳ Liquidity Levels", inline="lq2")
+var string lq_pwStyle=input.string("⎯⎯⎯", "", options=['⎯⎯⎯', '----', '····'], group="⑳ Liquidity Levels", inline="lq2")
+var bool lq_showPMH=input.bool(false, "PMH / PML", group="⑳ Liquidity Levels", inline="lq3")
+var color lq_pmhColor=input.color(color.new(#26a69a, 0), "", group="⑳ Liquidity Levels", inline="lq3")
+var color lq_pmlColor=input.color(color.new(#ef5350, 0), "", group="⑳ Liquidity Levels", inline="lq3")
+var string lq_pmStyle=input.string("⎯⎯⎯", "", options=['⎯⎯⎯', '----', '····'], group="⑳ Liquidity Levels", inline="lq3")
+var bool lq_showLabels=input.bool(true, "Show Labels", group="⑳ Liquidity Levels", inline="lq4")
+var int lq_lineWidth=input.int(1, "Width", 1, 4, group="⑳ Liquidity Levels", inline="lq4")
+var int   lq_lookbackDays = input.int(60, "History (days)", minval=1, maxval=365, group="⑳ Liquidity Levels", inline="lq5")
+var int   lq_maxDaily     = input.int(15, "Max D", minval=1, maxval=60, group="⑳ Liquidity Levels", inline="lq5")
+var int   lq_maxWeekly    = input.int(10, "Max W", minval=1, maxval=30, group="⑳ Liquidity Levels", inline="lq5")
+var int   lq_maxMonthly   = input.int(6, "Max M", minval=1, maxval=12, group="⑳ Liquidity Levels", inline="lq5")
+var bool  lq_showMit      = input.bool(true, "Show Mitigated", group="⑳ Liquidity Levels", inline="lq6")
+var color lq_mitColor     = input.color(color.new(color.gray, 50), "", group="⑳ Liquidity Levels", inline="lq6")
+
+
+f_inSession(_h, _m, _startH, _startM, _endH, _endM) =>
+	int _startTotal = _startH * 60 + _startM
+	int _endTotal = _endH * 60 + _endM
+	int _nowTotal = _h * 60 + _m
+	if _startTotal == _endTotal
+		false
+	else if _startTotal < _endTotal
+		_nowTotal >= _startTotal and _nowTotal < _endTotal
+	else
+		_nowTotal >= _startTotal or _nowTotal < _endTotal
+
+int kz_nyHour = hour(time, "America/New_York")
+int kz_nyMin  = minute(time, "America/New_York")
+
+color kz_bg = na
+var string kz_name = "—"
+bool kz_dashLast = ENABLE_DASHBOARD and barstate.islast
+if kz_dashLast
+	kz_name := ENABLE_KILLZONES and timeframe.isintraday ? "Dead" : "—"
+if ENABLE_KILLZONES and timeframe.isintraday
+	if kz_showAsian and f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
+		kz_bg := kz_asianColor
+		if kz_dashLast
+			kz_name := "Asian"
+	if kz_showLondon and f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
+		kz_bg := kz_londonColor
+		if kz_dashLast
+			kz_name := "London"
+	if kz_showNYAM and f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, kz_nyamEndM)
+		kz_bg := kz_nyamColor
+		if kz_dashLast
+			kz_name := "NY AM"
+	if kz_showNYPM and f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
+		kz_bg := kz_nypmColor
+		if kz_dashLast
+			kz_name := "NY PM"
+	if kz_showSBAM and f_inSession(kz_nyHour, kz_nyMin, kz_sbamStart, 0, kz_sbamEnd, 0)
+		kz_bg := kz_sbamColor
+		if kz_dashLast
+			kz_name := "Silver Bullet"
+	if kz_showSBPM and f_inSession(kz_nyHour, kz_nyMin, kz_sbpmStart, 0, kz_sbpmEnd, 0)
+		kz_bg := kz_sbpmColor
+		if kz_dashLast
+			kz_name := "Silver Bullet"
+
+color kz_lunchBg = na
+if ENABLE_KILLZONES and timeframe.isintraday and kz_showNYL and f_inSession(kz_nyHour, kz_nyMin, kz_nylStart, kz_nylStartM, kz_nylEnd, kz_nylEndM)
+	kz_lunchBg := kz_nylColor
+	kz_bg := na    // no-trade window: suppress the tradeable-killzone signal (㉘ Setup score / ㉑ heartbeat read kz_bg) even if a user configures lunch to overlap another session
+	if kz_dashLast
+		kz_name := "NY Lunch"
+
+bgcolor(kz_bg)
+bgcolor(kz_lunchBg)
+
+// ===== ㉚ Weekly Power 3 =====
+const string WP_GROUP='㉚ Weekly Power 3'
+var bool wp_showOpen=input.bool(true, 'Weekly Open', group=WP_GROUP, inline='wp1')
+var color wp_openColor=input.color(color.new(#b22833, 0), '', group=WP_GROUP, inline='wp1')
+var string wp_openStyle=input.string('Solid', '', options=['Solid', 'Dotted', 'Dashed'], group=WP_GROUP, inline='wp1')
+var int wp_openWidth=input.int(3, '', minval=1, maxval=4, group=WP_GROUP, inline='wp1')
+var int wp_historyWeeks=input.int(8, 'Weeks', minval=1, maxval=12, group=WP_GROUP, inline='wp1', tooltip='Total bounded history including the current week. Weekly timing follows the exchange week; odds windows use New York time.')
+var bool wp_showRange=input.bool(true, 'Current W H/L', group=WP_GROUP, inline='wp2')
+var color wp_highColor=input.color(color.new(#26a69a, 0), 'H', group=WP_GROUP, inline='wp2')
+var color wp_lowColor=input.color(color.new(#ef5350, 0), 'L', group=WP_GROUP, inline='wp2')
+var string wp_rangeStyle=input.string('Solid', '', options=['Solid', 'Dotted', 'Dashed'], group=WP_GROUP, inline='wp2')
+var int wp_rangeWidth=input.int(1, '', minval=1, maxval=4, group=WP_GROUP, inline='wp2')
+var bool wp_showRangeLabels=input.bool(true, 'H/L Labels', group=WP_GROUP, inline='wp3')
+var string wp_rangeLabelSize=input.string('Small', '', options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group=WP_GROUP, inline='wp3')
+var bool wp_keepRangeHistory=input.bool(true, 'Keep W H/L history', group=WP_GROUP, inline='wp3')
+var bool wp_showDays=input.bool(true, 'Weekdays', group=WP_GROUP, inline='wp4')
+var color wp_dayColor=input.color(color.new(#7b1fa2, 20), '', group=WP_GROUP, inline='wp4')
+var string wp_daySize=input.string('Normal', '', options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group=WP_GROUP, inline='wp4')
+var string wp_dayPosition=input.string('Above', '', options=['Above', 'Below'], group=WP_GROUP, inline='wp4')
+var float wp_dayBufferPct=input.float(5.0, 'Day buffer % range', minval=0.0, maxval=100.0, step=1.0, group=WP_GROUP)
+var bool wp_showLowOdds=input.bool(true, 'Bullish: Low odds', group=WP_GROUP, inline='wp5', tooltip='Snapshots the weekly low at Tuesday London open and projects it through Wednesday New York open.')
+var color wp_lowOddsColor=input.color(color.new(#90bff9, 0), '', group=WP_GROUP, inline='wp5')
+var int wp_lowOddsTicks=input.int(0, 'Ticks', minval=-100, maxval=100, group=WP_GROUP, inline='wp5')
+var bool wp_showHighOdds=input.bool(true, 'Bearish: High odds', group=WP_GROUP, inline='wp6', tooltip='Snapshots the weekly high at Tuesday London open and projects it through Wednesday New York open.')
+var color wp_highOddsColor=input.color(color.new(#90bff9, 0), '', group=WP_GROUP, inline='wp6')
+var int wp_highOddsTicks=input.int(0, 'Ticks', minval=-100, maxval=100, group=WP_GROUP, inline='wp6')
+var int wp_oddsWidth=input.int(3, 'Odds width', minval=1, maxval=4, group=WP_GROUP, inline='wp7')
+var bool wp_showOddsLabels=input.bool(false, 'Labels', group=WP_GROUP, inline='wp7')
+
+f_wpPruneLines(array<line> _arr, int _cap) =>
+	while _arr.size() > _cap
+		line.delete(_arr.shift())
+
+f_wpPruneLabels(array<label> _arr, int _cap) =>
+	while _arr.size() > _cap
+		label.delete(_arr.shift())
+
+var float wp_weekOpen=na
+var float wp_weekHigh=na
+var float wp_weekLow=na
+var int wp_weekStart=na
+var int wp_highBar=na
+var int wp_lowBar=na
+var line wp_openLine=na
+var line wp_highLine=na
+var line wp_lowLine=na
+var label wp_highLabel=na
+var label wp_lowLabel=na
+var bool wp_oddsMade=false
+var int wp_lastDayKey=na
+var array<line> wp_openHistory=array.new_line()
+var array<line> wp_rangeHistory=array.new_line()
+var array<line> wp_oddsHistory=array.new_line()
+var array<label> wp_rangeLabelHistory=array.new_label()
+var array<label> wp_oddsLabelHistory=array.new_label()
+var array<label> wp_dayHistory=array.new_label()
+var array<label> wp_weekDays=array.new_label()
+
+bool wp_newWeek=timeframe.change('W')
+if ENABLE_WEEKLY_POWER3 and timeframe.in_seconds() <= 86400
+	if wp_newWeek or na(wp_weekOpen)
+		if not na(wp_weekOpen)
+			if not na(wp_openLine)
+				line.set_x2(wp_openLine, time)
+				wp_openHistory.push(wp_openLine)
+				f_wpPruneLines(wp_openHistory, math.max(wp_historyWeeks - 1, 0))
+			if wp_keepRangeHistory
+				if not na(wp_highLine)
+					line.set_x2(wp_highLine, time)
+					line.set_x2(wp_lowLine, time)
+					wp_rangeHistory.push(wp_highLine)
+					wp_rangeHistory.push(wp_lowLine)
+					f_wpPruneLines(wp_rangeHistory, math.max(wp_historyWeeks - 1, 0) * 2)
+				if not na(wp_highLabel)
+					wp_rangeLabelHistory.push(wp_highLabel)
+					wp_rangeLabelHistory.push(wp_lowLabel)
+					f_wpPruneLabels(wp_rangeLabelHistory, math.max(wp_historyWeeks - 1, 0) * 2)
+			else
+				line.delete(wp_highLine)
+				line.delete(wp_lowLine)
+				label.delete(wp_highLabel)
+				label.delete(wp_lowLabel)
+		wp_weekOpen := open
+		wp_weekHigh := high
+		wp_weekLow := low
+		wp_weekStart := time
+		wp_highBar := bar_index
+		wp_lowBar := bar_index
+		wp_openLine := line(na)
+		wp_highLine := line(na)
+		wp_lowLine := line(na)
+		wp_highLabel := label(na)
+		wp_lowLabel := label(na)
+		wp_oddsMade := false
+		wp_lastDayKey := na
+		wp_weekDays.clear()
+	else
+		if high > wp_weekHigh
+			wp_weekHigh := high
+			wp_highBar := bar_index
+		if low < wp_weekLow
+			wp_weekLow := low
+			wp_lowBar := bar_index
+
+	if wp_showOpen
+		if na(wp_openLine)
+			wp_openLine := line.new(x1=wp_weekStart, y1=wp_weekOpen, x2=time, y2=wp_weekOpen, xloc=xloc.bar_time, color=wp_openColor, style=line_style(wp_openStyle), width=wp_openWidth)
+		line.set_x2(wp_openLine, time)
+		line.set_color(wp_openLine, wp_openColor)
+		line.set_style(wp_openLine, line_style(wp_openStyle))
+		line.set_width(wp_openLine, wp_openWidth)
+
+	if wp_showRange
+		if na(wp_highLine)
+			wp_highLine := line.new(x1=wp_weekStart, y1=wp_weekHigh, x2=time, y2=wp_weekHigh, xloc=xloc.bar_time, color=wp_highColor, style=line_style(wp_rangeStyle), width=wp_rangeWidth)
+			wp_lowLine := line.new(x1=wp_weekStart, y1=wp_weekLow, x2=time, y2=wp_weekLow, xloc=xloc.bar_time, color=wp_lowColor, style=line_style(wp_rangeStyle), width=wp_rangeWidth)
+		line.set_xy2(wp_highLine, time, wp_weekHigh)
+		line.set_y1(wp_highLine, wp_weekHigh)
+		line.set_xy2(wp_lowLine, time, wp_weekLow)
+		line.set_y1(wp_lowLine, wp_weekLow)
+		if wp_showRangeLabels
+			string _wpRangeSize=_ho_getSize(wp_rangeLabelSize)
+			if na(wp_highLabel)
+				wp_highLabel := label.new(wp_highBar, wp_weekHigh, 'Weekly High', style=label.style_label_down, color=wp_highColor, textcolor=chart.bg_color, size=_wpRangeSize)
+				wp_lowLabel := label.new(wp_lowBar, wp_weekLow, 'Weekly Low', style=label.style_label_up, color=wp_lowColor, textcolor=chart.bg_color, size=_wpRangeSize)
+			label.set_xy(wp_highLabel, wp_highBar, wp_weekHigh)
+			label.set_xy(wp_lowLabel, wp_lowBar, wp_weekLow)
+
+	int _wpNyDow=dayofweek(time, 'America/New_York')
+	int _wpNyMinutes=kz_nyHour * 60 + kz_nyMin
+	int _wpDayKey=year(time, 'America/New_York') * 10000 + month(time, 'America/New_York') * 100 + dayofmonth(time, 'America/New_York')
+	bool _wpWeekday=_wpNyDow >= dayofweek.monday and _wpNyDow <= dayofweek.friday
+	if wp_showDays and timeframe.isintraday and _wpWeekday and _wpNyMinutes >= 240 and (na(wp_lastDayKey) or _wpDayKey != wp_lastDayKey)
+		string _wpDayText=switch _wpNyDow
+			dayofweek.monday => 'Monday'
+			dayofweek.tuesday => 'Tuesday'
+			dayofweek.wednesday => 'Wednesday'
+			dayofweek.thursday => 'Thursday'
+			=> 'Friday'
+		float _wpRange=math.max(wp_weekHigh - wp_weekLow, syminfo.mintick)
+		float _wpDayY=wp_dayPosition == 'Above' ? wp_weekHigh + _wpRange * wp_dayBufferPct / 100.0 : wp_weekLow - _wpRange * wp_dayBufferPct / 100.0
+		label _wpDay=label.new(time, _wpDayY, _wpDayText, xloc=xloc.bar_time, style=label.style_none, textcolor=wp_dayColor, size=_ho_getSize(wp_daySize))
+		wp_weekDays.push(_wpDay)
+		wp_dayHistory.push(_wpDay)
+		f_wpPruneLabels(wp_dayHistory, wp_historyWeeks * 5)
+		wp_lastDayKey := _wpDayKey
+
+	if wp_showDays and wp_weekDays.size() > 0
+		float _wpRange=math.max(wp_weekHigh - wp_weekLow, syminfo.mintick)
+		float _wpDayY=wp_dayPosition == 'Above' ? wp_weekHigh + _wpRange * wp_dayBufferPct / 100.0 : wp_weekLow - _wpRange * wp_dayBufferPct / 100.0
+		for i=0 to wp_weekDays.size() - 1
+			label.set_y(wp_weekDays.get(i), _wpDayY)
+
+	int _wpPrevDow=dayofweek(time[1], 'America/New_York')
+	int _wpPrevMinutes=hour(time[1], 'America/New_York') * 60 + minute(time[1], 'America/New_York')
+	int _wpLondonOpen=kz_londonStart * 60
+	bool _wpOddsStart=timeframe.isintraday and not wp_oddsMade and _wpNyDow == dayofweek.tuesday and _wpNyMinutes >= _wpLondonOpen and (_wpPrevDow != dayofweek.tuesday or _wpPrevMinutes < _wpLondonOpen)
+	if _wpOddsStart
+		int _wpOddsStartTime=timestamp('America/New_York', year(time, 'America/New_York'), month(time, 'America/New_York'), dayofmonth(time, 'America/New_York'), kz_londonStart, 0)
+		int _wpOddsEnd=timestamp('America/New_York', year(time, 'America/New_York'), month(time, 'America/New_York'), dayofmonth(time, 'America/New_York') + 1, kz_nyamStart, kz_nyamStartM)
+		int _wpOddsMid=_wpOddsStartTime + int((_wpOddsEnd - _wpOddsStartTime) / 2)
+		if wp_showLowOdds
+			float _wpLowOdds=nz(wp_weekLow[1], wp_weekLow) + wp_lowOddsTicks * syminfo.mintick
+			line _wpLowLine=line.new(x1=_wpOddsStartTime, y1=_wpLowOdds, x2=_wpOddsEnd, y2=_wpLowOdds, xloc=xloc.bar_time, color=wp_lowOddsColor, width=wp_oddsWidth)
+			wp_oddsHistory.push(_wpLowLine)
+			if wp_showOddsLabels
+				label _wpLowLbl=label.new(_wpOddsMid, _wpLowOdds, 'Best Odds Low', xloc=xloc.bar_time, style=label.style_none, textcolor=wp_lowOddsColor, size=size.small)
+				wp_oddsLabelHistory.push(_wpLowLbl)
+		if wp_showHighOdds
+			float _wpHighOdds=nz(wp_weekHigh[1], wp_weekHigh) + wp_highOddsTicks * syminfo.mintick
+			line _wpHighLine=line.new(x1=_wpOddsStartTime, y1=_wpHighOdds, x2=_wpOddsEnd, y2=_wpHighOdds, xloc=xloc.bar_time, color=wp_highOddsColor, width=wp_oddsWidth)
+			wp_oddsHistory.push(_wpHighLine)
+			if wp_showOddsLabels
+				label _wpHighLbl=label.new(_wpOddsMid, _wpHighOdds, 'Best Odds High', xloc=xloc.bar_time, style=label.style_none, textcolor=wp_highOddsColor, size=size.small)
+				wp_oddsLabelHistory.push(_wpHighLbl)
+		f_wpPruneLines(wp_oddsHistory, wp_historyWeeks * 2)
+		f_wpPruneLabels(wp_oddsLabelHistory, wp_historyWeeks * 2)
+		wp_oddsMade := true
+
+// ===== ㉒ Liquidity Sweep engine (shared by Session H/L, PD/PW/PM, EQH/EQL) =====
+var int    sweep_confirmBars = input.int(2, "Confirm bars", minval=1, maxval=5, group="㉒ Liquidity Sweeps", inline="sw1", tooltip="A reversal must confirm within this many bars after the wick-reject, or the sweep re-arms.")
+var color  sweep_lineColor   = input.color(color.new(#ffd54f, 0), "Swept line", group="㉒ Liquidity Sweeps", inline="sw1")
+var bool   sweep_showMarker  = input.bool(true, "Marker", group="㉒ Liquidity Sweeps", inline="sw2")
+var color  sweep_markerColor = input.color(color.new(#ffd54f, 0), "", group="㉒ Liquidity Sweeps", inline="sw2")
+var string sweep_markerSize  = input.string(size.tiny, "", options=[size.tiny, size.small, size.normal], group="㉒ Liquidity Sweeps", inline="sw2")
+
+type SweepState
+	int   phase        = 0
+	float levelPrice   = na
+	int   sweepBar     = na
+	float confirmLevel = na
+	int   sweepTime    = na
+	label marker       = na
+	float bodyEdge         // ㉙ Wick Reversal only: Bar A's body edge (near side of its wick zone)
+
+// Per-bar flags bridging sweep/structure confirms (which happen inside functions) to native
+// alertconditions. Non-var: a fresh object each execution, so flags reset per tick; sweeps and
+// breaks only confirm on barstate.isconfirmed, so these are only ever true at bar close.
+type AlertFlags
+	bool swpBsl  = false
+	bool swpSsl  = false
+	bool bosBull = false
+	bool bosBear = false
+	bool chBull  = false
+	bool chBear  = false
+AlertFlags alertFlags = AlertFlags.new()
+
+// Persistent recency stamps for the ㉘ Setup score (freshness of the last sweep/SMT confirm per side).
+type SetupState
+	int swpBslBar
+	int swpSslBar
+	int smtBullBar
+	int smtBearBar
+var SetupState setupState = SetupState.new()
+
+// Advances the sweep state machine for one level on one bar. Returns true on the
+// bar a Turtle Soup confirms. Mutates st in place (Pine objects are by-reference).
+f_sweepTick(SweepState st, float lvl, bool isHigh, int confirmBars) =>
+	bool _justConfirmed = false
+	if not na(lvl)
+		if na(st.levelPrice) or st.levelPrice != lvl
+			label.delete(st.marker)
+			st.marker := na
+			st.phase := 0
+			st.levelPrice := lvl
+			st.sweepBar := na
+		if barstate.isconfirmed
+			if st.phase == 1
+				bool _confirmed = isHigh ? (close < st.confirmLevel) : (close > st.confirmLevel)
+				if _confirmed
+					st.phase := 2
+					_justConfirmed := true
+				else if bar_index - st.sweepBar >= confirmBars
+					st.phase := 0
+			if st.phase == 0
+				bool _bareSweep = isHigh ? (high > lvl and close < lvl) : (low < lvl and close > lvl)
+				if _bareSweep
+					st.phase := 1
+					st.sweepBar := bar_index
+					st.sweepTime := time
+					st.confirmLevel := isHigh ? low : high
+	_justConfirmed
+
+// Sets the alert flags, fires the webhook, and (when draw is true) draws/updates the one marker
+// label. Does NOT recolor the level line — each host module owns that.
+f_sweepMark(SweepState st, string name, bool isHigh, bool draw) =>
+	if isHigh
+		alertFlags.swpBsl := true
+		setupState.swpBslBar := bar_index
+	else
+		alertFlags.swpSsl := true
+		setupState.swpSslBar := bar_index
+	if draw and sweep_showMarker
+		string _tag = isHigh ? "TS↓" : "TS↑"
+		if na(st.marker)
+			st.marker := label.new(st.sweepBar, st.levelPrice, _tag, xloc=xloc.bar_index, style=isHigh ? label.style_label_down : label.style_label_up, color=color.new(sweep_markerColor, 20), textcolor=color.white, size=sweep_markerSize)
+		else
+			label.set_xy(st.marker, st.sweepBar, st.levelPrice)
+			label.set_text(st.marker, _tag)
+	if wh_enable and wh_sweeps
+		alert(_wh_json("SWEEP " + name + (isHigh ? " BSL" : " SSL"), st.levelPrice, st.levelPrice), alert.freq_once_per_bar)
+
+// ㉙ Wick Reversal: Bar A (a fresh swing pivot) prints a wick; Bar B later closes back inside that
+// wick zone (between A's body edge and its extreme, without exceeding it); confirmed when price
+// closes past A's opposite edge. NOT a call into f_sweepTick — that function derives confirmLevel
+// from the bare-condition bar's own opposite extreme (same bar as the level there); here Bar A
+// (the level source) and Bar B (the bare-condition bar) are different bars, so confirmLevel must be
+// captured from Bar A at re-arm time instead. Mirrors f_sweepTick's two-phase shape otherwise.
+f_wickTick(SweepState st, float extreme, float bodyEdge, float oppositeEdge, bool isHigh, int confirmBars) =>
+	bool _justConfirmed = false
+	if barstate.isconfirmed and not na(st.levelPrice) and st.phase == 1
+		bool _confirmed = isHigh ? (close < st.confirmLevel) : (close > st.confirmLevel)
+		if _confirmed
+			st.phase := 2
+			_justConfirmed := true
+		else if bar_index - st.sweepBar >= confirmBars
+			st.phase := 0
+	// Skip re-arm on a bar that just confirmed: st.marker/levelPrice/sweepBar still belong to the
+	// just-confirmed candidate and f_sweepMark (called by the driver right after this returns) needs
+	// them intact. The new pivot is only ever non-na on this one bar, so on this rare collision it's
+	// missed rather than tracked early — preferable to corrupting the just-fired confirm's own data.
+	if not na(extreme) and not _justConfirmed
+		label.delete(st.marker)
+		st.marker := na
+		st.phase := 0
+		st.levelPrice := extreme
+		st.bodyEdge := bodyEdge
+		st.confirmLevel := oppositeEdge
+		st.sweepBar := na
+	if barstate.isconfirmed and not na(st.levelPrice) and st.phase == 0
+		bool _wickClose = isHigh ? (close > st.bodyEdge and close <= st.levelPrice and high <= st.levelPrice) : (close < st.bodyEdge and close >= st.levelPrice and low >= st.levelPrice)
+		if _wickClose
+			st.phase := 1
+			st.sweepBar := bar_index
+	_justConfirmed
+
+// ===== ㉓ Equal Highs/Lows (resting liquidity pools) =====
+var int    eqhl_pivotLen = input.int(5, "Pivot length", minval=2, maxval=50, group="㉓ Equal Highs/Lows", inline="eq1", tooltip="Bars each side for swing pivots; pivots confirm this many bars late.")
+var float  eqhl_tolMult  = input.float(0.1, "Tolerance ×range", minval=0.0, maxval=1.0, step=0.05, group="㉓ Equal Highs/Lows", inline="eq1", tooltip="Two pivots are 'equal' if within this fraction of the average bar range.")
+var int    eqhl_maxPools = input.int(10, "Max pools/side", minval=1, maxval=20, group="㉓ Equal Highs/Lows", inline="eq2")
+var color  eqhl_color    = input.color(color.new(#b39ddb, 0), "Color", group="㉓ Equal Highs/Lows", inline="eq2")
+
+type LiqPool
+	float price
+	line  ln = na
+	label lbl = na
+	bool  mitigated = false
+	SweepState sweep = na
+
+// Register a new equal-high/low pool, deduped against active existing pools, pruned to cap.
+f_eqhlAdd(array<LiqPool> pools, float price, float tol) =>
+	bool _dup = false
+	if pools.size() > 0
+		for i = 0 to pools.size() - 1
+			LiqPool _p = pools.get(i)
+			if not _dup and not _p.mitigated and (na(_p.sweep) or _p.sweep.phase != 2) and math.abs(_p.price - price) <= tol
+				_dup := true
+	if not _dup
+		pools.unshift(LiqPool.new(price = price))
+		while pools.size() > eqhl_maxPools
+			LiqPool _old = pools.pop()
+			line.delete(_old.ln)
+			label.delete(_old.lbl)
+			if not na(_old.sweep)
+				label.delete(_old.sweep.marker)
+
+// Draw/update each pool's line+label, run close-through mitigation + sweep detection through the shared engine.
+f_eqhlProcess(array<LiqPool> pools, bool isHigh) =>
+	if pools.size() > 0
+		for i = 0 to pools.size() - 1
+			LiqPool _p = pools.get(i)
+			int _x2 = bar_index + 30
+			if na(_p.ln)
+				_p.ln := line.new(bar_index - 1, _p.price, _x2, _p.price, color=eqhl_color, style=line.style_dashed, width=1)
+			if na(_p.lbl)
+				_p.lbl := label.new(_x2, _p.price, isHigh ? "EQH" : "EQL", style=label.style_label_left, color=color.new(color.white, 100), textcolor=eqhl_color, size=size.tiny)
+			// Close-through mitigation (display-independent of ENABLE_SWEEPS, matches SHLevel/lq): freeze the line at this bar + dim ONCE, then stop tracking (no extend, no sweep, no TS marker).
+			if not _p.mitigated and barstate.isconfirmed and (isHigh ? close > _p.price : close < _p.price)
+				_p.mitigated := true
+				line.set_x2(_p.ln, bar_index)
+				line.set_color(_p.ln, color.new(eqhl_color, 70))
+				label.set_x(_p.lbl, bar_index)
+			if not _p.mitigated
+				line.set_x2(_p.ln, _x2)
+				label.set_x(_p.lbl, _x2)
+				if ENABLE_SWEEPS
+					if na(_p.sweep)
+						_p.sweep := SweepState.new()
+					if f_sweepTick(_p.sweep, _p.price, isHigh, sweep_confirmBars)
+						f_sweepMark(_p.sweep, isHigh ? "EQH" : "EQL", isHigh, true)
+					line.set_color(_p.ln, _p.sweep.phase == 2 ? sweep_lineColor : eqhl_color)
+
+// ===== ㉔ Market Structure (BOS / CHoCH) =====
+var int    struct_pivotLen  = input.int(5, "Pivot length", minval=2, maxval=50, group="㉔ Market Structure", inline="ms1", tooltip="Swing pivots use this many bars each side; pivots confirm this many bars late. Independent of ㉓.")
+var int    struct_holdBars  = input.int(2, "Hold bars", minval=1, maxval=5, group="㉔ Market Structure", inline="ms1", tooltip="A close-break must hold this many bars to confirm BOS/CHoCH; closing back inside = trap (suppressed).")
+var color  struct_bullColor = input.color(color.new(#26a69a, 0), "Bull", group="㉔ Market Structure", inline="ms2")
+var color  struct_bearColor = input.color(color.new(#ef5350, 0), "Bear", group="㉔ Market Structure", inline="ms2")
+var string struct_lineStyle = input.string("----", "", options=['⎯⎯⎯', '----', '····'], group="㉔ Market Structure", inline="ms2")
+var string struct_labelSize = input.string("Tiny", "", options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="㉔ Market Structure", inline="ms2")
+var int    struct_maxBreaks = input.int(15, "Max breaks", minval=1, maxval=40, group="㉔ Market Structure", inline="ms3", tooltip="Older break lines/labels pruned to this cap (shared 500-drawing budget).")
+
+type BosState
+	int   phase      = 0
+	int   breakBar   = na
+	float breakLevel = na
+
+var float structLastHigh = na
+var int   structHighBar = na
+var bool  structHighResolved = false
+var float structLastLow = na
+var int   structLowBar = na
+var bool  structLowResolved = false
+var int   struct_trend = 0
+var string struct_lastBreak = na
+var BosState bosH = BosState.new()
+var BosState bosL = BosState.new()
+var array<line>  struct_lines  = array.new<line>()
+var array<label> struct_labels = array.new<label>()
+
+// Mirror of f_sweepTick (comparisons inverted): a close-break must HOLD to confirm. Returns 2=confirm, 3=trap, 0=none.
+f_bosTick(BosState st, float lvl, bool isHigh, int holdBars) =>
+	int _out = 0
+	if not na(lvl) and barstate.isconfirmed
+		if st.phase == 1
+			bool _backInside = isHigh ? (close <= st.breakLevel) : (close >= st.breakLevel)
+			if _backInside
+				st.phase := 3
+				_out := 3
+			else if bar_index - st.breakBar >= holdBars
+				st.phase := 2
+				_out := 2
+		if st.phase == 0
+			bool _closeBreak = isHigh ? (close > lvl) : (close < lvl)
+			if _closeBreak
+				st.phase := 1
+				st.breakBar := bar_index
+				st.breakLevel := lvl
+	_out
+
+// Draw a confirmed BOS/CHoCH break: line at the broken swing + label, pruned to cap; optional webhook.
+f_structDrawBreak(float lvl, int swingBar, bool isChoch, bool isUp) =>
+	color _clr = isUp ? struct_bullColor : struct_bearColor
+	line _ln = line.new(swingBar, lvl, bar_index, lvl, color=_clr, style=f_get_line_style(struct_lineStyle), width=1)
+	label _lb = label.new(bar_index, lvl, isChoch ? "CHoCH" : "BOS", style=isUp ? label.style_label_up : label.style_label_down, color=color.new(_clr, 20), textcolor=color.white, size=_ho_getSize(struct_labelSize))
+	struct_lines.unshift(_ln)
+	struct_labels.unshift(_lb)
+	while struct_lines.size() > struct_maxBreaks
+		line.delete(struct_lines.pop())
+	while struct_labels.size() > struct_maxBreaks
+		label.delete(struct_labels.pop())
+	if isChoch
+		if isUp
+			alertFlags.chBull := true
+		else
+			alertFlags.chBear := true
+	else if isUp
+		alertFlags.bosBull := true
+	else
+		alertFlags.bosBear := true
+	if wh_enable and wh_structure
+		alert(_wh_json((isChoch ? "CHoCH " : "BOS ") + (isUp ? "BSL" : "SSL"), lvl, lvl), alert.freq_once_per_bar_close)
+
+type SHLevel
+	float price
+	int startBar
+	int priceTime
+	bool mitigated = false
+	line ln = na
+	label lbl = na
+	SweepState sweep = na
+
+_sh_fmtTime(_t) =>
+	na(_t) ? "" : " (" + str.format_time(_t, "EEE MM/dd HH:mm", "America/New_York") + ")"
+
+_sh_archive(_histH, _histL, _curH, _curL, _curBar, _curHT, _curLT) =>
+	if not na(_curH)
+		array.unshift(_histH, SHLevel.new(price = _curH, startBar = _curBar, priceTime = _curHT))
+		array.unshift(_histL, SHLevel.new(price = _curL, startBar = _curBar, priceTime = _curLT))
+		while array.size(_histH) > sh_historyCount
+			SHLevel _old = array.pop(_histH)
+			line.delete(_old.ln)
+			label.delete(_old.lbl)
+			if not na(_old.sweep)
+				label.delete(_old.sweep.marker)
+		while array.size(_histL) > sh_historyCount
+			SHLevel _old = array.pop(_histL)
+			line.delete(_old.ln)
+			label.delete(_old.lbl)
+			if not na(_old.sweep)
+				label.delete(_old.sweep.marker)
+
+_sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
+	if array.size(_hist) > 0
+		string _side = _isHigh ? "High - Buyside Liquidity " : "Low - Sellside Liquidity "
+		for i = 0 to array.size(_hist) - 1
+			SHLevel _lvl = array.get(_hist, i)
+			if na(_lvl.price)
+				continue
+			// Mitigation state is maintained even when the level class is hidden (the Dashboard reads it)
+			if not _lvl.mitigated and barstate.isconfirmed
+				bool _hit = _isHigh ? close > _lvl.price : close < _lvl.price
+				if _hit
+					_lvl.mitigated := true
+					if not na(_lvl.ln)
+						line.set_color(_lvl.ln, sh_mitColor)
+						line.set_style(_lvl.ln, f_get_line_style(sh_mitLineStyle))
+			// Sweep detection is also display-independent; only the TS marker draw is gated by _show
+			if ENABLE_SWEEPS
+				if na(_lvl.sweep)
+					_lvl.sweep := SweepState.new()
+				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
+					f_sweepMark(_lvl.sweep, _name, _isHigh, _show)
+			if not _show
+				continue
+			if _lvl.mitigated and not sh_showMit
+				line.delete(_lvl.ln)
+				label.delete(_lvl.lbl)
+				_lvl.ln := line(na)
+				_lvl.lbl := label(na)
+				if not na(_lvl.sweep)
+					label.delete(_lvl.sweep.marker)
+					_lvl.sweep.marker := na
+				continue
+			int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
+			int _x2 = bar_index + sh_lineExtend
+			bool _swept = ENABLE_SWEEPS and not na(_lvl.sweep) and _lvl.sweep.phase == 2
+			color _lineClr = _swept ? sweep_lineColor : _lvl.mitigated ? sh_mitColor : _color
+			color _lblClr = _swept ? sweep_lineColor : _lvl.mitigated ? sh_mitLblColor : _color
+			int _lw = _lvl.mitigated ? sh_mitLineWidth : sh_lineWidth
+			string _swTxt = _swept ? " ⚡TS" : ""
+			string _mitTxt = _lvl.mitigated ? " [Mitigated]" : ""
+			string _txt = _name + " " + _side + str.tostring(_lvl.price, format.mintick) + _sh_fmtTime(_lvl.priceTime) + _swTxt + _mitTxt
+			string _ls = _lvl.mitigated ? f_get_line_style(sh_mitLineStyle) : f_get_line_style(_style)
+			string _sz = _lvl.mitigated ? _ho_getSize(sh_mitLabelSize) : _ho_getSize(sh_labelSize)
+			if na(_lvl.ln)
+				_lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color = _lineClr, style = _ls, width = _lw)
+			line.set_x2(_lvl.ln, _x2)
+			line.set_color(_lvl.ln, _lineClr)
+			line.set_width(_lvl.ln, _lw)
+			if sh_showLabels
+				if na(_lvl.lbl)
+					_lvl.lbl := label.new(_x2, _lvl.price, _txt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _lblClr, size = _sz)
+				label.set_x(_lvl.lbl, _x2)
+				label.set_text(_lvl.lbl, _txt)
+				label.set_textcolor(_lvl.lbl, _lblClr)
+				label.set_size(_lvl.lbl, _sz)
+
+_sh_drawCur(_show, _inSess, _curH, _curL, _curHTime, _curLTime, _startBar, _hColor, _lColor, _name) =>
+	var line _cLineH=na, var line _cLineL=na
+	var label _cLblH=na, var label _cLblL=na
+	bool _active = _show and _inSess and not na(_curH)
+	if _active
+		int _x1 = math.max(nz(_startBar, bar_index - 1), 0)
+		int _x2 = bar_index + sh_lineExtend
+		string _hTxt = _name + " High* " + str.tostring(_curH, format.mintick) + _sh_fmtTime(_curHTime)
+		string _lTxt = _name + " Low* " + str.tostring(_curL, format.mintick) + _sh_fmtTime(_curLTime)
+		if na(_cLineH)
+			_cLineH := line.new(_x1, _curH, _x2, _curH, color = color.new(_hColor, 60), style = line.style_dotted, width = sh_lineWidth)
+			_cLineL := line.new(_x1, _curL, _x2, _curL, color = color.new(_lColor, 60), style = line.style_dotted, width = sh_lineWidth)
+		line.set_xy1(_cLineH, _x1, _curH)
+		line.set_xy2(_cLineH, _x2, _curH)
+		line.set_xy1(_cLineL, _x1, _curL)
+		line.set_xy2(_cLineL, _x2, _curL)
+		if sh_showLabels
+			string _sz = _ho_getSize(sh_labelSize)
+			if na(_cLblH)
+				_cLblH := label.new(_x2, _curH, _hTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_hColor, 40), size = _sz)
+				_cLblL := label.new(_x2, _curL, _lTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = color.new(_lColor, 40), size = _sz)
+			label.set_xy(_cLblH, _x2, _curH)
+			label.set_text(_cLblH, _hTxt)
+			label.set_xy(_cLblL, _x2, _curL)
+			label.set_text(_cLblL, _lTxt)
+			label.set_size(_cLblH, _sz)
+			label.set_size(_cLblL, _sz)
+	if not _active and not _inSess
+		if not na(_cLineH)
+			line.set_xy1(_cLineH, na, na)
+			line.set_xy2(_cLineH, na, na)
+			line.set_xy1(_cLineL, na, na)
+			line.set_xy2(_cLineL, na, na)
+		if not na(_cLblH)
+			label.set_xy(_cLblH, na, na)
+			label.set_xy(_cLblL, na, na)
+	[_cLineH, _cLineL, _cLblH, _cLblL]
+
+var array<SHLevel> sh_histAsiaH=array.new<SHLevel>()
+var array<SHLevel> sh_histAsiaL=array.new<SHLevel>()
+var array<SHLevel> sh_histLonH=array.new<SHLevel>()
+var array<SHLevel> sh_histLonL=array.new<SHLevel>()
+var array<SHLevel> sh_histNyamH=array.new<SHLevel>()
+var array<SHLevel> sh_histNyamL=array.new<SHLevel>()
+var array<SHLevel> sh_histNypreH=array.new<SHLevel>()
+var array<SHLevel> sh_histNypreL=array.new<SHLevel>()
+var array<SHLevel> sh_histNylH=array.new<SHLevel>()
+var array<SHLevel> sh_histNylL=array.new<SHLevel>()
+var array<SHLevel> sh_histNypmH=array.new<SHLevel>()
+var array<SHLevel> sh_histNypmL=array.new<SHLevel>()
+
+var float sh_asiaH=na, var float sh_asiaL=na, var int sh_asiaBar=na, var int sh_asiaHT=na, var int sh_asiaLT=na
+var float sh_lonH=na, var float sh_lonL=na, var int sh_lonBar=na, var int sh_lonHT=na, var int sh_lonLT=na
+var float sh_nyamH=na, var float sh_nyamL=na, var int sh_nyamBar=na, var int sh_nyamHT=na, var int sh_nyamLT=na
+var float sh_nypreH=na, var float sh_nypreL=na, var int sh_nypreBar=na, var int sh_nypreHT=na, var int sh_nypreLT=na
+var float sh_nylH=na, var float sh_nylL=na, var int sh_nylBar=na, var int sh_nylHT=na, var int sh_nylLT=na
+var float sh_nypmH=na, var float sh_nypmL=na, var int sh_nypmBar=na, var int sh_nypmHT=na, var int sh_nypmLT=na
+
+var bool sh_inAsia=false, var bool sh_inLon=false
+var bool sh_inNYAM=false, var bool sh_inNYPre=false, var bool sh_inNYL=false, var bool sh_inNYPM=false
+
+if ENABLE_SESSION_HL and timeframe.isintraday
+	bool _isAsia = f_inSession(kz_nyHour, kz_nyMin, kz_asianStart, 0, kz_asianEnd, 0)
+	bool _isLon = f_inSession(kz_nyHour, kz_nyMin, kz_londonStart, 0, kz_londonEnd, 0)
+	bool _isNYAM = f_inSession(kz_nyHour, kz_nyMin, kz_nyamStart, kz_nyamStartM, kz_nyamEnd, kz_nyamEndM)
+	bool _isNYPre = f_inSession(kz_nyHour, kz_nyMin, 7, 0, 9, 30)
+	bool _isNYL = f_inSession(kz_nyHour, kz_nyMin, kz_nylStart, kz_nylStartM, kz_nylEnd, kz_nylEndM)
+	bool _isNYPM = f_inSession(kz_nyHour, kz_nyMin, kz_nypmStart, kz_nypmStartM, kz_nypmEnd, 0)
+
+	if _isAsia and not sh_inAsia
+		sh_asiaH := high, sh_asiaL := low, sh_asiaBar := bar_index
+		sh_asiaHT := time, sh_asiaLT := time
+		sh_inAsia := true
+	else if _isAsia
+		if high > nz(sh_asiaH, high)
+			sh_asiaH := high, sh_asiaHT := time
+		if low < nz(sh_asiaL, low)
+			sh_asiaL := low, sh_asiaLT := time
+	else
+		if sh_inAsia
+			_sh_archive(sh_histAsiaH, sh_histAsiaL, sh_asiaH, sh_asiaL, sh_asiaBar, sh_asiaHT, sh_asiaLT)
+		sh_inAsia := false
+
+	if _isLon and not sh_inLon
+		sh_lonH := high, sh_lonL := low, sh_lonBar := bar_index
+		sh_lonHT := time, sh_lonLT := time
+		sh_inLon := true
+	else if _isLon
+		if high > nz(sh_lonH, high)
+			sh_lonH := high, sh_lonHT := time
+		if low < nz(sh_lonL, low)
+			sh_lonL := low, sh_lonLT := time
+	else
+		if sh_inLon
+			_sh_archive(sh_histLonH, sh_histLonL, sh_lonH, sh_lonL, sh_lonBar, sh_lonHT, sh_lonLT)
+		sh_inLon := false
+
+	if _isNYAM and not sh_inNYAM
+		sh_nyamH := high, sh_nyamL := low, sh_nyamBar := bar_index
+		sh_nyamHT := time, sh_nyamLT := time
+		sh_inNYAM := true
+	else if _isNYAM
+		if high > nz(sh_nyamH, high)
+			sh_nyamH := high, sh_nyamHT := time
+		if low < nz(sh_nyamL, low)
+			sh_nyamL := low, sh_nyamLT := time
+	else
+		if sh_inNYAM
+			_sh_archive(sh_histNyamH, sh_histNyamL, sh_nyamH, sh_nyamL, sh_nyamBar, sh_nyamHT, sh_nyamLT)
+		sh_inNYAM := false
+
+	if _isNYPre and not sh_inNYPre
+		sh_nypreH := high, sh_nypreL := low, sh_nypreBar := bar_index
+		sh_nypreHT := time, sh_nypreLT := time
+		sh_inNYPre := true
+	else if _isNYPre
+		if high > nz(sh_nypreH, high)
+			sh_nypreH := high, sh_nypreHT := time
+		if low < nz(sh_nypreL, low)
+			sh_nypreL := low, sh_nypreLT := time
+	else
+		if sh_inNYPre
+			_sh_archive(sh_histNypreH, sh_histNypreL, sh_nypreH, sh_nypreL, sh_nypreBar, sh_nypreHT, sh_nypreLT)
+		sh_inNYPre := false
+
+	if _isNYL and not sh_inNYL
+		sh_nylH := high, sh_nylL := low, sh_nylBar := bar_index
+		sh_nylHT := time, sh_nylLT := time
+		sh_inNYL := true
+	else if _isNYL
+		if high > nz(sh_nylH, high)
+			sh_nylH := high, sh_nylHT := time
+		if low < nz(sh_nylL, low)
+			sh_nylL := low, sh_nylLT := time
+	else
+		if sh_inNYL
+			_sh_archive(sh_histNylH, sh_histNylL, sh_nylH, sh_nylL, sh_nylBar, sh_nylHT, sh_nylLT)
+		sh_inNYL := false
+
+	if _isNYPM and not sh_inNYPM
+		sh_nypmH := high, sh_nypmL := low, sh_nypmBar := bar_index
+		sh_nypmHT := time, sh_nypmLT := time
+		sh_inNYPM := true
+	else if _isNYPM
+		if high > nz(sh_nypmH, high)
+			sh_nypmH := high, sh_nypmHT := time
+		if low < nz(sh_nypmL, low)
+			sh_nypmL := low, sh_nypmLT := time
+	else
+		if sh_inNYPM
+			_sh_archive(sh_histNypmH, sh_histNypmL, sh_nypmH, sh_nypmL, sh_nypmBar, sh_nypmHT, sh_nypmLT)
+		sh_inNYPM := false
+
+	_sh_processHist(sh_showAsian,   sh_histAsiaH, true,  sh_asianHColor,  sh_asianStyle,  "Asia")
+	_sh_processHist(sh_showAsian,   sh_histAsiaL, false, sh_asianLColor,  sh_asianStyle,  "Asia")
+	_sh_processHist(sh_showLondon,  sh_histLonH,  true,  sh_londonHColor, sh_londonStyle, "London")
+	_sh_processHist(sh_showLondon,  sh_histLonL,  false, sh_londonLColor, sh_londonStyle, "London")
+	_sh_processHist(sh_showNYAM,    sh_histNyamH, true,  sh_nyamHColor,   sh_nyamStyle,   "NY AM")
+	_sh_processHist(sh_showNYAM,    sh_histNyamL, false, sh_nyamLColor,   sh_nyamStyle,   "NY AM")
+	_sh_processHist(sh_showNYPre,   sh_histNypreH, true,  sh_nypreHColor,  sh_nypreStyle,  "NY Pre-AM")
+	_sh_processHist(sh_showNYPre,   sh_histNypreL, false, sh_nypreLColor,  sh_nypreStyle,  "NY Pre-AM")
+	_sh_processHist(sh_showNYLunch, sh_histNylH,  true,  sh_nylHColor,    sh_nylStyle,    "NY Lunch")
+	_sh_processHist(sh_showNYLunch, sh_histNylL,  false, sh_nylLColor,    sh_nylStyle,    "NY Lunch")
+	_sh_processHist(sh_showNYPM,    sh_histNypmH, true,  sh_nypmHColor,   sh_nypmStyle,   "NY PM")
+	_sh_processHist(sh_showNYPM,    sh_histNypmL, false, sh_nypmLColor,   sh_nypmStyle,   "NY PM")
+
+	if sh_showCurrent
+		_sh_drawCur(sh_showAsian,   _isAsia, sh_asiaH, sh_asiaL, sh_asiaHT, sh_asiaLT, sh_asiaBar, sh_asianHColor,  sh_asianLColor,  "Asia")
+		_sh_drawCur(sh_showLondon,  _isLon,  sh_lonH,  sh_lonL,  sh_lonHT,  sh_lonLT,  sh_lonBar,  sh_londonHColor, sh_londonLColor, "London")
+		_sh_drawCur(sh_showNYAM,    _isNYAM, sh_nyamH, sh_nyamL, sh_nyamHT, sh_nyamLT, sh_nyamBar, sh_nyamHColor,   sh_nyamLColor,   "NY AM")
+		_sh_drawCur(sh_showNYPre,   _isNYPre, sh_nypreH, sh_nypreL, sh_nypreHT, sh_nypreLT, sh_nypreBar, sh_nypreHColor, sh_nypreLColor, "NY Pre-AM")
+		_sh_drawCur(sh_showNYLunch, _isNYL,  sh_nylH,  sh_nylL,  sh_nylHT,  sh_nylLT,  sh_nylBar,  sh_nylHColor,    sh_nylLColor,    "NY Lunch")
+		_sh_drawCur(sh_showNYPM,    _isNYPM, sh_nypmH, sh_nypmL, sh_nypmHT, sh_nypmLT, sh_nypmBar, sh_nypmHColor,   sh_nypmLColor,   "NY PM")
+
+// ===== ⑳ Liquidity Levels — multi-level history (reuses SHLevel + sweep engine) =====
+var array<SHLevel> lq_histDayH   = array.new<SHLevel>()
+var array<SHLevel> lq_histDayL   = array.new<SHLevel>()
+var array<SHLevel> lq_histWeekH  = array.new<SHLevel>()
+var array<SHLevel> lq_histWeekL  = array.new<SHLevel>()
+var array<SHLevel> lq_histMonthH = array.new<SHLevel>()
+var array<SHLevel> lq_histMonthL = array.new<SHLevel>()
+
+// Prune a level array by count cap, then by age (deletes drawings). Newest is index 0; oldest is last().
+f_lqPrune(array<SHLevel> _arr, int _cap, int _lookbackMs) =>
+	while _arr.size() > _cap
+		SHLevel _o = _arr.pop()
+		line.delete(_o.ln)
+		label.delete(_o.lbl)
+		if not na(_o.sweep)
+			label.delete(_o.sweep.marker)
+	while _arr.size() > 1 and not na(_arr.last().priceTime) and (time - _arr.last().priceTime) > _lookbackMs
+		SHLevel _o = _arr.pop()
+		line.delete(_o.ln)
+		label.delete(_o.lbl)
+		if not na(_o.sweep)
+			label.delete(_o.sweep.marker)
+
+// Draw/update one liquidity-level array: shared sweep detection, close-through mitigation, grey-out.
+_lq_processHist(_show, array<SHLevel> _hist, _isHigh, _color, _style, _name) =>
+	if _hist.size() > 0
+		for i = 0 to _hist.size() - 1
+			SHLevel _lvl = _hist.get(i)
+			if na(_lvl.price)
+				continue
+			// Mitigation state is maintained even when the level class is hidden (the Dashboard reads it)
+			if not _lvl.mitigated and barstate.isconfirmed and (_isHigh ? close > _lvl.price : close < _lvl.price)
+				_lvl.mitigated := true
+			// Sweep detection is also display-independent; only the TS marker draw is gated by _show
+			if ENABLE_SWEEPS
+				if na(_lvl.sweep)
+					_lvl.sweep := SweepState.new()
+				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
+					f_sweepMark(_lvl.sweep, _name, _isHigh, _show)
+			if not _show
+				continue
+			if _lvl.mitigated and not lq_showMit
+				line.delete(_lvl.ln)
+				label.delete(_lvl.lbl)
+				_lvl.ln := line(na)
+				_lvl.lbl := label(na)
+				if not na(_lvl.sweep)
+					label.delete(_lvl.sweep.marker)
+					_lvl.sweep.marker := na
+				continue
+			int _x1 = math.max(nz(_lvl.startBar, bar_index - 1), 0)
+			int _x2 = bar_index + 30
+			bool _swept = ENABLE_SWEEPS and not na(_lvl.sweep) and _lvl.sweep.phase == 2
+			color _lineClr = _swept ? sweep_lineColor : _lvl.mitigated ? lq_mitColor : _color
+			string _swTxt = _swept ? " ⚡TS" : ""
+			string _mitTxt = _lvl.mitigated ? " [Mitigated]" : ""
+			string _txt = _name + " " + str.tostring(_lvl.price, format.mintick) + _swTxt + _mitTxt
+			string _ls = _lvl.mitigated ? line.style_dotted : f_get_line_style(_style)
+			if na(_lvl.ln)
+				_lvl.ln := line.new(_x1, _lvl.price, _x2, _lvl.price, color=_lineClr, style=_ls, width=lq_lineWidth)
+			line.set_x2(_lvl.ln, _x2)
+			line.set_color(_lvl.ln, _lineClr)
+			line.set_style(_lvl.ln, _ls)
+			if lq_showLabels
+				if na(_lvl.lbl)
+					_lvl.lbl := label.new(_x2, _lvl.price, _txt, style=label.style_label_left, color=color.new(color.white, 100), textcolor=_lineClr, size=size.small)
+				label.set_xy(_lvl.lbl, _x2, _lvl.price)
+				label.set_text(_lvl.lbl, _txt)
+				label.set_textcolor(_lvl.lbl, _lineClr)
+
+[_secWeekHi, _secWeekLo, _secWeekT] = request.security(syminfo.tickerid, "W", [high[1], low[1], time[1]], lookahead = barmerge.lookahead_on)
+[_secMonthHi, _secMonthLo, _secMonthT] = request.security(syminfo.tickerid, "M", [high[1], low[1], time[1]], lookahead = barmerge.lookahead_on)
+
+var int _lqPrevWeekT = na
+var int _lqPrevMonthT = na
+int _lqLookbackMs = lq_lookbackDays * 86400000
+if ENABLE_LIQUIDITY
+	if not na(_secWeekHi) and (na(_lqPrevWeekT) or _secWeekT != _lqPrevWeekT)
+		lq_histWeekH.unshift(SHLevel.new(price = _secWeekHi, startBar = bar_index, priceTime = _secWeekT))
+		lq_histWeekL.unshift(SHLevel.new(price = _secWeekLo, startBar = bar_index, priceTime = _secWeekT))
+		f_lqPrune(lq_histWeekH, lq_maxWeekly, _lqLookbackMs)
+		f_lqPrune(lq_histWeekL, lq_maxWeekly, _lqLookbackMs)
+		_lqPrevWeekT := _secWeekT
+	if not na(_secMonthHi) and (na(_lqPrevMonthT) or _secMonthT != _lqPrevMonthT)
+		lq_histMonthH.unshift(SHLevel.new(price = _secMonthHi, startBar = bar_index, priceTime = _secMonthT))
+		lq_histMonthL.unshift(SHLevel.new(price = _secMonthLo, startBar = bar_index, priceTime = _secMonthT))
+		f_lqPrune(lq_histMonthH, lq_maxMonthly, _lqLookbackMs)
+		f_lqPrune(lq_histMonthL, lq_maxMonthly, _lqLookbackMs)
+		_lqPrevMonthT := _secMonthT
+
+var float _midDayHi=na
+var float _midDayLo=na
+var float _prevMidDayHi=na
+var float _prevMidDayLo=na
+var bool _wasMidnight=false
+
+bool _isMidNY = hour(time, "America/New_York") == 0 and minute(time, "America/New_York") == 0
+if timeframe.isintraday and (ENABLE_LIQUIDITY or ENABLE_PDA_SCANNER or ENABLE_SETUP or ENABLE_DASHBOARD)
+	if _isMidNY and not _wasMidnight
+		_prevMidDayHi := _midDayHi
+		_prevMidDayLo := _midDayLo
+		if ENABLE_LIQUIDITY and not na(_midDayHi)
+			lq_histDayH.unshift(SHLevel.new(price = _midDayHi, startBar = bar_index, priceTime = time))
+			lq_histDayL.unshift(SHLevel.new(price = _midDayLo, startBar = bar_index, priceTime = time))
+			f_lqPrune(lq_histDayH, lq_maxDaily, _lqLookbackMs)
+			f_lqPrune(lq_histDayL, lq_maxDaily, _lqLookbackMs)
+		_midDayHi := high
+		_midDayLo := low
+	else
+		if na(_midDayHi)
+			_midDayHi := high
+			_midDayLo := low
+		else
+			_midDayHi := math.max(_midDayHi, high)
+			_midDayLo := math.min(_midDayLo, low)
+	_wasMidnight := _isMidNY
+
+if ENABLE_LIQUIDITY
+	_lq_processHist(lq_showPDH, lq_histDayH,   true,  lq_pdhColor, lq_pdStyle, "PDH")
+	_lq_processHist(lq_showPDH, lq_histDayL,   false, lq_pdlColor, lq_pdStyle, "PDL")
+	_lq_processHist(lq_showPWH, lq_histWeekH,  true,  lq_pwhColor, lq_pwStyle, "PWH")
+	_lq_processHist(lq_showPWH, lq_histWeekL,  false, lq_pwlColor, lq_pwStyle, "PWL")
+	_lq_processHist(lq_showPMH, lq_histMonthH, true,  lq_pmhColor, lq_pmStyle, "PMH")
+	_lq_processHist(lq_showPMH, lq_histMonthL, false, lq_pmlColor, lq_pmStyle, "PML")
+
+var array<LiqPool> eqhPools = array.new<LiqPool>()
+var array<LiqPool> eqlPools = array.new<LiqPool>()
+var array<float> _eqhRecent = array.new<float>()
+var array<float> _eqlRecent = array.new<float>()
+
+// ta.* computed unconditionally (Pine requires consistent per-bar calls); logic/drawing gated by ENABLE_EQHL
+float _eqhlPh  = ta.pivothigh(eqhl_pivotLen, eqhl_pivotLen)
+float _eqhlPl  = ta.pivotlow(eqhl_pivotLen, eqhl_pivotLen)
+float _eqhlTol = ta.sma(high - low, eqhl_pivotLen) * eqhl_tolMult
+if ENABLE_EQHL
+	if not na(_eqhlPh)
+		if _eqhRecent.size() > 0
+			for j = 0 to _eqhRecent.size() - 1
+				if math.abs(_eqhlPh - _eqhRecent.get(j)) <= _eqhlTol
+					f_eqhlAdd(eqhPools, math.max(_eqhlPh, _eqhRecent.get(j)), _eqhlTol)
+					break
+		_eqhRecent.unshift(_eqhlPh)
+		if _eqhRecent.size() > 6
+			_eqhRecent.pop()
+	if not na(_eqhlPl)
+		if _eqlRecent.size() > 0
+			for j = 0 to _eqlRecent.size() - 1
+				if math.abs(_eqhlPl - _eqlRecent.get(j)) <= _eqhlTol
+					f_eqhlAdd(eqlPools, math.min(_eqhlPl, _eqlRecent.get(j)), _eqhlTol)
+					break
+		_eqlRecent.unshift(_eqhlPl)
+		if _eqlRecent.size() > 6
+			_eqlRecent.pop()
+	f_eqhlProcess(eqhPools, true)
+	f_eqhlProcess(eqlPools, false)
+
+// ㉙ Wick Reversal driver — single current-pivot-per-side (no array/pruning), reuses the
+// ㉓ pivot calc above (_eqhlPh/_eqhlPl, already computed unconditionally) and the ㉒ sweep
+// engine's marker/alert/webhook/Setup-Score plumbing via f_sweepMark.
+var SweepState wickRevH = SweepState.new()
+var SweepState wickRevL = SweepState.new()
+if ENABLE_WICK_REV
+	if f_wickTick(wickRevH, _eqhlPh, math.max(close[eqhl_pivotLen], open[eqhl_pivotLen]), low[eqhl_pivotLen], true, sweep_confirmBars)
+		f_sweepMark(wickRevH, "WR", true, true)
+	if f_wickTick(wickRevL, _eqhlPl, math.min(close[eqhl_pivotLen], open[eqhl_pivotLen]), high[eqhl_pivotLen], false, sweep_confirmBars)
+		f_sweepMark(wickRevL, "WR", false, true)
+
+// ㉔ Market Structure driver — pivots computed unconditionally (ta.* consistency); gated logic below
+float _structPh = ta.pivothigh(struct_pivotLen, struct_pivotLen)
+float _structPl = ta.pivotlow(struct_pivotLen, struct_pivotLen)
+if ENABLE_STRUCTURE
+	// Resolve any pending break on the CURRENT swings first, so a same-bar new pivot can't wipe a confirming candidate.
+	if not na(structLastHigh) and not structHighResolved
+		int _rH = f_bosTick(bosH, structLastHigh, true, struct_holdBars)
+		if _rH == 2
+			bool _isCh = struct_trend == -1
+			f_structDrawBreak(structLastHigh, structHighBar, _isCh, true)
+			struct_lastBreak := _isCh ? "CHoCH" : "BOS"
+			struct_trend := 1
+			structHighResolved := true
+		else if _rH == 3
+			bosH.phase := 0    // re-arm: a failed break leaves the level live for a later genuine break
+	if not na(structLastLow) and not structLowResolved
+		int _rL = f_bosTick(bosL, structLastLow, false, struct_holdBars)
+		if _rL == 2
+			bool _isCh = struct_trend == 1
+			f_structDrawBreak(structLastLow, structLowBar, _isCh, false)
+			struct_lastBreak := _isCh ? "CHoCH" : "BOS"
+			struct_trend := -1
+			structLowResolved := true
+		else if _rL == 3
+			bosL.phase := 0
+	// Then ingest fresh confirmed pivots (re-arm for the new swing level).
+	if not na(_structPh)
+		structLastHigh := _structPh
+		structHighBar := bar_index - struct_pivotLen
+		structHighResolved := false
+		bosH := BosState.new()
+	if not na(_structPl)
+		structLastLow := _structPl
+		structLowBar := bar_index - struct_pivotLen
+		structLowResolved := false
+		bosL := BosState.new()
+
+// Native alertconditions for sweep/structure confirms (webhook path unchanged). Placed after the
+// structure driver so every AlertFlags write this bar has already run.
+alertcondition(alertFlags.swpBsl, title="Sweep BSL", message="SWEEP BSL {{ticker}} {{interval}}")
+alertcondition(alertFlags.swpSsl, title="Sweep SSL", message="SWEEP SSL {{ticker}} {{interval}}")
+alertcondition(alertFlags.bosBull, title="BOS Bull", message="BOS BSL {{ticker}} {{interval}}")
+alertcondition(alertFlags.bosBear, title="BOS Bear", message="BOS SSL {{ticker}} {{interval}}")
+alertcondition(alertFlags.chBull, title="CHoCH Bull", message="CHoCH BSL {{ticker}} {{interval}}")
+alertcondition(alertFlags.chBear, title="CHoCH Bear", message="CHoCH SSL {{ticker}} {{interval}}")
+
+// ═══════════ ㉗ SMT Divergences ═══════════
+// Two-scale synchronized-pair SMT divergence (chart symbol vs up to 2 correlated symbols).
+// Technique inspired by LuxAlgo "SMT Divergences"; independent re-implementation: raw ta.pivot*
+// (na except on the confirm bar), pending-per-side pairing within a scale-proportional window,
+// divergence on consecutive synced swing points. SmtPair UDT threaded by-reference (like SweepState).
+var bool   smt_useSym1   = input.bool(true, "Symbol 1", group="㉗ SMT Divergences", inline="smt1")
+var string smt_sym1      = input.symbol("CME_MINI_DL:ES1!", "", group="㉗ SMT Divergences", inline="smt1")
+var bool   smt_useSym2   = input.bool(true, "Symbol 2", group="㉗ SMT Divergences", inline="smt2")
+var string smt_sym2      = input.symbol("CBOT_MINI_DL:YM1!", "", group="㉗ SMT Divergences", inline="smt2")
+var int    smt_lenShort  = input.int(5, "Pivot — short", minval=2, group="㉗ SMT Divergences", inline="smt3")
+var int    smt_lenLong   = input.int(25, "long", minval=2, group="㉗ SMT Divergences", inline="smt3")
+var float  smt_pairMult  = input.float(1.0, "Pair window ×len", minval=0.0, maxval=5.0, step=0.25, group="㉗ SMT Divergences", inline="smt3", tooltip="Two pivots pair if their bars are within (pivot length × this) bars. Scales per scale, so the long pass tolerates wider gaps.")
+var color  smt_shColor   = input.color(#ff1100, "Swing-High Div", group="㉗ SMT Divergences", inline="smt4")
+var color  smt_slColor   = input.color(#2157f3, "Swing-Low Div", group="㉗ SMT Divergences", inline="smt4")
+var int    smt_maxDiv    = input.int(20, "Max Divergences", minval=1, maxval=100, group="㉗ SMT Divergences", inline="smt5", tooltip="Per-array cap (lines and labels each capped at 2×). Shared across both scales and symbols.")
+var string smt_labelSize = input.string("Tiny", "Label", options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="㉗ SMT Divergences", inline="smt5")
+var bool   smt_showPivot = input.bool(true, "Pivot-divergence", group="㉗ SMT Divergences", inline="smt6", tooltip="LuxAlgo-style: divergence between consecutive synced swing points (2 scales).")
+var bool   smt_showBreak = input.bool(true, "Level-break (sweep)", group="㉗ SMT Divergences", inline="smt6", tooltip="One symbol breaks its recent structural high/low while the other holds (uses the long-scale level + sweep_confirmBars hold).")
+
+type SmtPair
+	float chV     = na
+	int   chB     = na
+	float cmV     = na
+	int   cmB     = na
+	float chPrev  = na
+	int   chPrevB = na
+	float cmPrev  = na
+	int   count   = 0
+	int   lastT   = na
+
+var array<line>  smt_lines  = array.new<line>()
+var array<label> smt_labels = array.new<label>()
+var string   smt_tk1 = na
+var string   smt_tk2 = na
+var SmtPair smtS1H = SmtPair.new()
+var SmtPair smtS1L = SmtPair.new()
+var SmtPair smtS2H = SmtPair.new()
+var SmtPair smtS2L = SmtPair.new()
+var SmtPair smtL1H = SmtPair.new()
+var SmtPair smtL1L = SmtPair.new()
+var SmtPair smtL2H = SmtPair.new()
+var SmtPair smtL2L = SmtPair.new()
+
+// Level-break (sweep) SMT — each symbol's reference is its OWN most-recent long-scale pivot (tracked
+// independently, no coincidence needed); fire when one symbol breaks its reference and the other holds.
+type SmtBreak
+	float refCh    = na
+	int   refChBar = na
+	float refCm    = na
+	int   firstBrkBar = na
+	bool  firstWasCh  = false
+	bool  resolved    = false
+	int   count    = 0
+	int   lastT    = na
+
+var SmtBreak brk1H = SmtBreak.new()
+var SmtBreak brk1L = SmtBreak.new()
+var SmtBreak brk2H = SmtBreak.new()
+var SmtBreak brk2L = SmtBreak.new()
+
+// One detector for one bar. Feed the chart + comparison raw pivots; when both pending slots are filled
+// and their pivot bars are within _win, they form a synced swing point — compared to the previous synced
+// point for a direction divergence. Draws the chart-price line + ticker label into the passed arrays,
+// mutates st by-reference, returns true on a fire (driver ORs that into the alert flags).
+f_smtPair(SmtPair st, array<line> _lns, array<label> _lbs, bool _chP, float _chV, int _chB, bool _cmP, float _cmV, int _cmB, int _win, bool _isHigh, string _name, int _width) =>
+	bool _fired = false
+	if _chP
+		st.chV := _chV
+		st.chB := _chB
+	if _cmP
+		st.cmV := _cmV
+		st.cmB := _cmB
+	if not na(st.chV) and not na(st.cmV) and math.abs(st.chB - st.cmB) <= _win
+		if not na(st.chPrev) and not na(st.cmPrev)
+			if (st.chV - st.chPrev) * (st.cmV - st.cmPrev) < 0
+				color _clr = _isHigh ? smt_shColor : smt_slColor
+				_lns.unshift(line.new(st.chPrevB, st.chPrev, st.chB, st.chV, color = _clr, style = line.style_solid, width = _width))
+				_lbs.unshift(label.new(st.chB, st.chV, _name, style = _isHigh ? label.style_label_down : label.style_label_up, color = color.new(color.white, 100), textcolor = _clr, size = _ho_getSize(smt_labelSize)))
+				st.count := st.count + 1
+				st.lastT := time
+				_fired := true
+				if wh_enable and wh_smt
+					alert(_wh_json(_isHigh ? "SMT BEAR " + _name : "SMT BULL " + _name, st.chV, st.chV), alert.freq_once_per_bar_close)
+		st.chPrev := st.chV
+		st.cmPrev := st.cmV
+		st.chPrevB := st.chB
+		st.chV := na
+		st.cmV := na
+	_fired
+
+// Level-break detector for one (symbol, side). Each reference = that symbol's own latest long pivot
+// (independent — no coincidence needed); either reference updating re-arms the pair. A break is a
+// wick through the reference (low<ref / high>ref); SMT fires when one side breaks and the OTHER holds
+// for _hold confirmed bars (if both break, it's not a divergence). Draws a dotted level line + a marker
+// naming the breaker. Mutates st by-reference; returns true on a fire.
+f_smtBreak(SmtBreak st, array<line> _lns, array<label> _lbs, bool _isHigh, bool _chPiv, float _chPv, int _chPb, bool _cmPiv, float _cmPv, float _chPx, float _cmPx, int _hold, string _name) =>
+	bool _fired = false
+	if _chPiv
+		st.refCh := _chPv
+		st.refChBar := _chPb
+		st.firstBrkBar := na
+		st.resolved := false
+	if _cmPiv
+		st.refCm := _cmPv
+		st.firstBrkBar := na
+		st.resolved := false
+	if barstate.isconfirmed and not st.resolved and not na(st.refCh) and not na(st.refCm)
+		bool _chBrk = _isHigh ? (_chPx > st.refCh) : (_chPx < st.refCh)
+		bool _cmBrk = _isHigh ? (_cmPx > st.refCm) : (_cmPx < st.refCm)
+		if na(st.firstBrkBar)
+			if _chBrk and not _cmBrk
+				st.firstBrkBar := bar_index
+				st.firstWasCh := true
+			else if _cmBrk and not _chBrk
+				st.firstBrkBar := bar_index
+				st.firstWasCh := false
+			else if _chBrk and _cmBrk
+				st.resolved := true
+		else
+			bool _otherBrk = st.firstWasCh ? _cmBrk : _chBrk
+			if _otherBrk
+				st.resolved := true
+			else if bar_index - st.firstBrkBar >= _hold
+				color _clr = _isHigh ? smt_shColor : smt_slColor
+				string _breaker = st.firstWasCh ? syminfo.ticker : _name
+				_lns.unshift(line.new(st.refChBar, st.refCh, bar_index, st.refCh, color = _clr, style = line.style_dotted, width = 2))
+				_lbs.unshift(label.new(bar_index, _isHigh ? high : low, "SMT " + _breaker + (_isHigh ? " HH" : " LL"), style = _isHigh ? label.style_label_down : label.style_label_up, color = color.new(_clr, 30), textcolor = color.white, size = _ho_getSize(smt_labelSize)))
+				st.count := st.count + 1
+				st.lastT := time
+				st.resolved := true
+				_fired := true
+				if wh_enable and wh_smt
+					alert(_wh_json((_isHigh ? "SMT BREAK BEAR " : "SMT BREAK BULL ") + _breaker, _chPx, _cmPx), alert.freq_once_per_bar)
+	_fired
+
+// Chart pivots per scale — computed UNCONDITIONALLY (ta.* per-bar consistency, matches ㉓/㉔). Raw: na except on the confirm bar.
+float _chPhS = ta.pivothigh(smt_lenShort, smt_lenShort)
+float _chPlS = ta.pivotlow(smt_lenShort, smt_lenShort)
+float _chPhL = ta.pivothigh(smt_lenLong, smt_lenLong)
+float _chPlL = ta.pivotlow(smt_lenLong, smt_lenLong)
+int _winS = int(math.round(smt_lenShort * smt_pairMult))
+int _winL = int(math.round(smt_lenLong * smt_pairMult))
+bool smtBullFired = false
+bool smtBearFired = false
+
+if ENABLE_SMT
+	if smt_useSym1
+		[h1, l1, tk1] = request.security(smt_sym1, timeframe.period, [high, low, syminfo.ticker])
+		smt_tk1 := tk1
+		float _s1PhS = ta.pivothigh(h1, smt_lenShort, smt_lenShort)
+		float _s1PlS = ta.pivotlow(l1, smt_lenShort, smt_lenShort)
+		float _s1PhL = ta.pivothigh(h1, smt_lenLong, smt_lenLong)
+		float _s1PlL = ta.pivotlow(l1, smt_lenLong, smt_lenLong)
+		if smt_showPivot
+			smtBearFired := f_smtPair(smtS1H, smt_lines, smt_labels, not na(_chPhS), _chPhS, bar_index - smt_lenShort, not na(_s1PhS), _s1PhS, bar_index - smt_lenShort, _winS, true,  tk1, 1) or smtBearFired
+			smtBullFired := f_smtPair(smtS1L, smt_lines, smt_labels, not na(_chPlS), _chPlS, bar_index - smt_lenShort, not na(_s1PlS), _s1PlS, bar_index - smt_lenShort, _winS, false, tk1, 1) or smtBullFired
+			smtBearFired := f_smtPair(smtL1H, smt_lines, smt_labels, not na(_chPhL), _chPhL, bar_index - smt_lenLong,  not na(_s1PhL), _s1PhL, bar_index - smt_lenLong,  _winL, true,  tk1, 2) or smtBearFired
+			smtBullFired := f_smtPair(smtL1L, smt_lines, smt_labels, not na(_chPlL), _chPlL, bar_index - smt_lenLong,  not na(_s1PlL), _s1PlL, bar_index - smt_lenLong,  _winL, false, tk1, 2) or smtBullFired
+		if smt_showBreak
+			smtBearFired := f_smtBreak(brk1H, smt_lines, smt_labels, true,  not na(_chPhL), _chPhL, bar_index - smt_lenLong, not na(_s1PhL), _s1PhL, high, h1, sweep_confirmBars, tk1) or smtBearFired
+			smtBullFired := f_smtBreak(brk1L, smt_lines, smt_labels, false, not na(_chPlL), _chPlL, bar_index - smt_lenLong, not na(_s1PlL), _s1PlL, low,  l1, sweep_confirmBars, tk1) or smtBullFired
+	if smt_useSym2
+		[h2, l2, tk2] = request.security(smt_sym2, timeframe.period, [high, low, syminfo.ticker])
+		smt_tk2 := tk2
+		float _s2PhS = ta.pivothigh(h2, smt_lenShort, smt_lenShort)
+		float _s2PlS = ta.pivotlow(l2, smt_lenShort, smt_lenShort)
+		float _s2PhL = ta.pivothigh(h2, smt_lenLong, smt_lenLong)
+		float _s2PlL = ta.pivotlow(l2, smt_lenLong, smt_lenLong)
+		if smt_showPivot
+			smtBearFired := f_smtPair(smtS2H, smt_lines, smt_labels, not na(_chPhS), _chPhS, bar_index - smt_lenShort, not na(_s2PhS), _s2PhS, bar_index - smt_lenShort, _winS, true,  tk2, 1) or smtBearFired
+			smtBullFired := f_smtPair(smtS2L, smt_lines, smt_labels, not na(_chPlS), _chPlS, bar_index - smt_lenShort, not na(_s2PlS), _s2PlS, bar_index - smt_lenShort, _winS, false, tk2, 1) or smtBullFired
+			smtBearFired := f_smtPair(smtL2H, smt_lines, smt_labels, not na(_chPhL), _chPhL, bar_index - smt_lenLong,  not na(_s2PhL), _s2PhL, bar_index - smt_lenLong,  _winL, true,  tk2, 2) or smtBearFired
+			smtBullFired := f_smtPair(smtL2L, smt_lines, smt_labels, not na(_chPlL), _chPlL, bar_index - smt_lenLong,  not na(_s2PlL), _s2PlL, bar_index - smt_lenLong,  _winL, false, tk2, 2) or smtBullFired
+		if smt_showBreak
+			smtBearFired := f_smtBreak(brk2H, smt_lines, smt_labels, true,  not na(_chPhL), _chPhL, bar_index - smt_lenLong, not na(_s2PhL), _s2PhL, high, h2, sweep_confirmBars, tk2) or smtBearFired
+			smtBullFired := f_smtBreak(brk2L, smt_lines, smt_labels, false, not na(_chPlL), _chPlL, bar_index - smt_lenLong, not na(_s2PlL), _s2PlL, low,  l2, sweep_confirmBars, tk2) or smtBullFired
+	while smt_lines.size() > smt_maxDiv * 2
+		line.delete(smt_lines.pop())
+	while smt_labels.size() > smt_maxDiv * 2
+		label.delete(smt_labels.pop())
+
+if smtBullFired
+	setupState.smtBullBar := bar_index
+if smtBearFired
+	setupState.smtBearBar := bar_index
+
+alertcondition(smtBullFired, title="SMT Bull", message="SMT Bull {{ticker}} {{interval}}")
+alertcondition(smtBearFired, title="SMT Bear", message="SMT Bear {{ticker}} {{interval}}")
+
+var string pda_range=input.string("Previous Day", "Dealing Range", options=["Previous Day", "Previous Week", "Previous Month"], group="㉕ PD Array Scanner", tooltip="Range for EQ. Premium/Discount.")
+var bool pda_showEQ=input.bool(true, "EQ Line", group="㉕ PD Array Scanner", inline="pda1")
+var color pda_eqColor=input.color(color.new(color.white, 30), "", group="㉕ PD Array Scanner", inline="pda1")
+var bool pda_showQ=input.bool(true, "25/75%", group="㉕ PD Array Scanner", inline="pda1b")
+var color pda_qColor=input.color(color.new(color.white, 50), "", group="㉕ PD Array Scanner", inline="pda1b")
+var string pda_lineStyle=input.string("----", "Line Style", options=['⎯⎯⎯', '----', '····'], group="㉕ PD Array Scanner", inline="pda1c")
+var int pda_lineWidth=input.int(1, "Width", 1, 4, group="㉕ PD Array Scanner", inline="pda1c")
+var int pda_histCount=input.int(1, "History Count", 1, 5, group="㉕ PD Array Scanner", inline="pda1d", tooltip="Number of previous periods to show.")
+var bool pda_showLabels=input.bool(true, "Labels", group="㉕ PD Array Scanner", inline="pda1d")
+var string pda_labelSize=input.string("Tiny", "", options=['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], group="㉕ PD Array Scanner", inline="pda1d")
+
+type DealingRange
+	float hi
+	float lo
+	int startBar
+	string dateTxt
+	line eqLn = na
+	line q25Ln = na
+	line q75Ln = na
+	label eqLbl = na
+	label q25Lbl = na
+	label q75Lbl = na
+
+var array<DealingRange> pda_ranges=array.new<DealingRange>()
+var float pda_prevHi=na
+
+_pda_dateFmt(_t) =>
+	switch pda_range
+		"Previous Day" => str.format_time(_t, "dd/MM/yyyy", "America/New_York")
+		"Previous Week" => "W" + str.format_time(_t, "dd/MM/yyyy", "America/New_York")
+		"Previous Month" => str.format_time(_t, "MMM yyyy", "America/New_York")
+		=> str.format_time(_t, "dd/MM/yyyy", "America/New_York")
+
+_pda_rangeHi() =>
+	switch pda_range
+		"Previous Day" => _prevMidDayHi
+		"Previous Week" => _secWeekHi
+		"Previous Month" => _secMonthHi
+		=> _prevMidDayHi
+
+_pda_rangeLo() =>
+	switch pda_range
+		"Previous Day" => _prevMidDayLo
+		"Previous Week" => _secWeekLo
+		"Previous Month" => _secMonthLo
+		=> _prevMidDayLo
+
+_pda_resetDR(_dr) =>
+	line.delete(_dr.eqLn)
+	line.delete(_dr.q25Ln)
+	line.delete(_dr.q75Ln)
+	label.delete(_dr.eqLbl)
+	label.delete(_dr.q25Lbl)
+	label.delete(_dr.q75Lbl)
+
+float _pdaHi = _pda_rangeHi()
+float _pdaLo = _pda_rangeLo()
+
+if ENABLE_PDA_SCANNER and not na(_pdaHi) and (na(pda_prevHi) or _pdaHi != pda_prevHi)
+	string _dt = _pda_dateFmt(time)
+	pda_ranges.unshift(DealingRange.new(_pdaHi, _pdaLo, bar_index, _dt))
+	while pda_ranges.size() > pda_histCount
+		DealingRange _old = pda_ranges.pop()
+		_pda_resetDR(_old)
+	pda_prevHi := _pdaHi
+
+f_pdaScanner() =>
+	string _ls = f_get_line_style(pda_lineStyle)
+	int _x2 = bar_index + 20
+	string _sz = _ho_getSize(pda_labelSize)
+
+	for i = 0 to math.max(pda_ranges.size() - 1, 0) by 1
+		if i < pda_ranges.size()
+			DealingRange _dr = pda_ranges.get(i)
+			float _eq = (_dr.hi + _dr.lo) / 2
+			float _q25v = _dr.lo + (_dr.hi - _dr.lo) * 0.25
+			float _q75v = _dr.lo + (_dr.hi - _dr.lo) * 0.75
+			int _x1 = math.max(_dr.startBar, bar_index - 4999)
+			color _eClr = i == 0 ? pda_eqColor : color.new(pda_eqColor, 50 + i * 10)
+			color _qClr = i == 0 ? pda_qColor : color.new(pda_qColor, 50 + i * 10)
+
+			if pda_showEQ
+				if na(_dr.eqLn)
+					_dr.eqLn := line.new(_x1, _eq, _x2, _eq, color = _eClr, style = _ls, width = pda_lineWidth)
+				else
+					line.set_xy1(_dr.eqLn, _x1, _eq)
+					line.set_xy2(_dr.eqLn, _x2, _eq)
+					line.set_style(_dr.eqLn, _ls)
+					line.set_color(_dr.eqLn, _eClr)
+					line.set_width(_dr.eqLn, pda_lineWidth)
+				if pda_showLabels
+					string _eTxt = _dr.dateTxt + " EQ " + str.tostring(_eq, format.mintick)
+					if na(_dr.eqLbl)
+						_dr.eqLbl := label.new(_x2, _eq, _eTxt, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _eClr, size = _sz)
+					else
+						label.set_xy(_dr.eqLbl, _x2, _eq)
+						label.set_text(_dr.eqLbl, _eTxt)
+						label.set_textcolor(_dr.eqLbl, _eClr)
+						label.set_size(_dr.eqLbl, _sz)
+
+			if pda_showQ
+				if na(_dr.q25Ln)
+					_dr.q25Ln := line.new(_x1, _q25v, _x2, _q25v, color = _qClr, style = _ls, width = pda_lineWidth)
+					_dr.q75Ln := line.new(_x1, _q75v, _x2, _q75v, color = _qClr, style = _ls, width = pda_lineWidth)
+				else
+					line.set_xy1(_dr.q25Ln, _x1, _q25v)
+					line.set_xy2(_dr.q25Ln, _x2, _q25v)
+					line.set_style(_dr.q25Ln, _ls)
+					line.set_color(_dr.q25Ln, _qClr)
+					line.set_width(_dr.q25Ln, pda_lineWidth)
+					line.set_xy1(_dr.q75Ln, _x1, _q75v)
+					line.set_xy2(_dr.q75Ln, _x2, _q75v)
+					line.set_style(_dr.q75Ln, _ls)
+					line.set_color(_dr.q75Ln, _qClr)
+					line.set_width(_dr.q75Ln, pda_lineWidth)
+				if pda_showLabels
+					string _25t = _dr.dateTxt + " 25% " + str.tostring(_q25v, format.mintick)
+					string _75t = _dr.dateTxt + " 75% " + str.tostring(_q75v, format.mintick)
+					if na(_dr.q25Lbl)
+						_dr.q25Lbl := label.new(_x2, _q25v, _25t, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _qClr, size = _sz)
+						_dr.q75Lbl := label.new(_x2, _q75v, _75t, style = label.style_label_left, color = color.new(color.white, 100), textcolor = _qClr, size = _sz)
+					else
+						label.set_xy(_dr.q25Lbl, _x2, _q25v)
+						label.set_text(_dr.q25Lbl, _25t)
+						label.set_textcolor(_dr.q25Lbl, _qClr)
+						label.set_size(_dr.q25Lbl, _sz)
+						label.set_xy(_dr.q75Lbl, _x2, _q75v)
+						label.set_text(_dr.q75Lbl, _75t)
+						label.set_textcolor(_dr.q75Lbl, _qClr)
+						label.set_size(_dr.q75Lbl, _sz)
+	true
+
+if ENABLE_PDA_SCANNER
+	f_pdaScanner()
+
+// ===== ㉘ Setup Score — read-only confluence checklist per side (feeds the ㉖ Setup row) =====
+var int setup_lookback = input.int(20, "Freshness (bars)", minval=1, maxval=200, group="㉘ Setup Score", tooltip="A sweep/SMT confirm counts toward the score for this many bars.")
+
+// Shared bias read (also feeds the ㉖ Bias row): +1 discount, -1 premium, 0 unknown; pct is na in gap/unknown states.
+int biasDir = 0
+float biasPct = na
+if (ENABLE_SETUP or (ENABLE_DASHBOARD and barstate.islast)) and not na(_pdaHi) and _pdaHi > _pdaLo
+	float _p = (close - _pdaLo) / (_pdaHi - _pdaLo) * 100
+	if _p >= 0 and _p <= 100
+		biasDir := _p >= 50 ? -1 : 1
+		biasPct := _p
+	else
+		// Price gapped outside the dealing range: the % is degenerate — read bias vs the Midnight Open instead
+		biasDir := (ho_midPrices.size() > 0 ? close >= ho_midPrices.get(0) : _p > 100) ? -1 : 1
+
+// Score one side: killzone + bias + fresh sweep + fresh SMT + structure trend, 1 pt each.
+f_setupScore(bool _isLong) =>
+	int _swpBar = _isLong ? setupState.swpSslBar : setupState.swpBslBar
+	int _smtBar = _isLong ? setupState.smtBullBar : setupState.smtBearBar
+	(not na(kz_bg) ? 1 : 0) + (biasDir == (_isLong ? 1 : -1) ? 1 : 0) + (not na(_swpBar) and bar_index - _swpBar < setup_lookback ? 1 : 0) + (not na(_smtBar) and bar_index - _smtBar < setup_lookback ? 1 : 0) + (struct_trend == (_isLong ? 1 : -1) ? 1 : 0)
+
+int setupLongScore = 0
+int setupShortScore = 0
+if ENABLE_SETUP
+	setupLongScore := f_setupScore(true)
+	setupShortScore := f_setupScore(false)
+
+// ㉑ CTX heartbeat — one bar-close webhook with price + confluence context; the tv_events
+// outcome logger joins every other event against these bars (see supabase/README.md)
+if wh_enable and wh_heartbeat and barstate.isconfirmed
+	alert('{"event":"CTX","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '","bias_dir":' + str.tostring(biasDir) + ',"score_l":' + str.tostring(setupLongScore) + ',"score_s":' + str.tostring(setupShortScore) + ',"in_kz":' + (na(kz_bg) ? 'false' : 'true') + '}', alert.freq_once_per_bar_close)
+
+// ===== ㉛ Economic Calendar =====
+// Calendar data and rendering use the MPL-2.0 toodegrees Forex Factory utility/decoder libraries pinned above.
+const string EC_TIME_GROUP='㉛ Economic Calendar - Time'
+const string EC_FILTER_GROUP='㉛ Economic Calendar - Filters'
+const string EC_CHART_GROUP='㉛ Economic Calendar - Chart'
+const string EC_TABLE_GROUP='㉛ Economic Calendar - Table'
+
+var bool ec_customTimezone=input.bool(false, 'Custom timezone', group=EC_TIME_GROUP, inline='ect1')
+var int ec_timezoneH=input.int(1, 'UTC', minval=-10, maxval=13, group=EC_TIME_GROUP, inline='ect1')
+var int ec_timezoneM=input.int(0, ':', minval=0, maxval=59, step=15, group=EC_TIME_GROUP, inline='ect1', tooltip='Fixed UTC offset matching the chart timezone. DST changes require manual adjustment.')
+var bool ec_highImpact=input.bool(true, 'High', group=EC_FILTER_GROUP, inline='eci1')
+var bool ec_medImpact=input.bool(true, 'Medium', group=EC_FILTER_GROUP, inline='eci1')
+var bool ec_lowImpact=input.bool(true, 'Low', group=EC_FILTER_GROUP, inline='eci1')
+var bool ec_holiday=input.bool(true, 'Holiday', group=EC_FILTER_GROUP, inline='eci1')
+var bool ec_autoCurrency=input.bool(true, 'Automatic currencies', group=EC_FILTER_GROUP, tooltip='Selects currencies from the chart symbol. If an index resolves empty, disable Automatic and enable USD manually.')
+var bool ec_AUD=input.bool(false, 'AUD', group=EC_FILTER_GROUP, inline='ecc1')
+var bool ec_CAD=input.bool(false, 'CAD', group=EC_FILTER_GROUP, inline='ecc1')
+var bool ec_CHF=input.bool(false, 'CHF', group=EC_FILTER_GROUP, inline='ecc1')
+var bool ec_CNY=input.bool(false, 'CNY', group=EC_FILTER_GROUP, inline='ecc2')
+var bool ec_EUR=input.bool(false, 'EUR', group=EC_FILTER_GROUP, inline='ecc2')
+var bool ec_GBP=input.bool(false, 'GBP', group=EC_FILTER_GROUP, inline='ecc2')
+var bool ec_JPY=input.bool(false, 'JPY', group=EC_FILTER_GROUP, inline='ecc3')
+var bool ec_NZD=input.bool(false, 'NZD', group=EC_FILTER_GROUP, inline='ecc3')
+var bool ec_USD=input.bool(false, 'USD', group=EC_FILTER_GROUP, inline='ecc3')
+
+var string ec_onChartMode=input.string('This Week', 'Chart history', options=['Today', 'This Week', 'Manual'], group=EC_CHART_GROUP, inline='eco1')
+var int ec_onChartDays=input.int(30, '', minval=1, maxval=365, group=EC_CHART_GROUP, inline='eco1')
+var bool ec_showLabels=input.bool(true, 'Labels', group=EC_CHART_GROUP, inline='eco2')
+var string ec_labelSizeInput=input.string('Normal', '', options=['Tiny', 'Small', 'Normal', 'Large', 'Huge'], group=EC_CHART_GROUP, inline='eco2')
+var string ec_labelY=input.string('Auto', '', options=['Above', 'Below', 'Auto'], group=EC_CHART_GROUP, inline='eco2')
+var bool ec_labelOutline=input.bool(true, 'Outline', group=EC_CHART_GROUP, inline='eco2')
+var bool ec_showLines=input.bool(true, 'Lines', group=EC_CHART_GROUP, inline='eco3')
+var string ec_lineTime=input.string('Future', '', options=['Future', 'Past+Future'], group=EC_CHART_GROUP, inline='eco3')
+var string ec_lineWeightInput=input.string('Heavy', '', options=['Light', 'Medium', 'Heavy'], group=EC_CHART_GROUP, inline='eco3')
+var string ec_lineStyleInput=input.string('Solid', '', options=['Dashed', 'Dotted', 'Solid'], group=EC_CHART_GROUP, inline='eco3')
+var int ec_maxChartDrawings=input.int(120, 'Max calendar lines / labels', minval=10, maxval=250, group=EC_CHART_GROUP, tooltip='Independent cap for each calendar drawing type. Protects the Context indicators shared 500-object limits.')
+
+var bool ec_showTable=input.bool(true, 'Show', group=EC_TABLE_GROUP, inline='ectb1')
+var string ec_tableMode=input.string('This Week', '', options=['Today', 'This Week'], group=EC_TABLE_GROUP, inline='ectb1')
+var string ec_timeFormat=input.string('24H', '', options=['24H', 'AM/PM'], group=EC_TABLE_GROUP, inline='ectb1')
+var color ec_headTextColor=input.color(#dee1e9, 'Header', group=EC_TABLE_GROUP, inline='ectb2')
+var color ec_headBgColor=input.color(#283c70, '', group=EC_TABLE_GROUP, inline='ectb2')
+var color ec_pastTextColor=input.color(#787b86, 'Past/Future', group=EC_TABLE_GROUP, inline='ectb3')
+var color ec_futureTextColor=input.color(#000000, '', group=EC_TABLE_GROUP, inline='ectb3')
+var color ec_rowBgColor=input.color(#dee1e9, '', group=EC_TABLE_GROUP, inline='ectb3')
+var bool ec_tableBorder=input.bool(true, 'Border', group=EC_TABLE_GROUP, inline='ectb4')
+var color ec_borderColor=input.color(#000000, '', group=EC_TABLE_GROUP, inline='ectb4')
+var bool ec_borderAuto=input.bool(true, 'Auto', group=EC_TABLE_GROUP, inline='ectb4')
+var string ec_tableX=input.string('Right', 'Position', options=['Left', 'Center', 'Right'], group=EC_TABLE_GROUP, inline='ectb5')
+var string ec_tableY=input.string('Bottom', '', options=['Top', 'Middle', 'Bottom'], group=EC_TABLE_GROUP, inline='ectb5', tooltip='Choose a different corner if the ㉖ Dashboard uses the same anchor.')
+var string ec_tableSize=input.string('Small', '', options=['Tiny', 'Small', 'Normal', 'Large', 'Huge'], group=EC_TABLE_GROUP, inline='ectb5')
+
+ec_requestData() =>
+	[request.seed('seed_toodegrees_toogit', 'TOODEGREES_FOREX_FACTORY_SLOT_1', str.tostring(open) + ',' + str.tostring(high) + ',' + str.tostring(low) + ',' + str.tostring(close) + ',' + str.tostring(volume), ignore_invalid_symbol=true),
+	 request.seed('seed_toodegrees_toogit', 'TOODEGREES_FOREX_FACTORY_SLOT_2', str.tostring(open) + ',' + str.tostring(high) + ',' + str.tostring(low) + ',' + str.tostring(close) + ',' + str.tostring(volume), ignore_invalid_symbol=true),
+	 request.seed('seed_toodegrees_toogit', 'TOODEGREES_FOREX_FACTORY_SLOT_3', str.tostring(open) + ',' + str.tostring(high) + ',' + str.tostring(low) + ',' + str.tostring(close) + ',' + str.tostring(volume), ignore_invalid_symbol=true),
+	 request.seed('seed_toodegrees_toogit', 'TOODEGREES_FOREX_FACTORY_SLOT_4', str.tostring(open) + ',' + str.tostring(high) + ',' + str.tostring(low) + ',' + str.tostring(close) + ',' + str.tostring(volume), ignore_invalid_symbol=true),
+	 request.seed('seed_toodegrees_toogit', 'TOODEGREES_FOREX_FACTORY_SLOT_5', str.tostring(open) + ',' + str.tostring(high) + ',' + str.tostring(low) + ',' + str.tostring(close) + ',' + str.tostring(volume), ignore_invalid_symbol=true),
+	 request.seed('seed_toodegrees_toogit', 'TOODEGREES_FOREX_FACTORY_SLOT_6', str.tostring(open) + ',' + str.tostring(high) + ',' + str.tostring(low) + ',' + str.tostring(close) + ',' + str.tostring(volume), ignore_invalid_symbol=true),
+	 request.seed('seed_toodegrees_toogit', 'TOODEGREES_FOREX_FACTORY_SLOT_7', str.tostring(open) + ',' + str.tostring(high) + ',' + str.tostring(low) + ',' + str.tostring(close) + ',' + str.tostring(volume), ignore_invalid_symbol=true),
+	 request.seed('seed_toodegrees_toogit', 'TOODEGREES_FOREX_FACTORY_SLOT_8', str.tostring(open) + ',' + str.tostring(high) + ',' + str.tostring(low) + ',' + str.tostring(close) + ',' + str.tostring(volume), ignore_invalid_symbol=true),
+	 request.seed('seed_toodegrees_toogit', 'TOODEGREES_FOREX_FACTORY_SLOT_9', str.tostring(open) + ',' + str.tostring(high) + ',' + str.tostring(low) + ',' + str.tostring(close) + ',' + str.tostring(volume), ignore_invalid_symbol=true)]
+
+method ec_processData(ffUtil.News[] _news, string _s1, string _s2, string _s3, string _s4, string _s5, string _s6, string _s7, string _s8, string _s9) =>
+	if not na(_s1)
+		ffDec.readNews(_news, _s1)
+	if not na(_s2)
+		ffDec.readNews(_news, _s2)
+	if not na(_s3)
+		ffDec.readNews(_news, _s3)
+	if not na(_s4)
+		ffDec.readNews(_news, _s4)
+	if not na(_s5)
+		ffDec.readNews(_news, _s5)
+	if not na(_s6)
+		ffDec.readNews(_news, _s6)
+	if not na(_s7)
+		ffDec.readNews(_news, _s7)
+	if not na(_s8)
+		ffDec.readNews(_news, _s8)
+	if not na(_s9)
+		ffDec.readNews(_news, _s9)
+
+f_ecImpactRank(color _c) =>
+	_c == color.red ? 3 : _c == color.orange ? 2 : _c == color.yellow ? 1 : 0
+
+f_ecCloneNews(array<ffUtil.News> _source) =>
+	array<ffUtil.News> _clone=array.new<ffUtil.News>()
+	if _source.size() > 0
+		for i=0 to _source.size() - 1
+			ffUtil.News _event=_source.get(i)
+			_clone.push(ffUtil.News.new(_event.dow, _event.dat, _event._t, _event.tod, _event.cur, _event.imp, _event.ttl, _event.tmst, _event.ln))
+	_clone
+
+f_ecTodayNews(array<ffUtil.News> _week, array<ffUtil.News> _day, string _timezone) =>
+	_day.clear()
+	int _year=year(time, _timezone)
+	int _month=month(time, _timezone)
+	int _date=dayofmonth(time, _timezone)
+	if _week.size() > 0
+		for i=0 to _week.size() - 1
+			ffUtil.News _event=_week.get(i)
+			if not na(_event.tmst) and year(_event.tmst, _timezone) == _year and month(_event.tmst, _timezone) == _month and dayofmonth(_event.tmst, _timezone) == _date
+				_day.push(_event)
+	_day
+
+f_ecDrawLines(array<ffUtil.News> _news, array<line> _lines, array<int> _times, int _transparency, string _style, int _cap) =>
+	array<int> _eventTimes=array.new_int()
+	array<color> _eventColors=array.new_color()
+	if _news.size() > 0
+		for i=_news.size() - 1 to 0
+			ffUtil.News _event=_news.get(i)
+			if not na(_event.tmst)
+				int _adj=_event.tmst
+				int _idx=_eventTimes.indexof(_adj)
+				if _idx == -1
+					_eventTimes.push(_adj)
+					_eventColors.push(_event.imp)
+				else if f_ecImpactRank(_event.imp) > f_ecImpactRank(_eventColors.get(_idx))
+					_eventColors.set(_idx, _event.imp)
+	if _eventTimes.size() > 0
+		for i=0 to _eventTimes.size() - 1
+			int _eventTime=_eventTimes.get(i)
+			if _times.indexof(_eventTime) == -1
+				while _lines.size() >= _cap
+					line.delete(_lines.shift())
+					_times.shift()
+				if line.all.size() < 490
+					line _eventLine=line.new(_eventTime, low, _eventTime, high, xloc.bar_time, extend.both, color.new(_eventColors.get(i), _transparency), style=_style)
+					_lines.push(_eventLine)
+					_times.push(_eventTime)
+	while _lines.size() > _cap
+		line.delete(_lines.shift())
+		_times.shift()
+
+f_ecDrawLabel(array<ffUtil.News> _news, array<label> _labels, array<int> _times, string _placement, string _size, bool _outline, int _cap) =>
+	string _tooltip=''
+	color _impact=color.white
+	if _news.size() > 0
+		for i=0 to _news.size() - 1
+			ffUtil.News _event=_news.get(i)
+			if _event.tmst >= time and _event.tmst < time_close and (not barstate.isrealtime or timenow >= _event.tmst)
+				_tooltip += (_tooltip == '' ? '' : '\n') + _event.ttl + ' (' + _event.cur + ')'
+				if f_ecImpactRank(_event.imp) > f_ecImpactRank(_impact)
+					_impact := _event.imp
+	if _tooltip != ''
+		bool _below=_placement == 'Below' or (_placement == 'Auto' and open < close)
+		int _labelIdx=_times.indexof(time)
+		label _eventLabel=_labelIdx == -1 ? label(na) : _labels.get(_labelIdx)
+		if na(_eventLabel)
+			while _labels.size() >= _cap
+				label.delete(_labels.shift())
+				_times.shift()
+			if label.all.size() < 490
+				_eventLabel := label.new(time, _below ? low : high, _outline ? '◉' : '●', xloc=xloc.bar_time, color=color.new(color.black, 100), style=_below ? label.style_label_up : label.style_label_down, textcolor=_impact, size=_size, tooltip=_tooltip)
+		if not na(_eventLabel)
+			label.set_xy(_eventLabel, time, _below ? low : high)
+			label.set_text(_eventLabel, _outline ? '◉' : '●')
+			label.set_style(_eventLabel, _below ? label.style_label_up : label.style_label_down)
+			label.set_textcolor(_eventLabel, _impact)
+			label.set_size(_eventLabel, _size)
+			label.set_tooltip(_eventLabel, _tooltip)
+		if _labelIdx == -1 and not na(_eventLabel)
+			_labels.push(_eventLabel)
+			_times.push(time)
+	while _labels.size() > _cap
+		label.delete(_labels.shift())
+		_times.shift()
+
+f_ecPruneDrawings(array<line> _lines, array<int> _lineTimes, array<label> _labels, array<int> _labelTimes, string _historyMode, int _days, string _lineMode, string _timezone) =>
+	int _calendarMidnight=timestamp(_timezone, year(time, _timezone), month(time, _timezone), dayofmonth(time, _timezone), 0, 0)
+	int _delimiter=_historyMode == 'Today' ? _calendarMidnight : _historyMode == 'This Week' ? time('W') : time - _days * 86400000
+	int _futureCutoff=barstate.isrealtime ? timenow : time_close
+	if _lines.size() > 0
+		for i=_lines.size() - 1 to 0
+			int _eventTime=_lineTimes.get(i)
+			if _eventTime < _delimiter or (_lineMode == 'Future' and _eventTime <= _futureCutoff)
+				line.delete(_lines.remove(i))
+				_lineTimes.remove(i)
+	if _labels.size() > 0
+		for i=_labels.size() - 1 to 0
+			if _labelTimes.get(i) < _delimiter
+				label.delete(_labels.remove(i))
+				_labelTimes.remove(i)
+
+var ec_labelSize=ffUtil.size(ec_labelSizeInput)
+var ec_lineTransparency=ffUtil.lineTrnsp(ec_lineWeightInput)
+var ec_lineStyle=ffUtil.lineStyle(ec_lineStyleInput)
+var ec_tableLocation=ffUtil.boxLoc(ec_tableX, ec_tableY)
+var ec_impactFilter=ffUtil.impFilter(ec_holiday, ec_lowImpact, ec_medImpact, ec_highImpact)
+var ec_currencyFilter=ffUtil.curFilter(ec_autoCurrency, ec_AUD, ec_CAD, ec_CHF, ec_CNY, ec_EUR, ec_GBP, ec_JPY, ec_NZD, ec_USD)
+var array<ffUtil.News> ec_currentWeek=array.new<ffUtil.News>()
+var array<ffUtil.News> ec_nextWeek=array.new<ffUtil.News>()
+var array<ffUtil.News> ec_currentDay=array.new<ffUtil.News>()
+var array<line> ec_chartLines=array.new_line()
+var array<int> ec_chartLineTimes=array.new_int()
+var array<label> ec_chartLabels=array.new_label()
+var array<int> ec_chartLabelTimes=array.new_int()
+var table ec_table=na
+
+float ec_tfSeconds=timeframe.in_seconds()
+bool ec_supportedTf=not na(ec_tfSeconds) and ec_tfSeconds >= 30 and ec_tfSeconds <= 86400
+string ec_timezone=ec_customTimezone ? 'UTC' + (ec_timezoneH >= 0 ? '+' : '-') + str.tostring(math.abs(ec_timezoneH)) + (ec_timezoneM == 0 ? '' : ':' + (ec_timezoneM < 10 ? '0' : '') + str.tostring(ec_timezoneM)) : 'America/New_York'
+int ec_dayKey=year(time, ec_timezone) * 10000 + month(time, ec_timezone) * 100 + dayofmonth(time, ec_timezone)
+bool ec_newDay=not na(ec_dayKey[1]) and ec_dayKey != ec_dayKey[1]
+if ENABLE_ECON_CAL and ec_supportedTf
+	string _ecChartMode=timeframe.isdaily and ec_onChartMode == 'Today' ? 'This Week' : ec_onChartMode
+	string _ecTableMode=timeframe.isdaily ? 'This Week' : ec_tableMode
+	color _ecTableBorder=ec_tableBorder ? (ec_borderAuto ? chart.fg_color : ec_borderColor) : na
+	int _ecTimelineH=ec_customTimezone ? ec_timezoneH : int(na)
+	int _ecTimelineM=ec_customTimezone ? ec_timezoneM : int(na)
+	[_ecSlot1, _ecSlot2, _ecSlot3, _ecSlot4, _ecSlot5, _ecSlot6, _ecSlot7, _ecSlot8, _ecSlot9]=ec_requestData()
+	if timeframe.change('W')
+		ec_nextWeek := ffUtil.bubbleSort_News(ec_nextWeek)
+		if ec_customTimezone
+			ec_nextWeek := ffUtil.adjustTimezone(ec_nextWeek, ec_timezoneH, ec_timezoneM)
+		if ec_timeFormat == 'AM/PM'
+			ec_nextWeek := ffUtil.NewsAMPM_TOD(ec_nextWeek)
+		ec_currentWeek := ec_nextWeek.copy()
+		ec_currentWeek := ffUtil.weekNews(ec_currentWeek, ec_currencyFilter, ec_impactFilter)
+		ec_nextWeek.clear()
+	if ec_newDay
+		ec_currentDay := f_ecTodayNews(ec_currentWeek, ec_currentDay, ec_timezone)
+	ec_nextWeek.ec_processData(_ecSlot1, _ecSlot2, _ecSlot3, _ecSlot4, _ecSlot5, _ecSlot6, _ecSlot7, _ecSlot8, _ecSlot9)
+	if timeframe.isdaily and timeframe.change('W')
+		ec_nextWeek.ec_processData(_ecSlot1, _ecSlot2, _ecSlot3, _ecSlot4, _ecSlot5, _ecSlot6, _ecSlot7, _ecSlot8, _ecSlot9)
+	if ec_currentWeek.size() > 0 and ec_showTable
+		if _ecTableMode == 'Today'
+			if ec_newDay or na(ec_table)
+				if not na(ec_table)
+					table.delete(ec_table)
+				ec_table := ffUtil.FF_Table(f_ecCloneNews(ec_currentDay), ec_tableLocation, ec_tableSize, ec_headTextColor, ec_headBgColor, ec_futureTextColor, ec_rowBgColor, _ecTableBorder)
+			if not na(ec_table)
+				ffUtil.timeline(ec_currentDay, ec_table, ec_pastTextColor, _ecTimelineH, _ecTimelineM, true)
+		else
+			if timeframe.change('W') or na(ec_table)
+				if not na(ec_table)
+					table.delete(ec_table)
+				ec_table := ffUtil.FF_Table(f_ecCloneNews(ec_currentWeek), ec_tableLocation, ec_tableSize, ec_headTextColor, ec_headBgColor, ec_futureTextColor, ec_rowBgColor, _ecTableBorder)
+			if not na(ec_table)
+				ffUtil.timeline(ec_currentWeek, ec_table, ec_pastTextColor, _ecTimelineH, _ecTimelineM)
+	else if not na(ec_table)
+		table.delete(ec_table)
+		ec_table := table(na)
+	f_ecPruneDrawings(ec_chartLines, ec_chartLineTimes, ec_chartLabels, ec_chartLabelTimes, _ecChartMode, ec_onChartDays, ec_lineTime, ec_timezone)
+	if ec_showLines
+		if _ecChartMode != 'Today' and timeframe.change('W')
+			f_ecDrawLines(ec_currentWeek, ec_chartLines, ec_chartLineTimes, ec_lineTransparency, ec_lineStyle, ec_maxChartDrawings)
+		else if _ecChartMode == 'Today' and ec_newDay
+			f_ecDrawLines(ec_currentDay, ec_chartLines, ec_chartLineTimes, ec_lineTransparency, ec_lineStyle, ec_maxChartDrawings)
+	if ec_showLabels
+		f_ecDrawLabel(ec_currentWeek, ec_chartLabels, ec_chartLabelTimes, ec_labelY, ec_labelSize, ec_labelOutline, ec_maxChartDrawings)
+	f_ecPruneDrawings(ec_chartLines, ec_chartLineTimes, ec_chartLabels, ec_chartLabelTimes, _ecChartMode, ec_onChartDays, ec_lineTime, ec_timezone)
+
+// ===== ㉖ Dashboard =====
+var string dash_pos  = input.string("Top Right", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="㉖ Dashboard")
+var string dash_size = input.string(size.small, "Text size", options=[size.tiny, size.small, size.normal], group="㉖ Dashboard")
+var color  dash_bg   = input.color(color.new(color.black, 20), "Background", group="㉖ Dashboard", inline="d1")
+var color  dash_txt  = input.color(color.white, "Text", group="㉖ Dashboard", inline="d1")
+
+// Accumulator for the nearest untapped level above / below the close (mutated by reference).
+type DashAcc
+	float aP = na
+	string aN = ""
+	float bP = na
+	string bN = ""
+
+// Update the accumulator with one candidate level (mutates _acc in place).
+f_dashNear(DashAcc _acc, float _p, string _nm) =>
+	if not na(_p)
+		if _p > close and (na(_acc.aP) or _p < _acc.aP)
+			_acc.aP := _p
+			_acc.aN := _nm
+		if _p < close and (na(_acc.bP) or _p > _acc.bP)
+			_acc.bP := _p
+			_acc.bN := _nm
+
+// Consider every un-tapped (neither close-through mitigated nor sweep-confirmed) level of an SHLevel history array.
+f_dashShArr(DashAcc _acc, array<SHLevel> _arr, string _nm) =>
+	for _l in _arr
+		if not _l.mitigated and (na(_l.sweep) or _l.sweep.phase != 2)
+			f_dashNear(_acc, _l.price, _nm)
+
+_dashPosCnst = switch dash_pos
+	"Top Left"     => position.top_left
+	"Bottom Right" => position.bottom_right
+	"Bottom Left"  => position.bottom_left
+	=> position.top_right
+var table dashTbl = table.new(_dashPosCnst, 2, 6 + (smt_useSym1 ? 1 : 0) + (smt_useSym2 ? 1 : 0), border_width=1)
+
+if ENABLE_DASHBOARD and barstate.islast
+	string _biasTxt = biasDir == 0 ? "—" : (biasDir == -1 ? "Premium" : "Discount") + (na(biasPct) ? " (gap)" : " " + str.tostring(biasPct, "#") + "%")
+	color _biasCol = biasDir == 0 ? dash_bg : color.new(biasDir == -1 ? color.red : color.green, 40)
+	string _structTxt = "—"
+	color _structCol = dash_bg
+	if ENABLE_STRUCTURE and struct_trend != 0
+		_structTxt := (struct_trend == 1 ? "Bull" : "Bear") + (na(struct_lastBreak) ? "" : " · " + struct_lastBreak)
+		_structCol := struct_trend == 1 ? color.new(color.green, 40) : color.new(color.red, 40)
+	DashAcc _acc = DashAcc.new()
+	if ENABLE_LIQUIDITY
+		f_dashShArr(_acc, lq_histDayH,   "PDH")
+		f_dashShArr(_acc, lq_histDayL,   "PDL")
+		f_dashShArr(_acc, lq_histWeekH,  "PWH")
+		f_dashShArr(_acc, lq_histWeekL,  "PWL")
+		f_dashShArr(_acc, lq_histMonthH, "PMH")
+		f_dashShArr(_acc, lq_histMonthL, "PML")
+	if ENABLE_SESSION_HL
+		f_dashShArr(_acc, sh_histAsiaH, "Asia H")
+		f_dashShArr(_acc, sh_histAsiaL, "Asia L")
+		f_dashShArr(_acc, sh_histLonH, "London H")
+		f_dashShArr(_acc, sh_histLonL, "London L")
+		f_dashShArr(_acc, sh_histNyamH, "NY AM H")
+		f_dashShArr(_acc, sh_histNyamL, "NY AM L")
+		f_dashShArr(_acc, sh_histNypreH, "Pre-AM H")
+		f_dashShArr(_acc, sh_histNypreL, "Pre-AM L")
+		f_dashShArr(_acc, sh_histNylH, "Lunch H")
+		f_dashShArr(_acc, sh_histNylL, "Lunch L")
+		f_dashShArr(_acc, sh_histNypmH, "NY PM H")
+		f_dashShArr(_acc, sh_histNypmL, "NY PM L")
+	if ENABLE_EQHL
+		if eqhPools.size() > 0
+			for i = 0 to eqhPools.size() - 1
+				LiqPool _p = eqhPools.get(i)
+				if not _p.mitigated and (na(_p.sweep) or _p.sweep.phase != 2)
+					f_dashNear(_acc, _p.price, "EQH")
+		if eqlPools.size() > 0
+			for i = 0 to eqlPools.size() - 1
+				LiqPool _p = eqlPools.get(i)
+				if not _p.mitigated and (na(_p.sweep) or _p.sweep.phase != 2)
+					f_dashNear(_acc, _p.price, "EQL")
+	string _upTxt = na(_acc.aP) ? "—" : "↑ " + _acc.aN + " " + str.tostring(_acc.aP, format.mintick)
+	string _dnTxt = na(_acc.bP) ? "—" : "↓ " + _acc.bN + " " + str.tostring(_acc.bP, format.mintick)
+	string _kzTxt = kz_name
+	table.cell(dashTbl, 0, 0, "Bias",      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 0, _biasTxt,    text_color=color.white,  text_size=dash_size, bgcolor=_biasCol)
+	table.cell(dashTbl, 0, 1, "Structure", text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 1, _structTxt,  text_color=color.white,  text_size=dash_size, bgcolor=_structCol)
+	table.cell(dashTbl, 0, 2, "Liq ↑",     text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 2, _upTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 0, 3, "Liq ↓",     text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 3, _dnTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 0, 4, "Killzone",  text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 4, _kzTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	string _suTxt = not ENABLE_SETUP ? "—" : "L " + str.tostring(setupLongScore) + "/5 · S " + str.tostring(setupShortScore) + "/5"
+	table.cell(dashTbl, 0, 5, "Setup",     text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	table.cell(dashTbl, 1, 5, _suTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
+	int _smtRow = 6
+	if smt_useSym1
+		string _smtV1 = "—"
+		if ENABLE_SMT
+			int _pc1 = smtS1H.count + smtS1L.count + smtL1H.count + smtL1L.count
+			int _bc1 = brk1H.count + brk1L.count
+			int _smtT1 = math.max(nz(smtS1H.lastT, 0), nz(smtS1L.lastT, 0), nz(smtL1H.lastT, 0), nz(smtL1L.lastT, 0), nz(brk1H.lastT, 0), nz(brk1L.lastT, 0))
+			_smtV1 := str.format("P:{0} B:{1}", _pc1, _bc1) + (_smtT1 > 0 ? " · " + str.format_time(_smtT1, "HH:mm", "America/New_York") : "")
+		table.cell(dashTbl, 0, _smtRow, "SMT " + (na(smt_tk1) ? "1" : smt_tk1), text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		table.cell(dashTbl, 1, _smtRow, _smtV1, text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		_smtRow += 1
+	if smt_useSym2
+		string _smtV2 = "—"
+		if ENABLE_SMT
+			int _pc2 = smtS2H.count + smtS2L.count + smtL2H.count + smtL2L.count
+			int _bc2 = brk2H.count + brk2L.count
+			int _smtT2 = math.max(nz(smtS2H.lastT, 0), nz(smtS2L.lastT, 0), nz(smtL2H.lastT, 0), nz(smtL2L.lastT, 0), nz(brk2H.lastT, 0), nz(brk2L.lastT, 0))
+			_smtV2 := str.format("P:{0} B:{1}", _pc2, _bc2) + (_smtT2 > 0 ? " · " + str.format_time(_smtT2, "HH:mm", "America/New_York") : "")
+		table.cell(dashTbl, 0, _smtRow, "SMT " + (na(smt_tk2) ? "2" : smt_tk2), text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		table.cell(dashTbl, 1, _smtRow, _smtV2, text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		_smtRow += 1
