@@ -40,7 +40,7 @@ Keep these together in `ict_price_delivery.pine`:
 - `GradeLines` and the full 25/50/75 lifecycle.
 - NWOG, NDOG ETH, Settlement → ETH, Settlement → RTH, their settings/types, and their request calls.
 - HTF candle rendering and traces.
-- Fit-live HTF compaction must retain at least four candles when projected FVG detection is enabled (two for raw VI), preserving one completed projected FVG across the next rollover even if that slightly exceeds the requested projection span.
+- HTF compaction prefers at least four candles when projected FVG detection is enabled (two for raw VI). It drops farther HTF sets first; if even one required-history set cannot fit, it reduces history rather than crossing the 490-bar hard projection bound.
 - Selected-HTF FVG overlay.
 - Formation/mitigation webhooks and all Delivery alertconditions.
 

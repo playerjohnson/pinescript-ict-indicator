@@ -32,6 +32,12 @@ Selected-HTF normal FVGs have independent bullish and bearish colour inputs in t
 
 The 25%/75% lines copy the owning zone's CE color, width, style, and coordinates. They extend, rebalance, change mitigation color, transfer into inverse FVGs, and retire with the same zone. Inverse conversion refreshes the same grade owner at the newest end of the queue. A priority-aware FIFO protects selected-HTF grades from lower-timeframe churn while the live line-count guard protects the 500-line drawing budget; a generic zone whose optional quartiles are evicted keeps its 50% line.
 
+## HTF projected candles
+
+The Delivery indicator defaults to the nearest three valid higher-timeframe sets with four candles each. Padding, candle spacing, and inter-timeframe spacing are honored in both fit and manual modes. Fit mode drops farther HTF sets before reducing the history needed by projected FVG/VI detection, and both modes keep every projected drawing within a 490-bar future bound.
+
+Custom daily candles can roll at New York midnight, 08:30, or 09:30 even when the chart timeframe does not open a bar on the exact minute. On historical bars that span a custom boundary, TradingView exposes only the aggregate chart-bar OHLC, so that first custom candle is approximate unless the chart timeframe aligns with the boundary.
+
 ## Installation
 
 1. Open TradingView and create a new Pine indicator.
