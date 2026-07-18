@@ -1,0 +1,2255 @@
+// ICT PRICE DELIVERY + GAP GRADING : Imbalances + NWOG/NDOG + HTF Candles
+// Extracted from the merged indicator to preserve the price-delivery feature stack within TradingView token limits.
+// Combines:
+//    1. "ICT – GAPS, Volume & Price Imbalances"  © Vulnerable_human_x
+//    2. "ICT NWOG/NDOG (fadi)"                   © fadizeidan
+//    3. "ICT HTF Candles (fadi)"                 © fadizeidan
+//    4. "MTF FVG x2 [MK]" overlay concept        © @malk1903
+// Licence: Mozilla Public License 2.0
+
+//@version=6
+indicator(
+	 "ICT Price Delivery + NWOG/NDOG + HTF Candles",
+	 shorttitle = "ICT Delivery + HTF",
+	 overlay = true,
+	 max_boxes_count = 500,
+	 max_lines_count = 500,
+	 max_labels_count = 500,
+	 max_bars_back = 5000,
+	 behind_chart = true,
+	 dynamic_requests = true)
+
+var bool ENABLE_IMBALANCES=input.bool(true, "Enable ICT Imbalances (FVG/VI/GAP)", group="⓪ Section Toggles")
+var bool ENABLE_NWOG_NDOG=input.bool(true, "Enable NWOG / NDOG", group="⓪ Section Toggles")
+var bool ENABLE_HTF_CANDLES=input.bool(true, "Enable HTF Candles", group="⓪ Section Toggles")
+var bool ENABLE_MTF_FVG=input.bool(false, "Enable HTF FVG Overlay", group="⓪ Section Toggles", tooltip="Draws confirmed normal and enabled ⑥ Implied FVGs from one selected higher timeframe. ⑥ Inverse and VI Anchor also apply; styling comes from ⑥/⑦.")
+
+var bool wh_enable=input.bool(false, "Enable Webhook Alerts", group="㉑ Webhook Alerts", tooltip="JSON alerts via alert(). In TV alert dialog, select 'Any alert() function call'.")
+var bool wh_formations=input.bool(true, "Formation Alerts", group="㉑ Webhook Alerts", inline="wh1", tooltip="FVG/VI/GAP formations")
+var bool wh_mitigations=input.bool(true, "Mitigation Alerts", group="㉑ Webhook Alerts", inline="wh1", tooltip="Mitigation events")
+
+_wh_json(string _event, float _high, float _low) =>
+	'{"event":"' + _event + '","ticker":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '","price_high":' + str.tostring(_high, format.mintick) + ',"price_low":' + str.tostring(_low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '"}'
+
+f_get_line_style(style) =>
+	out = switch style
+		'⎯⎯⎯'  => line.style_solid
+		'----' => line.style_dashed
+		'····' => line.style_dotted
+		=> line.style_solid
+
+vitype=input.string('Classic', 'Type              ', options=['None', 'Classic', 'Advanced'], group='④ Volume Imbalance', inline='vi0', tooltip='Classic=single. Advanced=all.')
+bullimbalance=input.color(color.new(#00e640, 90), '', group='④ Volume Imbalance', inline='vi0')
+bearimbalance=input.color(color.new(#e30000, 90), '', group='④ Volume Imbalance', inline='vi0')
+
+bool classicvi  = vitype == 'Classic'
+bool advancedvi = vitype == 'Advanced'
+
+viMaxBoxSet=input.int(8, title='Max Boxes         ', minval=1, maxval=100, group='④ Volume Imbalance', inline='vi1')
+vimitigationtype=input.string('Engulf', options=['Engulf', 'Mitigate'], group='④ Volume Imbalance', inline='vi1', tooltip='Engulf=body through.')
+extendvibox=input.bool(true, title='Extend Unmit.     ', group='④ Volume Imbalance', inline='vi2')
+extendallvis=input.bool(false, title='Extend All', group='④ Volume Imbalance', inline='vi2')
+
+gaptype=input.string('True GAP', 'Type              ', options=['None', 'True GAP', 'GAP + Inefficiency'], group='⑤ GAP', inline='gp0', tooltip='True=no delivery. +Eff=one-sided.')
+gapcolor=input.color(color.new(#4ec1f7, 90), '', group='⑤ GAP', inline='gp0')
+
+bool truegap    = gaptype == 'True GAP'
+bool gapwithimb = gaptype == 'GAP + Inefficiency'
+
+gapsMaxBoxSet=input.int(7, title='Max Boxes         ', minval=1, maxval=100, group='⑤ GAP', inline='gp1')
+gapmitigationtype=input.string('Engulf', options=['Engulf', 'Rebalance'], group='⑤ GAP', inline='gp1', tooltip='Engulf=body through. Rebalance=erased.')
+cegap=input.bool(true, title='C.E. Line         ', group='⑤ GAP', inline='gp2')
+cegaplinetype=input.string(line.style_dashed, '', options=[line.style_dashed, line.style_dotted, line.style_solid], group='⑤ GAP', inline='gp2')
+extendgapbox=input.bool(true, title='Extend Unmit.', group='⑤ GAP', inline='gp2')
+
+fvgtype=input.string('Normal', 'FVG Type          ', options=['None', 'Normal', 'Liquidity Void'], group='⑥ FVG', inline='fv0', tooltip='Consecutive FVGs=LV.')
+showifvg=input.bool(false, 'Implied', group='⑥ FVG', inline='fv0')
+Inversefvgmode=input.bool(false, 'Inverse', group='⑥ FVG', inline='fv0', tooltip='Requires ENGULF.')
+fvgAnchorVI=input.bool(false, 'VI Anchor', group='⑥ FVG', inline='fv0', tooltip='Anchor FVG to VI body gap when both form on same candles.')
+
+bool plotFVG           = fvgtype == 'Normal'
+bool liquidityvoidmode = fvgtype == 'Liquidity Void'
+
+fvgBullColor=input.color(color.new(color.green, 90), title='FVG Colors        ', inline='fv1', group='⑥ FVG')
+fvgBearColor=input.color(color.new(color.red, 90), inline='fv1', group='⑥ FVG')
+
+ifvgBullColor=input.color(color.new(color.green, 90), title='Imp.FVG           ', inline='fv2', group='⑥ FVG')
+ifvgBearColor=input.color(color.new(color.red, 90), inline='fv2', group='⑥ FVG')
+
+buinvfvgcolor=input.color(color.new(#fbc02d, 94), title='Inv.FVG           ', inline='fv3', group='⑥ FVG')
+beinvfvgcolor=input.color(color.new(#fbc02d, 94), inline='fv3', group='⑥ FVG')
+
+fvgMaxBoxSet=input.int(15, title='FVG Box Limit     ', minval=1, maxval=100, group='⑥ FVG', inline='fv4')
+invfvgMaxBoxSet=input.int(4, title='Inv.', minval=1, maxval=100, group='⑥ FVG', inline='fv4')
+fvgmitigationtype=input.string('Engulf', title='FVG Mitigation    ', options=['Engulf', 'Mitigate', 'Rebalance'], group='⑥ FVG', inline='fv5')
+ifvgmitigationtype=input.string('Engulf', title='Imp.', options=['Engulf', 'Mitigate'], group='⑥ FVG', inline='fv5')
+cefvg=input.bool(true, title='C.E. Line         ', group='⑥ FVG', inline='fv6')
+celinetype=input.string(line.style_dashed, '', options=[line.style_dashed, line.style_dotted, line.style_solid], group='⑥ FVG', inline='fv6')
+cetransparency=input.int(50, title='Transp.', group='⑥ FVG', inline='fv6')
+extendfvgbox=input.bool(true, title='Extend Unmit.', group='⑥ FVG', inline='fv6')
+
+BoxBorder=input.string(line.style_solid, title='Border            ', options=[line.style_dashed, line.style_dotted, line.style_solid], group='⑦ Box Style', inline='bx1', tooltip='FVG/VI/GAP boxes')
+BorderTransparency=input.int(85, title='Transp.', minval=0, maxval=100, group='⑦ Box Style', inline='bx1')
+HighlightBox=input.bool(true, title='Highlight         ', group='⑦ Box Style', inline='bx2', tooltip='Highlight on price touch')
+Highlightboxtransparency=input.int(80, 'BG', group='⑦ Box Style', inline='bx2')
+Highlightboxbordertransparency=input.int(67, 'Border', group='⑦ Box Style', inline='bx2')
+plotBoxLabel=input.bool(true, title='Label             ', group='⑦ Box Style', inline='bx3')
+BoxLabelSize=input.string(size.tiny, options=[size.huge, size.large, size.small, size.tiny, size.auto, size.normal], group='⑦ Box Style', inline='bx3')
+BoxLabelColor=input.color(color.rgb(161, 163, 171), group='⑦ Box Style', inline='bx3')
+labelhalign=input.string(text.align_center, '', options=[text.align_center, text.align_right, text.align_left], group='⑦ Box Style', inline='bx3')
+labelvalign=input.string(text.align_center, '', options=[text.align_top, text.align_center, text.align_bottom], group='⑦ Box Style', inline='bx3')
+
+filterMitBOX=input.bool(true, title='Mitigated Color   ', group='⑦ Box Style', inline='bx4')
+mitBOXColor=input.color(color.new(color.gray, 92), group='⑦ Box Style', inline='bx4')
+MitBoxLabelColor=input.color(color.rgb(161, 163, 171, 88), title='Lbl', group='⑦ Box Style', inline='bx4')
+gradeQuartiles=input.bool(false, '25/75% Grades', group='⑦ Box Style', inline='bx5', tooltip='Adds 25% and 75% lines to CE-enabled GAP, FVG/LV, implied/inverse/VI-anchored FVG, NWOG/NDOG, projected HTF-candle FVG, and selected-HTF FVG zones. Uses two extra line IDs per graded zone.')
+gradeMaxZones=input.int(30, 'Max Graded', minval=1, maxval=100, group='⑦ Box Style', inline='bx5', tooltip='Combined 25/75% drawing budget across all supported gap families. C.E. lines do not count toward this limit.')
+fvgQuality=input.bool(false, 'FVG Residency', group='⑦ Box Style', inline='bx6', tooltip='Informational body-residency grade for normal chart and selected-HTF FVGs: 1 Conviction, 2-3 Normal, 4-5 Hesitation, above 5 Failed/Stale. Consecutive confirmed body overlaps only; resets outside the zone. Chart FVG residency requires Extend Unmit.; selected-HTF zones extend automatically.')
+
+// Per-bar touch flags (no `var`: reset each bar so the Mitigation alertconditions don't latch)
+bool buimpfvgtouch=false
+bool beimpfvgtouch=false
+bool bufvgtouch=false
+bool befvgtouch=false
+bool buvitouch=false
+bool bevitouch=false
+bool bugaptouch=false
+bool begaptouch=false
+bool buinvfvgtouch=false
+bool beinvfvgtouch=false
+
+bool isbuinversefvg = false
+bool isbeinversefvg = false
+
+var int _fvg=2
+var int _vi=3
+
+type GradeLines
+	line q25 = na
+	line ce = na
+	line q75 = na
+	bool pinned = false
+	int residency = 0
+
+var array<GradeLines> gradeQueue=array.new<GradeLines>()
+
+f_gradeDrop(GradeLines _g) =>
+	if not na(_g)
+		line.delete(_g.q25)
+		line.delete(_g.q75)
+		_g.q25 := na
+		_g.q75 := na
+
+f_gradePruneQueue() =>
+	if gradeQueue.size() > 0
+		for i = gradeQueue.size() - 1 to 0 by 1
+			GradeLines _g = gradeQueue.get(i)
+			if na(_g.q25) and na(_g.q75)
+				gradeQueue.remove(i)
+
+f_gradeVictim(bool _incomingPinned) =>
+	int _idx = na
+	if gradeQueue.size() > 0
+		for i = 0 to gradeQueue.size() - 1
+			if not gradeQueue.get(i).pinned
+				_idx := i
+				break
+		if na(_idx) and _incomingPinned
+			_idx := 0
+	_idx
+
+f_gradeY(GradeLines _g, float _top, float _bottom) =>
+	if not na(_g) and not na(_g.ce)
+		float _span = _top - _bottom
+		float _mid = math.avg(_top, _bottom)
+		line.set_y1(_g.ce, _mid)
+		line.set_y2(_g.ce, _mid)
+		if not na(_g.q25)
+			float _q25 = _bottom + _span * 0.25
+			float _q75 = _bottom + _span * 0.75
+			line.set_y1(_g.q25, _q25)
+			line.set_y2(_g.q25, _q25)
+			line.set_y1(_g.q75, _q75)
+			line.set_y2(_g.q75, _q75)
+
+f_gradeAttach(GradeLines _g, float _top, float _bottom) =>
+	if gradeQuartiles and not na(_g) and not na(_g.ce) and (na(_g.q25) or na(_g.q75))
+		f_gradeDrop(_g)
+		f_gradePruneQueue()
+		bool _room = gradeQueue.size() < gradeMaxZones
+		if (not _room or line.all.size() > 498) and gradeQueue.size() > 0
+			int _victim = f_gradeVictim(_g.pinned)
+			if not na(_victim)
+				GradeLines _old = gradeQueue.get(_victim)
+				gradeQueue.remove(_victim)
+				f_gradeDrop(_old)
+				_room := gradeQueue.size() < gradeMaxZones
+		if _room and line.all.size() <= 498
+			_g.q25 := line.copy(_g.ce)
+			_g.q75 := line.copy(_g.ce)
+			gradeQueue.push(_g)
+	f_gradeY(_g, _top, _bottom)
+	_g
+
+f_gradeBuild(line _ce, float _top, float _bottom, bool _pinned) =>
+	GradeLines _g = GradeLines.new(na, _ce, na, _pinned, 0)
+	f_gradeAttach(_g, _top, _bottom)
+
+f_gradeNew(line _ce, float _top, float _bottom) =>
+	f_gradeBuild(_ce, _top, _bottom, false)
+
+f_gradePinnedNew(line _ce, float _top, float _bottom) =>
+	f_gradeBuild(_ce, _top, _bottom, true)
+
+f_gradeOpenNew(line _ce, float _top, float _bottom) =>
+	f_gradeBuild(_ce, _top, _bottom, false)
+
+f_gradeEnsureOpen(GradeLines _g, float _top, float _bottom) =>
+	f_gradeY(_g, _top, _bottom)
+
+f_gradePromote(GradeLines _g, float _top, float _bottom) =>
+	f_gradeDrop(_g)
+	_g.residency := 0
+	f_gradeAttach(_g, _top, _bottom)
+
+f_fvgQualityText(int _count) =>
+	_count == 1 ? '1 · Conviction' : _count <= 3 ? str.tostring(_count) + ' · Normal' : _count <= 5 ? str.tostring(_count) + ' · Hesitation' : str.tostring(_count) + ' · Failed/Stale'
+
+f_fvgQualityTick(GradeLines _g, box _bx, string _base) =>
+	float _bodyTop = math.max(open, close)
+	float _bodyBottom = math.min(open, close)
+	bool _overlap = _bodyTop > box.get_bottom(_bx) and _bodyBottom < box.get_top(_bx)
+	_g.residency := _overlap ? _g.residency + 1 : 0
+	box.set_text(_bx, _g.residency > 0 ? (_base == '' ? '' : _base + '\n') + f_fvgQualityText(_g.residency) : _base)
+
+
+f_gradeDelete(GradeLines _g) =>
+	if not na(_g)
+		f_gradeDrop(_g)
+		line.delete(_g.ce)
+		_g.ce := na
+
+f_gradeX2(GradeLines _g, int _x) =>
+	if not na(_g) and not na(_g.ce)
+		line.set_x2(_g.ce, _x)
+		if not na(_g.q25)
+			line.set_x2(_g.q25, _x)
+			line.set_x2(_g.q75, _x)
+
+f_gradeColor(GradeLines _g, color _color) =>
+	if not na(_g) and not na(_g.ce)
+		line.set_color(_g.ce, _color)
+		if not na(_g.q25)
+			line.set_color(_g.q25, _color)
+			line.set_color(_g.q75, _color)
+
+f_gradeSync(GradeLines _g, box _bx) =>
+	if not na(_g) and not na(_g.ce) and not na(_bx)
+		int _x1 = box.get_left(_bx)
+		line.set_x1(_g.ce, _x1)
+		if not na(_g.q25)
+			line.set_x1(_g.q25, _x1)
+			line.set_x1(_g.q75, _x1)
+		f_gradeX2(_g, box.get_right(_bx))
+		f_gradeY(_g, box.get_top(_bx), box.get_bottom(_bx))
+
+var GradeLines noGrades=GradeLines.new()
+
+var array<box> _bearBoxesFVG=array.new_box()
+var array<box> _bullBoxesFVG=array.new_box()
+var array<box> _gapsboxesbu=array.new_box()
+var array<box> _gapsboxesbe=array.new_box()
+var array<box> _bullishvi=array.new_box()
+var array<box> _bearishvi=array.new_box()
+var array<box> _bullishifvg=array.new_box()
+var array<box> _bearishifvg=array.new_box()
+var array<GradeLines> _buifvgce=array.new<GradeLines>()
+var array<GradeLines> _beifvgce=array.new<GradeLines>()
+var array<GradeLines> _bufvgce=array.new<GradeLines>()
+var array<GradeLines> _befvgce=array.new<GradeLines>()
+var array<box> bearInvFVG=array.new_box()
+var array<box> bullInvFVG=array.new_box()
+var array<GradeLines> buinvfvgce=array.new<GradeLines>()
+var array<GradeLines> beinvfvgce=array.new<GradeLines>()
+var array<GradeLines> bugapce=array.new<GradeLines>()
+var array<GradeLines> begapce=array.new<GradeLines>()
+
+_controlBox2(_boxes) =>
+	if array.size(_boxes) > 0
+		for i = 0 to array.size(_boxes) - 1
+			box.set_right(array.get(_boxes, i), bar_index + 1)
+
+isBuVItype1(index) =>
+	open[index] > close[index + 1] and low[index] <= high[index + 1] and close[index] > open[index] and close[index + 1] > open[index + 1]
+
+isBeVItype1(index) =>
+	open[index] < close[index + 1] and high[index] >= low[index + 1] and close[index] < open[index] and close[index + 1] < open[index + 1]
+
+isBuVItype2(index) =>
+	open[index] < close[index + 1] and close[index] > open[index] and close[index + 1] > open[index + 1] and high[index] >= low[index + 1]
+
+isBeVItype2(index) =>
+	open[index] > close[index + 1] and close[index] < open[index] and close[index + 1] < open[index + 1] and low[index] <= high[index + 1]
+
+isBuVItype3(index) =>
+	open[index] != close[index + 1] and close[index] > open[index] and close[index + 1] < open[index + 1] and high[index] >= low[index + 1] and low[index] <= high[index + 1]
+
+isBeVItype3(index) =>
+	open[index] != close[index + 1] and close[index] < open[index] and close[index + 1] > open[index + 1] and low[index] <= high[index + 1] and high[index] >= low[index + 1]
+
+_anyVI(index) =>
+	isBuVItype1(index) or isBeVItype1(index) or isBuVItype2(index) or isBeVItype2(index) or isBuVItype3(index) or isBeVItype3(index)
+
+_anyVI0() => _anyVI(0)
+_anyVI1() => _anyVI(1)
+
+isFvgUp(index) =>
+	low[index] > high[index + 2] and low[index + 1] <= high[index + 2] and high[index + 1] >= low[index]
+
+isFvgDown(index) =>
+	high[index] < low[index + 2] and high[index] >= low[index + 1] and high[index + 1] >= low[index + 2]
+
+bool _viSuppressed = fvgAnchorVI and (isFvgUp(0) or isFvgDown(0))
+
+if isBuVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES and not _viSuppressed
+	box _bullboxVI = box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	if array.size(_bullishvi) >= viMaxBoxSet
+		box.delete(array.shift(_bullishvi))
+	array.push(_bullishvi, _bullboxVI)
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("VI+", open, close[1]), alert.freq_once_per_bar_close)
+
+if isBeVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES and not _viSuppressed
+	box _bearboxVI = box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	if array.size(_bearishvi) >= viMaxBoxSet
+		box.delete(array.shift(_bearishvi))
+	array.push(_bearishvi, _bearboxVI)
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("VI-", close[1], open), alert.freq_once_per_bar_close)
+
+if isBuVItype2(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
+	box _bullboxVI = box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	if array.size(_bullishvi) >= viMaxBoxSet
+		box.delete(array.shift(_bullishvi))
+	array.push(_bullishvi, _bullboxVI)
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("VI+", close[1], open), alert.freq_once_per_bar_close)
+
+if isBeVItype2(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
+	box _bearboxVI = box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	if array.size(_bearishvi) >= viMaxBoxSet
+		box.delete(array.shift(_bearishvi))
+	array.push(_bearishvi, _bearboxVI)
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("VI-", open, close[1]), alert.freq_once_per_bar_close)
+
+if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
+	box _bullboxVI = box.new(left = bar_index - 1, top = math.max(open, close[1]), right = bar_index + 1, bottom = math.min(open, close[1]), bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	if array.size(_bullishvi) >= viMaxBoxSet
+		box.delete(array.shift(_bullishvi))
+	array.push(_bullishvi, _bullboxVI)
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("VI+", math.max(open, close[1]), math.min(open, close[1])), alert.freq_once_per_bar_close)
+
+if isBeVItype3(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
+	box _bearboxVI = box.new(left = bar_index - 1, top = math.max(open, close[1]), right = bar_index + 1, bottom = math.min(open, close[1]), bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	if array.size(_bearishvi) >= viMaxBoxSet
+		box.delete(array.shift(_bearishvi))
+	array.push(_bearishvi, _bearboxVI)
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("VI-", math.max(open, close[1]), math.min(open, close[1])), alert.freq_once_per_bar_close)
+
+if extendallvis
+	_controlBox2(_bullishvi)
+	_controlBox2(_bearishvi)
+
+if (high[1] < low or low[1] > high) and truegap and ENABLE_IMBALANCES
+	box _gapsbu = na
+	box _gapsbe = na
+	line bugapceline = na
+	line begapceline = na
+	if high[1] < low
+		_gapsbu := box.new(left = bar_index - 1, top = low, right = bar_index + 1, bottom = high[1], bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+		bugapceline := cegap ? line.new(bar_index - 1, math.avg(low, high[1]), bar_index + 1, math.avg(low, high[1]), style = cegaplinetype, color = color.new(gapcolor, cetransparency)) : na
+		if wh_enable and wh_formations and barstate.isconfirmed
+			alert(_wh_json("GAP+", low, high[1]), alert.freq_once_per_bar_close)
+		bugapceline
+	else if low[1] > high
+		_gapsbe := box.new(left = bar_index - 1, top = low[1], right = bar_index + 1, bottom = high, bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+		begapceline := cegap ? line.new(bar_index - 1, math.avg(low[1], high), bar_index + 1, math.avg(low[1], high), style = cegaplinetype, color = color.new(gapcolor, cetransparency)) : na
+		if wh_enable and wh_formations and barstate.isconfirmed
+			alert(_wh_json("GAP-", low[1], high), alert.freq_once_per_bar_close)
+		begapceline
+	if array.size(_gapsboxesbu) >= gapsMaxBoxSet and array.size(bugapce) >= gapsMaxBoxSet
+		box.delete(array.shift(_gapsboxesbu))
+		f_gradeDelete(array.shift(bugapce))
+	array.push(_gapsboxesbu, _gapsbu)
+	array.push(bugapce, f_gradeNew(bugapceline, box.get_top(_gapsbu), box.get_bottom(_gapsbu)))
+	if array.size(_gapsboxesbe) >= gapsMaxBoxSet and array.size(begapce) >= gapsMaxBoxSet
+		box.delete(array.shift(_gapsboxesbe))
+		f_gradeDelete(array.shift(begapce))
+	array.push(_gapsboxesbe, _gapsbe)
+	array.push(begapce, f_gradeNew(begapceline, box.get_top(_gapsbe), box.get_bottom(_gapsbe)))
+else if (high[1] < low or low[1] > high) and gapwithimb and ENABLE_IMBALANCES
+	box _gapsbu = na
+	box _gapsbe = na
+	line bugapceline = na
+	line begapceline = na
+	if high[1] < low
+		_gapsbu := box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+		bugapceline := cegap ? line.new(bar_index - 1, math.avg(open, close[1]), bar_index + 1, math.avg(open, close[1]), style = cegaplinetype, color = color.new(gapcolor, cetransparency)) : na
+		bugapceline
+	else if low[1] > high
+		_gapsbe := box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+		begapceline := cegap ? line.new(bar_index - 1, math.avg(close[1], open), bar_index + 1, math.avg(close[1], open), style = cegaplinetype, color = color.new(gapcolor, cetransparency)) : na
+		begapceline
+	if array.size(_gapsboxesbu) >= gapsMaxBoxSet and array.size(bugapce) >= gapsMaxBoxSet
+		box.delete(array.shift(_gapsboxesbu))
+		f_gradeDelete(array.shift(bugapce))
+	array.push(_gapsboxesbu, _gapsbu)
+	array.push(bugapce, f_gradeNew(bugapceline, box.get_top(_gapsbu), box.get_bottom(_gapsbu)))
+	if array.size(_gapsboxesbe) >= gapsMaxBoxSet and array.size(begapce) >= gapsMaxBoxSet
+		box.delete(array.shift(_gapsboxesbe))
+		f_gradeDelete(array.shift(begapce))
+	array.push(_gapsboxesbe, _gapsbe)
+	array.push(begapce, f_gradeNew(begapceline, box.get_top(_gapsbe), box.get_bottom(_gapsbe)))
+
+if isFvgUp(0) and not liquidityvoidmode and ENABLE_IMBALANCES
+	float _fTop = low[0]
+	float _fBot = high[2]
+	if fvgAnchorVI and _anyVI0()
+		_fTop := math.max(_fTop, math.max(open[0], close[1]))
+		_fBot := math.min(_fBot, math.min(open[0], close[1]))
+	if fvgAnchorVI and _anyVI1()
+		_fTop := math.max(_fTop, math.max(open[1], close[2]))
+		_fBot := math.min(_fBot, math.min(open[1], close[2]))
+	box _bullboxFVG = na
+	line _buline = na
+	if plotFVG or Inversefvgmode
+		color _fvgBg = (not plotFVG and Inversefvgmode) ? color.new(fvgBullColor, 100) : fvgBullColor
+		color _fvgBdr = (not plotFVG and Inversefvgmode) ? color.new(fvgBullColor, 100) : color.new(fvgBullColor, BorderTransparency)
+		color _fvgTxt = (not plotFVG and Inversefvgmode) ? color.new(BoxLabelColor, 100) : BoxLabelColor
+		color _fvgCe = (not plotFVG and Inversefvgmode) ? color.new(fvgBullColor, 100) : color.new(fvgBullColor, cetransparency)
+		_bullboxFVG := box.new(left = bar_index - 2, top = _fTop, right = bar_index, bottom = _fBot, bgcolor = _fvgBg, border_color = _fvgBdr, border_style = BoxBorder, border_width = 1, text = plotBoxLabel ? 'FVG+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = _fvgTxt)
+		_buline := cefvg ? line.new(bar_index - 2, math.avg(_fTop, _fBot), bar_index, math.avg(_fTop, _fBot), style = celinetype, color = _fvgCe) : na
+		_buline
+	if array.size(_bullBoxesFVG) >= fvgMaxBoxSet and array.size(_bufvgce) >= fvgMaxBoxSet
+		box.delete(array.shift(_bullBoxesFVG))
+		f_gradeDelete(array.shift(_bufvgce))
+	array.push(_bullBoxesFVG, _bullboxFVG)
+	array.push(_bufvgce, f_gradeNew(_buline, box.get_top(_bullboxFVG), box.get_bottom(_bullboxFVG)))
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("FVG+", _fTop, _fBot), alert.freq_once_per_bar_close)
+
+if isFvgDown(0) and not liquidityvoidmode and ENABLE_IMBALANCES
+	float _fTop = low[2]
+	float _fBot = high[0]
+	if fvgAnchorVI and _anyVI0()
+		_fTop := math.max(_fTop, math.max(open[0], close[1]))
+		_fBot := math.min(_fBot, math.min(open[0], close[1]))
+	if fvgAnchorVI and _anyVI1()
+		_fTop := math.max(_fTop, math.max(open[1], close[2]))
+		_fBot := math.min(_fBot, math.min(open[1], close[2]))
+	box _bearboxFVG = na
+	line _beline = na
+	if plotFVG or Inversefvgmode
+		color _fvgBeBg = (not plotFVG and Inversefvgmode) ? color.new(fvgBearColor, 100) : fvgBearColor
+		color _fvgBeBdr = (not plotFVG and Inversefvgmode) ? color.new(fvgBearColor, 100) : color.new(fvgBearColor, BorderTransparency)
+		color _fvgBeTxt = (not plotFVG and Inversefvgmode) ? color.new(BoxLabelColor, 100) : BoxLabelColor
+		color _fvgBeCe = (not plotFVG and Inversefvgmode) ? color.new(fvgBearColor, 100) : color.new(fvgBearColor, cetransparency)
+		_bearboxFVG := box.new(left = bar_index - 2, top = _fTop, right = bar_index, bottom = _fBot, bgcolor = _fvgBeBg, border_color = _fvgBeBdr, border_style = BoxBorder, border_width = 1, text = plotBoxLabel ? 'FVG-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = _fvgBeTxt)
+		_beline := cefvg ? line.new(bar_index - 2, math.avg(_fTop, _fBot), bar_index, math.avg(_fTop, _fBot), style = celinetype, color = _fvgBeCe) : na
+		_beline
+	if array.size(_bearBoxesFVG) >= fvgMaxBoxSet and array.size(_befvgce) >= fvgMaxBoxSet
+		box.delete(array.shift(_bearBoxesFVG))
+		f_gradeDelete(array.shift(_befvgce))
+	array.push(_bearBoxesFVG, _bearboxFVG)
+	array.push(_befvgce, f_gradeNew(_beline, box.get_top(_bearboxFVG), box.get_bottom(_bearboxFVG)))
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("FVG-", _fTop, _fBot), alert.freq_once_per_bar_close)
+
+bool bulv = false
+bool belv = false
+
+if isFvgUp(0) and isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and array.size(_bullBoxesFVG) > 0 and not plotFVG
+	bulv := true
+	x = array.size(_bullBoxesFVG) - 1
+	_box = array.get(_bullBoxesFVG, x)
+	tempboxlow = box.get_bottom(_box)
+	tempboxleft = box.get_left(_box)
+	box.delete(array.pop(_bullBoxesFVG))
+	f_gradeDelete(array.pop(_bufvgce))
+	box _bullboxFVG = box.new(left = tempboxleft, top = low[0], right = bar_index, bottom = tempboxlow, bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	line _buline = cefvg ? line.new(tempboxleft, math.avg(low, tempboxlow), bar_index, math.avg(low, tempboxlow), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
+	if array.size(_bullBoxesFVG) >= fvgMaxBoxSet and array.size(_bufvgce) >= fvgMaxBoxSet
+		box.delete(array.shift(_bullBoxesFVG))
+		f_gradeDelete(array.shift(_bufvgce))
+	array.push(_bullBoxesFVG, _bullboxFVG)
+	array.push(_bufvgce, f_gradeNew(_buline, box.get_top(_bullboxFVG), box.get_bottom(_bullboxFVG)))
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("LV+", low, tempboxlow), alert.freq_once_per_bar_close)
+else if isFvgUp(0) and not isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
+	float _fTop = low[0]
+	float _fBot = high[2]
+	if fvgAnchorVI and _anyVI0()
+		_fTop := math.max(_fTop, math.max(open[0], close[1]))
+		_fBot := math.min(_fBot, math.min(open[0], close[1]))
+	if fvgAnchorVI and _anyVI1()
+		_fTop := math.max(_fTop, math.max(open[1], close[2]))
+		_fBot := math.min(_fBot, math.min(open[1], close[2]))
+	box _bullboxFVG = box.new(left = bar_index - 2, top = _fTop, right = bar_index, bottom = _fBot, bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	line _buline = cefvg ? line.new(bar_index - 2, math.avg(_fTop, _fBot), bar_index, math.avg(_fTop, _fBot), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
+	if array.size(_bullBoxesFVG) >= fvgMaxBoxSet and array.size(_bufvgce) >= fvgMaxBoxSet
+		box.delete(array.shift(_bullBoxesFVG))
+		f_gradeDelete(array.shift(_bufvgce))
+	array.push(_bullBoxesFVG, _bullboxFVG)
+	array.push(_bufvgce, f_gradeNew(_buline, box.get_top(_bullboxFVG), box.get_bottom(_bullboxFVG)))
+
+if isFvgDown(0) and isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and array.size(_bearBoxesFVG) > 0 and not plotFVG
+	belv := true
+	x = array.size(_bearBoxesFVG) - 1
+	_box = array.get(_bearBoxesFVG, x)
+	tempboxhigh = box.get_top(_box)
+	tempboxleft = box.get_left(_box)
+	box.delete(array.pop(_bearBoxesFVG))
+	f_gradeDelete(array.pop(_befvgce))
+	box _bearboxFVG = box.new(left = tempboxleft, top = tempboxhigh, right = bar_index, bottom = high[0], bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	line _beline = cefvg ? line.new(tempboxleft, math.avg(tempboxhigh, high), bar_index, math.avg(tempboxhigh, high), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
+	if array.size(_bearBoxesFVG) >= fvgMaxBoxSet and array.size(_befvgce) >= fvgMaxBoxSet
+		box.delete(array.shift(_bearBoxesFVG))
+		f_gradeDelete(array.shift(_befvgce))
+	array.push(_bearBoxesFVG, _bearboxFVG)
+	array.push(_befvgce, f_gradeNew(_beline, box.get_top(_bearboxFVG), box.get_bottom(_bearboxFVG)))
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("LV-", tempboxhigh, high), alert.freq_once_per_bar_close)
+else if isFvgDown(0) and not isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
+	float _fTop = low[2]
+	float _fBot = high[0]
+	if fvgAnchorVI and _anyVI0()
+		_fTop := math.max(_fTop, math.max(open[0], close[1]))
+		_fBot := math.min(_fBot, math.min(open[0], close[1]))
+	if fvgAnchorVI and _anyVI1()
+		_fTop := math.max(_fTop, math.max(open[1], close[2]))
+		_fBot := math.min(_fBot, math.min(open[1], close[2]))
+	box _bearboxFVG = box.new(left = bar_index - 2, top = _fTop, right = bar_index, bottom = _fBot, bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	line _beline = cefvg ? line.new(bar_index - 2, math.avg(_fTop, _fBot), bar_index, math.avg(_fTop, _fBot), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
+	if array.size(_bearBoxesFVG) >= fvgMaxBoxSet and array.size(_befvgce) >= fvgMaxBoxSet
+		box.delete(array.shift(_bearBoxesFVG))
+		f_gradeDelete(array.shift(_befvgce))
+	array.push(_bearBoxesFVG, _bearboxFVG)
+	array.push(_befvgce, f_gradeNew(_beline, box.get_top(_bearboxFVG), box.get_bottom(_bearboxFVG)))
+
+if fvgAnchorVI and (isFvgUp(0) or isFvgDown(0)) and _anyVI1()
+	if _bullishvi.size() > 0
+		box _v = _bullishvi.last()
+		if not na(_v) and box.get_left(_v) == bar_index - 2
+			box.delete(_bullishvi.pop())
+	if _bearishvi.size() > 0
+		box _v = _bearishvi.last()
+		if not na(_v) and box.get_left(_v) == bar_index - 2
+			box.delete(_bearishvi.pop())
+
+isBuIFvg(index) =>
+	high[index] > high[index + 2] and low[index + 2] < low[index] and low[index] <= high[index + 2] and high[index + 2] - math.max(open[index + 2], close[index + 2]) > (math.max(open[index + 2], close[index + 2]) - math.min(open[index + 2], close[index + 2])) / 2 and math.min(open[index], close[index]) - low[index] > (math.max(open[index], close[index]) - math.min(open[index], close[index])) / 2 and low[index] > low[index + 1] and (high[index + 2] + math.max(open[index + 2], close[index + 2])) / 2 < (math.min(open[index], close[index]) + low[index]) / 2 and high[index] > high[index + 1] and close[index + 1] > open[index + 1]
+
+isBeIFvg(index) =>
+	low[index] < low[index + 2] and high[index + 2] > high[index] and high[index] >= low[index + 2] and math.min(open[index + 2], close[index + 2]) - low[index + 2] > (math.max(open[index + 2], close[index + 2]) - math.min(open[index + 2], close[index + 2])) / 2 and high[index] - math.max(open[index], close[index]) > (math.max(open[index], close[index]) - math.min(open[index], close[index])) / 2 and high[index] < high[index + 1] and (math.min(open[index + 2], close[index + 2]) + low[index + 2]) / 2 > (high[index] + math.max(open[index], close[index])) / 2 and low[index] < low[index + 1] and close[index + 1] < open[index + 1]
+
+if isBuIFvg(0) and showifvg and ENABLE_IMBALANCES
+	float _ifTop = (math.min(open, close) + low) / 2
+	float _ifBot = (high[2] + math.max(open[2], close[2])) / 2
+	box _bullboxifvg = box.new(left = bar_index - 2, top = _ifTop, right = bar_index + 1, bottom = _ifBot, bgcolor = ifvgBullColor, border_style = BoxBorder, border_color = color.new(ifvgBullColor, BorderTransparency), text = plotBoxLabel ? 'Imp.FVG+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	line _bulineifvg = cefvg ? line.new(bar_index - 2, math.avg(_ifTop, _ifBot), bar_index + 1, math.avg(_ifTop, _ifBot), style = celinetype, color = color.new(ifvgBullColor, cetransparency)) : na
+	if array.size(_bullishifvg) >= fvgMaxBoxSet and array.size(_buifvgce) >= fvgMaxBoxSet
+		box.delete(array.shift(_bullishifvg))
+		f_gradeDelete(array.shift(_buifvgce))
+	array.push(_bullishifvg, _bullboxifvg)
+	array.push(_buifvgce, f_gradeNew(_bulineifvg, _ifTop, _ifBot))
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("I.FVG+", _ifTop, _ifBot), alert.freq_once_per_bar_close)
+
+if isBeIFvg(0) and showifvg and ENABLE_IMBALANCES
+	float _ifTop = (math.min(open[2], close[2]) + low[2]) / 2
+	float _ifBot = (math.max(open, close) + high) / 2
+	box _bearboxifvg = box.new(left = bar_index - 2, top = _ifTop, right = bar_index + 1, bottom = _ifBot, bgcolor = ifvgBearColor, border_style = BoxBorder, border_color = color.new(ifvgBearColor, BorderTransparency), text = plotBoxLabel ? 'Imp.FVG-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
+	line _belineifvg = cefvg ? line.new(bar_index - 2, math.avg(_ifTop, _ifBot), bar_index + 1, math.avg(_ifTop, _ifBot), style = celinetype, color = color.new(ifvgBearColor, cetransparency)) : na
+	if array.size(_bearishifvg) >= fvgMaxBoxSet and array.size(_beifvgce) >= fvgMaxBoxSet
+		box.delete(array.shift(_bearishifvg))
+		f_gradeDelete(array.shift(_beifvgce))
+	array.push(_bearishifvg, _bearboxifvg)
+	array.push(_beifvgce, f_gradeNew(_belineifvg, _ifTop, _ifBot))
+	if wh_enable and wh_formations and barstate.isconfirmed
+		alert(_wh_json("I.FVG-", _ifTop, _ifBot), alert.freq_once_per_bar_close)
+
+_applyMitStyle(_bx, GradeLines _grade) =>
+	box.set_bgcolor(_bx, mitBOXColor)
+	box.set_border_color(_bx, mitBOXColor)
+	box.set_text_color(_bx, MitBoxLabelColor)
+	f_gradeColor(_grade, mitBOXColor)
+
+_applyHighlight(_bx, color _baseColor) =>
+	box.set_bgcolor(_bx, color.new(_baseColor, Highlightboxtransparency))
+	box.set_border_color(_bx, color.new(_baseColor, Highlightboxbordertransparency))
+
+if ENABLE_IMBALANCES and array.size(_bullishifvg) > 0 and array.size(_buifvgce) > 0 and extendfvgbox
+	for i = array.size(_bullishifvg) - 1 to 0 by 1
+		_box = array.get(_bullishifvg, i)
+		GradeLines _grade = array.get(_buifvgce, i)
+		_boxLow = box.get_bottom(_box)
+		_boxHigh = box.get_top(_box)
+		_boxRight = box.get_right(_box)
+		if bar_index == _boxRight
+			if barstate.isconfirmed
+				if ifvgmitigationtype == 'Engulf'
+					if close >= _boxLow and open >= _boxLow
+						box.set_right(_box, bar_index + 1)
+					else if (close < _boxLow or open < _boxLow) and filterMitBOX
+						_applyMitStyle(_box, _grade)
+				else if ifvgmitigationtype == 'Mitigate'
+					if low >= _boxHigh
+						box.set_right(_box, bar_index + 1)
+					else if low < _boxHigh and filterMitBOX
+						_applyMitStyle(_box, _grade)
+			f_gradeSync(_grade, _box)
+			_boxRight := box.get_right(_box)
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and ifvgmitigationtype == 'Engulf' and HighlightBox
+				if close >= _boxLow and low < _boxHigh
+					_applyHighlight(_box, ifvgBullColor)
+					buimpfvgtouch := true
+					if wh_enable and wh_mitigations
+						alert(_wh_json("I.FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+					buimpfvgtouch
+
+if ENABLE_IMBALANCES and array.size(_bearishifvg) > 0 and array.size(_beifvgce) > 0 and extendfvgbox
+	for i = array.size(_bearishifvg) - 1 to 0 by 1
+		_box = array.get(_bearishifvg, i)
+		GradeLines _grade = array.get(_beifvgce, i)
+		_boxLow = box.get_bottom(_box)
+		_boxHigh = box.get_top(_box)
+		_boxRight = box.get_right(_box)
+		if bar_index == _boxRight
+			if barstate.isconfirmed
+				if ifvgmitigationtype == 'Engulf'
+					if close <= _boxHigh and open <= _boxHigh
+						box.set_right(_box, bar_index + 1)
+					else if (close > _boxHigh or open > _boxHigh) and filterMitBOX
+						_applyMitStyle(_box, _grade)
+				else if ifvgmitigationtype == 'Mitigate'
+					if high <= _boxLow
+						box.set_right(_box, bar_index + 1)
+					else if high > _boxLow and filterMitBOX
+						_applyMitStyle(_box, _grade)
+			f_gradeSync(_grade, _box)
+			_boxRight := box.get_right(_box)
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and ifvgmitigationtype == 'Engulf' and HighlightBox
+				if close <= _boxHigh and high > _boxLow
+					_applyHighlight(_box, ifvgBearColor)
+					beimpfvgtouch := true
+					if wh_enable and wh_mitigations
+						alert(_wh_json("I.FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+					beimpfvgtouch
+
+if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) > 0
+	for i = array.size(_bullBoxesFVG) - 1 to 0 by 1
+		_box = array.get(_bullBoxesFVG, i)
+		GradeLines _grade = array.get(_bufvgce, i)
+		_boxLow = box.get_bottom(_box)
+		_boxHigh = box.get_top(_box)
+		_boxRight = box.get_right(_box)
+		if bar_index == _boxRight
+			if barstate.isconfirmed and extendfvgbox
+				if fvgmitigationtype == 'Engulf'
+					if close >= _boxLow
+						box.set_right(_box, bar_index + 1)
+					else if close < _boxLow and Inversefvgmode
+						box beifvgbox = box.copy(_box)
+						if fvgQuality
+							box.set_text(beifvgbox, plotBoxLabel ? 'I.FVG-' : '')
+						array.push(bearInvFVG, beifvgbox)
+						array.push(beinvfvgce, _grade)
+						f_gradePromote(_grade, _boxHigh, _boxLow)
+						box.delete(_box)
+						array.remove(_bullBoxesFVG, i)
+						array.remove(_bufvgce, i)
+						isbeinversefvg := true
+						if wh_enable and wh_formations
+							alert(_wh_json("Inverse.FVG-", _boxHigh, _boxLow), alert.freq_once_per_bar_close)
+						isbeinversefvg
+						continue
+					else if close < _boxLow and filterMitBOX
+						_applyMitStyle(_box, _grade)
+				else if fvgmitigationtype == 'Mitigate'
+					if low >= _boxHigh
+						box.set_right(_box, bar_index + 1)
+					else if low < _boxHigh and filterMitBOX
+						_applyMitStyle(_box, _grade)
+				else if fvgmitigationtype == 'Rebalance'
+					if low >= _boxHigh
+						box.set_right(_box, bar_index + 1)
+					else if low < _boxHigh and low > _boxLow
+						box.set_top(_box, low)
+						box.set_right(_box, bar_index + 1)
+					else if low <= _boxLow and filterMitBOX
+						_applyMitStyle(_box, _grade)
+			f_gradeSync(_grade, _box)
+			_boxLow := box.get_bottom(_box)
+			_boxHigh := box.get_top(_box)
+			_boxRight := box.get_right(_box)
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and extendfvgbox and HighlightBox
+				if fvgmitigationtype == 'Engulf'
+					if close >= _boxLow and low < _boxHigh
+						_applyHighlight(_box, fvgBullColor)
+						bufvgtouch := true
+						if wh_enable and wh_mitigations
+							alert(_wh_json("FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+						bufvgtouch
+				else if fvgmitigationtype == 'Rebalance'
+					if low < _boxHigh and low > _boxLow
+						_applyHighlight(_box, fvgBullColor)
+						bufvgtouch := true
+						if wh_enable and wh_mitigations
+							alert(_wh_json("FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+						bufvgtouch
+			if fvgQuality and plotFVG and barstate.isconfirmed and extendfvgbox
+				f_fvgQualityTick(_grade, _box, plotBoxLabel ? 'FVG+' : '')
+
+if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) > 0
+	for i = array.size(_bearBoxesFVG) - 1 to 0 by 1
+		_box = array.get(_bearBoxesFVG, i)
+		GradeLines _grade = array.get(_befvgce, i)
+		_boxLow = box.get_bottom(_box)
+		_boxHigh = box.get_top(_box)
+		_boxRight = box.get_right(_box)
+		if bar_index == _boxRight
+			if barstate.isconfirmed and extendfvgbox
+				if fvgmitigationtype == 'Engulf'
+					if close <= _boxHigh
+						box.set_right(_box, bar_index + 1)
+					else if close > _boxHigh and Inversefvgmode
+						box buifvgbox = box.copy(_box)
+						if fvgQuality
+							box.set_text(buifvgbox, plotBoxLabel ? 'I.FVG+' : '')
+						array.push(bullInvFVG, buifvgbox)
+						array.push(buinvfvgce, _grade)
+						f_gradePromote(_grade, _boxHigh, _boxLow)
+						box.delete(_box)
+						array.remove(_bearBoxesFVG, i)
+						array.remove(_befvgce, i)
+						isbuinversefvg := true
+						if wh_enable and wh_formations
+							alert(_wh_json("Inverse.FVG+", _boxHigh, _boxLow), alert.freq_once_per_bar_close)
+						isbuinversefvg
+						continue
+					else if close > _boxHigh and filterMitBOX
+						_applyMitStyle(_box, _grade)
+				else if fvgmitigationtype == 'Mitigate'
+					if high <= _boxLow
+						box.set_right(_box, bar_index + 1)
+					else if high > _boxLow and filterMitBOX
+						_applyMitStyle(_box, _grade)
+				else if fvgmitigationtype == 'Rebalance'
+					if high <= _boxLow
+						box.set_right(_box, bar_index + 1)
+					else if high > _boxLow and high < _boxHigh
+						box.set_bottom(_box, high)
+						box.set_right(_box, bar_index + 1)
+					else if high >= _boxHigh and filterMitBOX
+						_applyMitStyle(_box, _grade)
+			f_gradeSync(_grade, _box)
+			_boxLow := box.get_bottom(_box)
+			_boxHigh := box.get_top(_box)
+			_boxRight := box.get_right(_box)
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and extendfvgbox and HighlightBox
+				if fvgmitigationtype == 'Engulf'
+					if close <= _boxHigh and high > _boxLow
+						_applyHighlight(_box, fvgBearColor)
+						befvgtouch := true
+						if wh_enable and wh_mitigations
+							alert(_wh_json("FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+						befvgtouch
+				else if fvgmitigationtype == 'Rebalance'
+					if high > _boxLow and high < _boxHigh
+						_applyHighlight(_box, fvgBearColor)
+						befvgtouch := true
+						if wh_enable and wh_mitigations
+							alert(_wh_json("FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+						befvgtouch
+			if fvgQuality and plotFVG and barstate.isconfirmed and extendfvgbox
+				f_fvgQualityTick(_grade, _box, plotBoxLabel ? 'FVG-' : '')
+
+if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'Engulf' and Inversefvgmode
+	for i = array.size(bullInvFVG) - 1 to 0 by 1
+		_box = array.get(bullInvFVG, i)
+		GradeLines _grade = array.get(buinvfvgce, i)
+		_boxLow = box.get_bottom(_box)
+		_boxHigh = box.get_top(_box)
+		_boxRight = box.get_right(_box)
+		if barstate.isconfirmed
+			box.set_bgcolor(_box, buinvfvgcolor)
+			if plotBoxLabel
+				box.set_text(_box, 'I.FVG+')
+				box.set_text_halign(_box, labelhalign)
+				box.set_text_valign(_box, labelvalign)
+				box.set_text_size(_box, BoxLabelSize)
+				box.set_text_color(_box, BoxLabelColor)
+			box.set_border_color(_box, color.new(buinvfvgcolor, BorderTransparency))
+			f_gradeColor(_grade, color.new(buinvfvgcolor, cetransparency))
+			if close >= _boxLow and bar_index == _boxRight
+				box.set_right(_box, bar_index + 1)
+			else if close < _boxLow
+				box.delete(_box)
+				f_gradeDelete(_grade)
+				array.remove(bullInvFVG, i)
+				array.remove(buinvfvgce, i)
+				continue
+		f_gradeSync(_grade, _box)
+		_boxRight := box.get_right(_box)
+		if extendfvgbox and HighlightBox and (bar_index == _boxRight or bar_index == _boxRight - 1)
+			if close >= _boxLow and low < _boxHigh
+				_applyHighlight(_box, buinvfvgcolor)
+				buinvfvgtouch := true
+				if wh_enable and wh_mitigations
+					alert(_wh_json("Inv.FVG+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+				buinvfvgtouch
+
+if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'Engulf' and Inversefvgmode
+	for i = array.size(bearInvFVG) - 1 to 0 by 1
+		_box = array.get(bearInvFVG, i)
+		GradeLines _grade = array.get(beinvfvgce, i)
+		_boxLow = box.get_bottom(_box)
+		_boxHigh = box.get_top(_box)
+		_boxRight = box.get_right(_box)
+		if barstate.isconfirmed
+			box.set_bgcolor(_box, beinvfvgcolor)
+			if plotBoxLabel
+				box.set_text(_box, 'I.FVG-')
+				box.set_text_halign(_box, labelhalign)
+				box.set_text_valign(_box, labelvalign)
+				box.set_text_size(_box, BoxLabelSize)
+				box.set_text_color(_box, BoxLabelColor)
+			box.set_border_color(_box, color.new(beinvfvgcolor, BorderTransparency))
+			f_gradeColor(_grade, color.new(beinvfvgcolor, cetransparency))
+			if close <= _boxHigh and bar_index == _boxRight
+				box.set_right(_box, bar_index + 1)
+			else if close > _boxHigh
+				box.delete(_box)
+				f_gradeDelete(_grade)
+				array.remove(bearInvFVG, i)
+				array.remove(beinvfvgce, i)
+				continue
+		f_gradeSync(_grade, _box)
+		_boxRight := box.get_right(_box)
+		if extendfvgbox and HighlightBox and (bar_index == _boxRight or bar_index == _boxRight - 1)
+			if close <= _boxHigh and high > _boxLow
+				_applyHighlight(_box, beinvfvgcolor)
+				beinvfvgtouch := true
+				if wh_enable and wh_mitigations
+					alert(_wh_json("Inv.FVG- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+				beinvfvgtouch
+
+while array.size(bullInvFVG) > invfvgMaxBoxSet
+	box.delete(array.shift(bullInvFVG))
+	f_gradeDelete(array.shift(buinvfvgce))
+while array.size(bearInvFVG) > invfvgMaxBoxSet
+	box.delete(array.shift(bearInvFVG))
+	f_gradeDelete(array.shift(beinvfvgce))
+
+if ENABLE_IMBALANCES and array.size(_bullishvi) > 0 and extendvibox
+	for i = array.size(_bullishvi) - 1 to 0 by 1
+		_box = array.get(_bullishvi, i)
+		_boxLow = box.get_bottom(_box)
+		_boxHigh = box.get_top(_box)
+		_boxRight = box.get_right(_box)
+		if bar_index == _boxRight
+			if barstate.isconfirmed
+				if vimitigationtype == 'Engulf'
+					if close >= _boxLow
+						box.set_right(_box, bar_index + 1)
+					else if close < _boxLow and filterMitBOX
+						_applyMitStyle(_box, noGrades)
+				else if vimitigationtype == 'Mitigate'
+					if low > _boxHigh
+						box.set_right(_box, bar_index + 1)
+					else if low <= _boxHigh and filterMitBOX
+						_applyMitStyle(_box, noGrades)
+						buvitouch := true
+						if wh_enable and wh_mitigations
+							alert(_wh_json("VI+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+						buvitouch
+			_boxRight := box.get_right(_box)
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and vimitigationtype == 'Engulf' and HighlightBox
+				if close >= _boxLow and low < _boxHigh
+					_applyHighlight(_box, bullimbalance)
+					buvitouch := true
+					if wh_enable and wh_mitigations
+						alert(_wh_json("VI+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+					buvitouch
+
+if ENABLE_IMBALANCES and array.size(_bearishvi) > 0 and extendvibox
+	for i = array.size(_bearishvi) - 1 to 0 by 1
+		_box = array.get(_bearishvi, i)
+		_boxLow = box.get_bottom(_box)
+		_boxHigh = box.get_top(_box)
+		_boxRight = box.get_right(_box)
+		if bar_index == _boxRight
+			if barstate.isconfirmed
+				if vimitigationtype == 'Engulf'
+					if close <= _boxHigh
+						box.set_right(_box, bar_index + 1)
+					else if close > _boxHigh and filterMitBOX
+						_applyMitStyle(_box, noGrades)
+				else if vimitigationtype == 'Mitigate'
+					if high < _boxHigh
+						box.set_right(_box, bar_index + 1)
+					else if high >= _boxHigh and filterMitBOX
+						_applyMitStyle(_box, noGrades)
+						bevitouch := true
+						if wh_enable and wh_mitigations
+							alert(_wh_json("VI- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+						bevitouch
+			_boxRight := box.get_right(_box)
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and vimitigationtype == 'Engulf' and HighlightBox
+				if close <= _boxHigh and high > _boxLow
+					_applyHighlight(_box, bearimbalance)
+					bevitouch := true
+					if wh_enable and wh_mitigations
+						alert(_wh_json("VI- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+					bevitouch
+
+if ENABLE_IMBALANCES and array.size(_gapsboxesbu) > 0 and array.size(bugapce) > 0 and extendgapbox
+	for i = array.size(_gapsboxesbu) - 1 to 0 by 1
+		_box = array.get(_gapsboxesbu, i)
+		GradeLines _grade = array.get(bugapce, i)
+		_boxLow = box.get_bottom(_box)
+		_boxHigh = box.get_top(_box)
+		_boxRight = box.get_right(_box)
+		if bar_index == _boxRight
+			if barstate.isconfirmed
+				if gapmitigationtype == 'Engulf'
+					if close >= _boxLow and open >= _boxLow
+						box.set_right(_box, bar_index + 1)
+					else if (close < _boxLow or open < _boxLow) and filterMitBOX
+						_applyMitStyle(_box, _grade)
+				else if gapmitigationtype == 'Rebalance'
+					if low >= _boxHigh
+						box.set_right(_box, bar_index + 1)
+					else if low < _boxHigh and low > _boxLow
+						box.set_top(_box, low)
+						box.set_right(_box, bar_index + 1)
+					else if low <= _boxLow and filterMitBOX
+						_applyMitStyle(_box, _grade)
+			f_gradeSync(_grade, _box)
+			_boxLow := box.get_bottom(_box)
+			_boxHigh := box.get_top(_box)
+			_boxRight := box.get_right(_box)
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and HighlightBox
+				if gapmitigationtype == 'Engulf'
+					if close >= _boxLow and open >= _boxLow and low < _boxHigh
+						_applyHighlight(_box, gapcolor)
+						bugaptouch := true
+						if wh_enable and wh_mitigations
+							alert(_wh_json("GAP+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+						bugaptouch
+				else if gapmitigationtype == 'Rebalance'
+					if low > _boxLow and low < _boxHigh
+						_applyHighlight(_box, gapcolor)
+						bugaptouch := true
+						if wh_enable and wh_mitigations
+							alert(_wh_json("GAP+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+						bugaptouch
+
+if ENABLE_IMBALANCES and array.size(_gapsboxesbe) > 0 and array.size(begapce) > 0 and extendgapbox
+	for i = array.size(_gapsboxesbe) - 1 to 0 by 1
+		_box = array.get(_gapsboxesbe, i)
+		GradeLines _grade = array.get(begapce, i)
+		_boxLow = box.get_bottom(_box)
+		_boxHigh = box.get_top(_box)
+		_boxRight = box.get_right(_box)
+		if bar_index == _boxRight
+			if barstate.isconfirmed
+				if gapmitigationtype == 'Engulf'
+					if close <= _boxHigh and open <= _boxHigh
+						box.set_right(_box, bar_index + 1)
+					else if (close > _boxHigh or open > _boxHigh) and filterMitBOX
+						_applyMitStyle(_box, _grade)
+				else if gapmitigationtype == 'Rebalance'
+					if high <= _boxLow
+						box.set_right(_box, bar_index + 1)
+					else if high > _boxLow and high < _boxHigh
+						box.set_bottom(_box, high)
+						box.set_right(_box, bar_index + 1)
+					else if high >= _boxHigh and filterMitBOX
+						_applyMitStyle(_box, _grade)
+			f_gradeSync(_grade, _box)
+			_boxLow := box.get_bottom(_box)
+			_boxHigh := box.get_top(_box)
+			_boxRight := box.get_right(_box)
+			if (bar_index == _boxRight or bar_index == _boxRight - 1) and HighlightBox
+				if gapmitigationtype == 'Engulf'
+					if close <= _boxHigh and open <= _boxHigh and high > _boxLow
+						_applyHighlight(_box, gapcolor)
+						begaptouch := true
+						if wh_enable and wh_mitigations
+							alert(_wh_json("GAP- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+						begaptouch
+				else if gapmitigationtype == 'Rebalance'
+					if high < _boxHigh and high > _boxLow
+						_applyHighlight(_box, gapcolor)
+						begaptouch := true
+						if wh_enable and wh_mitigations
+							alert(_wh_json("GAP- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
+						begaptouch
+
+alertcondition(barstate.isconfirmed and isFvgUp(0), title = 'FVG+', message = 'FVG+ {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and isFvgDown(0), title = 'FVG-', message = 'FVG- {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and isBuIFvg(0), title = 'Implied.FVG+', message = 'I.FVG+ {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and isBeIFvg(0), title = 'Implied.FVG-', message = 'I.FVG- {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and ((isBuVItype1(0) or isBuVItype2(0) or isBuVItype3(0)) and advancedvi or isBuVItype1(0) and classicvi), title = 'VI+', message = 'VI+ {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and ((isBeVItype1(0) or isBeVItype2(0) or isBeVItype3(0)) and advancedvi or isBeVItype1(0) and classicvi), title = 'VI-', message = 'VI- {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and high[1] < low, title = 'GAP+', message = 'GAP+ {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and low[1] > high, title = 'GAP-', message = 'GAP- {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and isbuinversefvg, title = 'Inverse.FVG+', message = 'Inverse.FVG+ {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and isbeinversefvg, title = 'Inverse.FVG-', message = 'Inverse.FVG- {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and bulv, title = 'LV+', message = 'LV+ {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and belv, title = 'LV-', message = 'LV- {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and bugaptouch, title = 'GAP(+) Mitigation', message = 'GAP+ Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and begaptouch, title = 'GAP(-) Mitigation', message = 'GAP- Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and buimpfvgtouch, title = 'Implied.FVG(+) Mitigation', message = 'I.FVG+ Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and beimpfvgtouch, title = 'Implied.FVG(-) Mitigation', message = 'I.FVG- Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and bufvgtouch, title = 'FVG(+) Mitigation', message = 'FVG+ Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and befvgtouch, title = 'FVG(-) Mitigation', message = 'FVG- Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and buvitouch, title = 'VI(+) Mitigation', message = 'VI+ Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and bevitouch, title = 'VI(-) Mitigation', message = 'VI- Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and buinvfvgtouch, title = 'Inverse.FVG(+) Mitigation', message = 'Inv.FVG+ Mit {{ticker}} {{interval}}')
+alertcondition(barstate.isconfirmed and beinvfvgtouch, title = 'Inverse.FVG(-) Mitigation', message = 'Inv.FVG- Mit {{ticker}} {{interval}}')
+
+type NWOGHelper
+	string name
+
+type NWOGSettings
+	bool show
+	color color
+	color color_new
+	int size
+	string style
+	color ce_color
+	color ce_color_new
+	int ce_size
+	string ce_style
+	bool EH_show
+	color EH_color
+	string EH_style
+	int EH_size
+	int max_count
+	bool use_background
+	color background
+	color background_new
+	bool label_show
+	string label_size
+	color label_color
+	color label_bgcolor
+
+type GapBox
+	line top
+	label l_top
+	GradeLines grade
+	line bottom
+	label l_bottom
+	linefill fill
+
+type Gap
+	string name
+	string date_name
+	float open
+	float middle
+	float close
+	int open_time
+	int close_time
+	GapBox gbox
+	bool is_current = false
+	bool is_visible = false
+	bool is_sunday = false
+
+type OpenGap
+	Gap[] gaps
+	NWOGSettings settings
+	line EventHorizon = na
+
+var nwog_gaps=array.new<Gap>()
+var OpenGap NWOG=OpenGap.new()
+NWOG.gaps := nwog_gaps
+NWOG.settings := NWOGSettings.new()
+
+var ndog_gaps=array.new<Gap>()
+var OpenGap NDOG=OpenGap.new()
+NDOG.gaps := ndog_gaps
+NDOG.settings := NWOGSettings.new()
+
+var ndogrth_gaps=array.new<Gap>()
+var OpenGap NDOGrth=OpenGap.new()
+NDOGrth.gaps := ndogrth_gaps
+NDOGrth.settings := NWOGSettings.new()
+
+var settlementrth_gaps=array.new<Gap>()
+var OpenGap SettlementRTH=OpenGap.new()
+SettlementRTH.gaps := settlementrth_gaps
+SettlementRTH.settings := NDOGrth.settings
+
+var NWOGHelper nwogHelper=NWOGHelper.new()
+
+NWOG_Group                  = "⑧ NWOG"
+NDOG_Group                  = "⑨ NDOG ETH"
+NDOGrth_Group               = "⑩ Settlement Gaps"
+
+NWOG.settings.show         := input.bool(true, "NWOG", group=NWOG_Group, inline="1")
+NWOG.settings.color_new    := input.color(color.new(color.purple,0), '', group=NWOG_Group, inline='1')
+NWOG.settings.color        := input.color(color.new(color.black,0), '', group=NWOG_Group, inline='1')
+NWOG.settings.style        := input.string('⎯⎯⎯', '', options=['⎯⎯⎯', '----', '····'], group=NWOG_Group, inline='1')
+NWOG.settings.size         := input.int(1, '', options=[1,2,3,4], group=NWOG_Group, inline='1')
+
+NWOG.settings.ce_color_new := input.color(color.new(color.purple,0), 'C.E.              ', group=NWOG_Group, inline='3')
+NWOG.settings.ce_color     := input.color(color.new(color.black,0), '', group=NWOG_Group, inline='3')
+NWOG.settings.ce_style     := input.string('····', '', options=['⎯⎯⎯', '----', '····'], group=NWOG_Group, inline='3')
+NWOG.settings.ce_size      := input.int(1, '', options=[1,2,3,4], group=NWOG_Group, inline='3')
+NWOG.settings.EH_show      := input.bool(true, "Event Horizon", group=NWOG_Group, inline="4")
+NWOG.settings.EH_color     := input.color(color.new(color.purple,20), "", group=NWOG_Group, inline='4')
+NWOG.settings.EH_style     := input.string('----', '      ', options=['⎯⎯⎯', '----', '····'], group=NWOG_Group, inline='4')
+NWOG.settings.EH_size      := input.int(1, '', options=[1,2,3,4], group=NWOG_Group, inline='4')
+
+NWOG.settings.use_background    := input.bool(true, "Background", group=NWOG_Group, inline="5")
+NWOG.settings.background_new    := input.color(color.new(color.purple,95), "", group=NWOG_Group, inline='5')
+NWOG.settings.background        := input.color(color.new(color.black,95), "", group=NWOG_Group, inline='5')
+
+NWOG.settings.label_show    := input.bool(true, "label", group=NWOG_Group, inline='2')
+NWOG.settings.label_color   := input.color(color.black, "", group=NWOG_Group, inline='2')
+NWOG.settings.label_bgcolor := input.color(color.new(color.orange, 100), "", group=NWOG_Group, inline='2')
+NWOG.settings.label_size    := input.string(size.small, "", [size.auto, size.tiny, size.small, size.normal, size.large, size.huge], group=NWOG_Group, inline='2')
+max_week=input.int(5, "Show Above/Below", 1, 10, group=NWOG_Group)
+NWOG.settings.max_count := max_week
+
+NDOG.settings.show         := input.bool(true, "NDOG ETH", group=NDOG_Group, inline='1')
+NDOG.settings.color_new    := input.color(color.new(color.green,0), '', group=NDOG_Group, inline='1')
+NDOG.settings.color        := input.color(color.new(color.blue,0), '', group=NDOG_Group, inline='1')
+NDOG.settings.style        := input.string('⎯⎯⎯', '', options=['⎯⎯⎯', '----', '····'], group=NDOG_Group, inline='1')
+NDOG.settings.size         := input.int(1, '', options=[1,2,3,4], group=NDOG_Group, inline='1')
+NDOG.settings.ce_color_new := input.color(color.new(color.green,0), 'C.E.              ', group=NDOG_Group, inline='3')
+NDOG.settings.ce_color     := input.color(color.new(color.blue,0), '', group=NDOG_Group, inline='3')
+NDOG.settings.ce_style     := input.string('····', '', options=['⎯⎯⎯', '----', '····'], group=NDOG_Group, inline='3')
+NDOG.settings.ce_size      := input.int(1, '', options=[1,2,3,4], group=NDOG_Group, inline='3')
+NDOG.settings.use_background    := input.bool(true, "Background", group=NDOG_Group, inline="5")
+NDOG.settings.background_new    := input.color(color.new(color.green,95), "", group=NDOG_Group, inline='5')
+NDOG.settings.background        := input.color(color.new(color.blue,95), "", group=NDOG_Group, inline='5')
+
+NDOG.settings.label_show    := input.bool(true, "label", group=NDOG_Group, inline='2')
+NDOG.settings.label_color   := input.color(color.black, "", group=NDOG_Group, inline='2')
+NDOG.settings.label_bgcolor := input.color(color.new(color.orange, 100), "", group=NDOG_Group, inline='2')
+NDOG.settings.label_size    := input.string(size.small, "", [size.auto, size.tiny, size.small, size.normal, size.large, size.huge], group=NDOG_Group, inline='2')
+
+NDOG.settings.max_count     := input.int(5, "Show Above/Below", 1, 10, group=NDOG_Group)
+
+NDOGrth.settings.show         := input.bool(true, 'Settlement → ETH', group=NDOGrth_Group, inline='1')
+NDOGrth.settings.color_new    := input.color(color.new(color.orange,0), '', group=NDOGrth_Group, inline='1')
+NDOGrth.settings.color        := input.color(color.new(color.red,0), '', group=NDOGrth_Group, inline='1')
+NDOGrth.settings.style        := input.string('⎯⎯⎯', '', options=['⎯⎯⎯', '----', '····'], group=NDOGrth_Group, inline='1')
+NDOGrth.settings.size         := input.int(1, '', options=[1,2,3,4], group=NDOGrth_Group, inline='1')
+NDOGrth.settings.ce_color_new := input.color(color.new(color.orange,0), 'C.E.              ', group=NDOGrth_Group, inline='3')
+NDOGrth.settings.ce_color     := input.color(color.new(color.red,0), '', group=NDOGrth_Group, inline='3')
+NDOGrth.settings.ce_style     := input.string('····', '', options=['⎯⎯⎯', '----', '····'], group=NDOGrth_Group, inline='3')
+NDOGrth.settings.ce_size      := input.int(1, '', options=[1,2,3,4], group=NDOGrth_Group, inline='3')
+NDOGrth.settings.use_background    := input.bool(true, "Background", group=NDOGrth_Group, inline="5")
+NDOGrth.settings.background_new    := input.color(color.new(color.orange,95), "", group=NDOGrth_Group, inline='5')
+NDOGrth.settings.background        := input.color(color.new(color.red,95), "", group=NDOGrth_Group, inline='5')
+
+NDOGrth.settings.label_show    := input.bool(true, "label", group=NDOGrth_Group, inline='2')
+NDOGrth.settings.label_color   := input.color(color.black, "", group=NDOGrth_Group, inline='2')
+NDOGrth.settings.label_bgcolor := input.color(color.new(color.orange, 100), "", group=NDOGrth_Group, inline='2')
+NDOGrth.settings.label_size    := input.string(size.small, "", [size.auto, size.tiny, size.small, size.normal, size.large, size.huge], group=NDOGrth_Group, inline='2')
+
+NDOGrth.settings.max_count    := input.int(5, "Show Above/Below", 1, 10, group=NDOGrth_Group)
+
+bool showSettlementRTH=input.bool(false, 'Settlement → RTH', group=NDOGrth_Group, inline='6', tooltip='Gap from the prior 16:14 New York settlement close to the next 09:30 RTH open. Shares the Settlement gap style and uses the same per-family Show Above/Below cap.')
+
+buffer=input.int(10, "Buffer - Number of candles to extend by", minval=0, group="⑪ Advanced (NWOG/NDOG)")+1
+
+dt = time - time[1]
+
+var float[] median=array.new_float()
+length = 500
+median.unshift(high-low)
+if median.size() > length
+	median.pop()
+float spacing = ta.sma(ta.sma(median.median(), length), length) *.5
+
+method render(Gap gap, NWOGSettings settings) =>
+	int e = time + (dt*buffer)
+	float middle = (gap.open+gap.close)/2
+	if not ((str.contains(gap.name, "NDOG") or str.contains(gap.name, 'Settlement → ETH')) and gap.is_sunday and NWOG.settings.show)
+		if na(gap.gbox)
+			gap.gbox := GapBox.new()
+			gap.gbox.top := line.new(gap.open_time, math.max(gap.open, gap.close), e, math.max(gap.open, gap.close), xloc=xloc.bar_time, color=gap.is_current ? settings.color_new : settings.color, width = settings.size, style=f_get_line_style(settings.style))
+			gap.gbox.bottom := line.new(gap.open_time, math.min(gap.open, gap.close), e, math.min(gap.open, gap.close), xloc=xloc.bar_time, color=gap.is_current ? settings.color_new : settings.color, width = settings.size, style=f_get_line_style(settings.style))
+			line _ce = line.new(gap.open_time, middle, e, middle, xloc=xloc.bar_time, color=gap.is_current ? settings.ce_color_new : settings.ce_color, width = settings.ce_size, style=f_get_line_style(settings.ce_style))
+			gap.gbox.grade := f_gradeOpenNew(_ce, math.max(gap.open, gap.close), math.min(gap.open, gap.close))
+			if settings.use_background
+				gap.gbox.fill := linefill.new(gap.gbox.top, gap.gbox.bottom, gap.is_current ? settings.background_new : settings.background)
+		else
+			line.set_x2(gap.gbox.top, e)
+			line.set_x2(gap.gbox.bottom, e)
+			f_gradeX2(gap.gbox.grade, e)
+			line.set_color(gap.gbox.top, gap.is_current ? settings.color_new : settings.color)
+			line.set_color(gap.gbox.bottom, gap.is_current ? settings.color_new : settings.color)
+			f_gradeColor(gap.gbox.grade, gap.is_current ? settings.ce_color_new : settings.ce_color)
+			linefill.set_color(gap.gbox.fill, gap.is_current ? settings.background_new : settings.background)
+		f_gradeEnsureOpen(gap.gbox.grade, math.max(gap.open, gap.close), math.min(gap.open, gap.close))
+
+		if settings.label_show
+			bool _wide = math.abs(gap.open - gap.close) >= spacing
+			bool _hasBottom = not na(gap.gbox.l_bottom)
+			if not na(gap.gbox.l_top) and _wide != _hasBottom
+				label.delete(gap.gbox.l_top)
+				label.delete(gap.gbox.l_bottom)
+				gap.gbox.l_top := na
+				gap.gbox.l_bottom := na
+			if na(gap.gbox.l_top)
+				if _wide
+					gap.gbox.l_top       := label.new(e, math.max(gap.close, gap.open), str.format("{1} high -{0}", gap.date_name, gap.name), style=label.style_label_left, xloc=xloc.bar_time, size=settings.label_size, color=settings.label_bgcolor, textcolor=settings.label_color)
+					gap.gbox.l_bottom    := label.new(e, math.min(gap.close, gap.open), str.format("{1} low -{0}", gap.date_name, gap.name), style=label.style_label_left, xloc=xloc.bar_time, size=settings.label_size, color=settings.label_bgcolor, textcolor=settings.label_color)
+				else
+					gap.gbox.l_top       := label.new(e, gap.middle, str.format("{1} -{0}", gap.date_name, gap.name), style=label.style_label_left, xloc=xloc.bar_time, size=settings.label_size, color=settings.label_bgcolor, textcolor=settings.label_color)
+			else
+				label.set_x(gap.gbox.l_top, e)
+				if _wide
+					label.set_x(gap.gbox.l_bottom, e)
+	gap
+
+method reset(Gap gap) =>
+	if not na(gap.gbox)
+		line.delete(gap.gbox.top)
+		line.delete(gap.gbox.bottom)
+		f_gradeDelete(gap.gbox.grade)
+		linefill.delete(gap.gbox.fill)
+		label.delete(gap.gbox.l_top)
+		label.delete(gap.gbox.l_bottom)
+		gap.gbox := na
+
+method Add(OpenGap GAP, string name, float o, float c, int t, int t1, int tt) =>
+	gap = Gap.new()
+	gap.name := name
+	gap.date_name   := str.format("{0, date, MMM, d yyyy}", tt)
+	gap.open := c
+	gap.close := o
+	gap.middle := (o+c)/2
+	gap.open_time := t1
+	gap.close_time := t
+	gap.is_sunday := dayofweek == dayofweek.sunday
+	GAP.gaps.unshift(gap)
+
+	if GAP.gaps.size() > 50
+		g = GAP.gaps.pop()
+		g.reset()
+
+	GAP
+
+method NearPrice(Gap[] gaps, float price, int count, bool above) =>
+	array<Gap> _found = array.new<Gap>()
+	if gaps.size() > 0
+		for i = 0 to gaps.size() - 1
+			Gap ng = gaps.get(i)
+			float mark = above ? math.max(ng.open, ng.close) : math.min(ng.open, ng.close)
+			if (above and price < mark) or (not above and price > mark)
+				_found.push(ng)
+	if _found.size() > 1
+		for i = 1 to _found.size() - 1
+			Gap _key = _found.get(i)
+			float _kd = math.abs((above ? math.max(_key.open, _key.close) : math.min(_key.open, _key.close)) - price)
+			int j = i - 1
+			while j >= 0
+				Gap _jg = _found.get(j)
+				float _jd = math.abs((above ? math.max(_jg.open, _jg.close) : math.min(_jg.open, _jg.close)) - price)
+				if _jd <= _kd
+					break
+				_found.set(j + 1, _jg)
+				j -= 1
+			_found.set(j + 1, _key)
+	_found
+
+method Redraw(OpenGap GAP) =>
+	if GAP.gaps.size() > 0
+		for i = 0 to GAP.gaps.size()-1
+			Gap _gap = GAP.gaps.get(i)
+			_gap.is_current := i == 0
+			_gap.is_visible := false
+		array<Gap> _above = GAP.gaps.NearPrice(close, GAP.settings.max_count, true)
+		array<Gap> _below = GAP.gaps.NearPrice(close, GAP.settings.max_count, false)
+		int _aCnt = math.min(_above.size(), GAP.settings.max_count)
+		int _bCnt = math.min(_below.size(), GAP.settings.max_count)
+		if _aCnt > 0
+			for i = 0 to _aCnt - 1
+				Gap _gap = _above.get(i)
+				_gap.is_visible := true
+		if _bCnt > 0
+			for i = 0 to _bCnt - 1
+				Gap _gap = _below.get(i)
+				_gap.is_visible := true
+		for i = 0 to GAP.gaps.size()-1
+			Gap _gap = GAP.gaps.get(i)
+			if not _gap.is_visible
+				_gap.reset()
+		if _aCnt > 0
+			for i = 0 to _aCnt - 1
+				_above.get(i).render(GAP.settings)
+		if _bCnt > 0
+			for i = 0 to _bCnt - 1
+				_below.get(i).render(GAP.settings)
+		Gap prev = _above.size() > 0 ? _above.first() : na
+		Gap next = _below.size() > 0 ? _below.first() : na
+		if GAP.settings.EH_show
+			if not na(prev) and not na(next)
+				if math.min(prev.open, prev.close) > math.max(next.open, next.close)
+					middle = (math.min(prev.open, prev.close) + math.max(next.open, next.close))/2
+					if na(GAP.EventHorizon)
+						GAP.EventHorizon := line.new(math.max(prev.open_time, next.open_time), middle, time+(time-time[1])*buffer, middle, xloc=xloc.bar_time, color=GAP.settings.EH_color, width = GAP.settings.EH_size, style=f_get_line_style(GAP.settings.EH_style))
+					else
+						line.set_xy1(GAP.EventHorizon, math.max(prev.open_time, next.open_time), middle)
+						line.set_xy2(GAP.EventHorizon, time+(time-time[1])*buffer, middle)
+				else
+					line.delete(GAP.EventHorizon)
+			else
+				line.delete(GAP.EventHorizon)
+				1
+		else
+			line.delete(GAP.EventHorizon)
+			1
+	GAP
+
+getCloseAtTime() =>
+	float closed = na
+	int closedtime = 0
+	if timeframe.isseconds
+		[isclosed, closeAt, closedAtTime] = request.security(syminfo.tickerid, "1", [(hour(time[1], "America/New_York") == 16 and minute(time[1], "America/New_York") == 14), close[1], time[1]], lookahead=barmerge.lookahead_on)
+		if isclosed
+			closed := closeAt
+			closedtime := closedAtTime
+	else
+		[isclosed, closeAt, closedAtTime] = request.security_lower_tf(syminfo.tickerid, "1", [(hour(time[1], "America/New_York") == 16 and minute(time[1], "America/New_York") == 14), close[1], time[1]])
+		int index = na
+		if isclosed.size() > 0
+			for i = 0 to isclosed.size() - 1
+				if isclosed.get(i)
+					index := i
+					break
+			if not na(index)
+				if closeAt.size() > index
+					closed := closeAt.get(index)
+				if closedAtTime.size() > index
+					closedtime := closedAtTime.get(index)
+	[closed, closedtime]
+
+getOpenAtTime() =>
+	float ethOpened = na
+	int ethTime = 0
+	float rthOpened = na
+	int rthTime = 0
+	if timeframe.isseconds
+		if ta.change(time("1")) != 0
+			[isEthOpen, isRthOpen, openAt, openedAtTime] = request.security(syminfo.tickerid, "1", [(hour(time[1], "America/New_York") == 18 and minute(time[1], "America/New_York") == 0), (hour(time[1], "America/New_York") == 9 and minute(time[1], "America/New_York") == 30), open[1], time[1]], lookahead=barmerge.lookahead_on)
+			if isEthOpen
+				ethOpened := openAt
+				ethTime := openedAtTime
+			if isRthOpen
+				rthOpened := openAt
+				rthTime := openedAtTime
+	else
+		[isEthOpen, isRthOpen, openAt, openedAtTime] = request.security_lower_tf(syminfo.tickerid, "1", [(hour(time[1], "America/New_York") == 18 and minute(time[1], "America/New_York") == 0), (hour(time[1], "America/New_York") == 9 and minute(time[1], "America/New_York") == 30), open[1], time[1]])
+		if isEthOpen.size() > 0
+			for i = 0 to isEthOpen.size() - 1
+				if isEthOpen.get(i)
+					ethOpened := openAt.get(i)
+					ethTime := openedAtTime.get(i)
+				if isRthOpen.get(i)
+					rthOpened := openAt.get(i)
+					rthTime := openedAtTime.get(i)
+	[ethOpened, ethTime, rthOpened, rthTime]
+
+[_nwogOpen, _nwogPrevClose, _nwogTime] = request.security(syminfo.tickerid, "W", [open, close[1], time], lookahead = barmerge.lookahead_on)
+[_ndogOpen, _ndogPrevClose, _ndogTime] = request.security(syminfo.tickerid, "D", [open, close[1], time], lookahead = barmerge.lookahead_on)
+
+var float _prevNwogOpen=na
+var float _prevNdogOpen=na
+
+if ENABLE_NWOG_NDOG
+	if barstate.isconfirmed
+		if NWOG.settings.show and not na(_nwogOpen)
+			if na(_prevNwogOpen) or _nwogOpen != _prevNwogOpen
+				NWOG.Add("NWOG", _nwogOpen, _nwogPrevClose, _nwogTime, _nwogTime, _nwogTime)
+				_prevNwogOpen := _nwogOpen
+		if NDOG.settings.show and not na(_ndogOpen)
+			if na(_prevNdogOpen) or _ndogOpen != _prevNdogOpen
+				NDOG.Add("NDOG ETH", _ndogOpen, _ndogPrevClose, _ndogTime, _ndogTime, _ndogTime)
+				_prevNdogOpen := _ndogOpen
+	if (NDOGrth.settings.show or showSettlementRTH) and timeframe.isintraday
+		var float settlementClose=na
+		var int settlementTime=0
+		var int lastEthOpenTime=0
+		var int lastRthOpenTime=0
+		var int lastEthSettlementTime=0
+		var int lastRthSettlementTime=0
+		[closedAt, closedAttime] = getCloseAtTime()
+		[ethOpened, ethOpenedtime, rthOpened, rthOpenedtime] = getOpenAtTime()
+		bool newEthOpen = not na(ethOpened) and ethOpenedtime != lastEthOpenTime
+		bool newRthOpen = not na(rthOpened) and rthOpenedtime != lastRthOpenTime
+		bool ethBeforeClose = newEthOpen and not na(closedAt) and ethOpenedtime < closedAttime
+		bool rthBeforeClose = newRthOpen and not na(closedAt) and rthOpenedtime < closedAttime
+		if ethBeforeClose and NDOGrth.settings.show and not na(settlementClose) and settlementTime != lastEthSettlementTime
+			NDOGrth.Add('Settlement → ETH', settlementClose, ethOpened, settlementTime, ethOpenedtime, settlementTime)
+			lastEthSettlementTime := settlementTime
+		if rthBeforeClose and showSettlementRTH and not na(settlementClose) and settlementTime != lastRthSettlementTime
+			SettlementRTH.Add('Settlement → RTH', settlementClose, rthOpened, settlementTime, rthOpenedtime, settlementTime)
+			lastRthSettlementTime := settlementTime
+		if not na(closedAt) and closedAttime != settlementTime
+			settlementClose := closedAt
+			settlementTime := closedAttime
+		if newEthOpen and not ethBeforeClose and NDOGrth.settings.show and not na(settlementClose) and settlementTime != lastEthSettlementTime
+			NDOGrth.Add('Settlement → ETH', settlementClose, ethOpened, settlementTime, ethOpenedtime, settlementTime)
+			lastEthSettlementTime := settlementTime
+		if newRthOpen and not rthBeforeClose and showSettlementRTH and not na(settlementClose) and settlementTime != lastRthSettlementTime
+			SettlementRTH.Add('Settlement → RTH', settlementClose, rthOpened, settlementTime, rthOpenedtime, settlementTime)
+			lastRthSettlementTime := settlementTime
+		if newEthOpen
+			lastEthOpenTime := ethOpenedtime
+		if newRthOpen
+			lastRthOpenTime := rthOpenedtime
+	if NWOG.settings.show
+		NWOG.Redraw()
+	if NDOG.settings.show
+		NDOG.Redraw()
+	if NDOGrth.settings.show and timeframe.isintraday
+		NDOGrth.Redraw()
+	if showSettlementRTH and timeframe.isintraday
+		SettlementRTH.Redraw()
+
+type Candle
+	float o
+	float c
+	float h
+	float l
+	int o_time
+	int o_idx
+	int c_idx
+	int h_idx
+	int l_idx
+	string dow
+	box body
+	line wick_up
+	line wick_down
+	label dow_label
+
+type Trace
+	line o
+	line c
+	line h
+	line l
+	label o_l
+	label c_l
+	label h_l
+	label l_l
+
+type Imbalance
+	box b
+	int idx
+	GradeLines grade
+
+type CandleSettings
+	bool show
+	string htf
+	int max_display
+
+type HTFSettings
+	int max_sets
+	color bull_body
+	color bull_border
+	color bull_wick
+	color bear_body
+	color bear_border
+	color bear_wick
+	int offset
+	int buffer
+	int htf_buffer
+	int width
+	bool use_custom_daily
+	string custom_daily
+	bool daily_name
+	bool trace_show
+	color trace_o_color
+	string trace_o_style
+	int trace_o_size
+	color trace_c_color
+	string trace_c_style
+	int trace_c_size
+	color trace_h_color
+	string trace_h_style
+	int trace_h_size
+	color trace_l_color
+	string trace_l_style
+	int trace_l_size
+	string trace_anchor
+	bool label_show
+	color label_color
+	string label_size
+	string label_position
+	string label_alignment
+	bool fvg_show
+	color fvg_color
+	bool vi_show
+	color vi_color
+	bool htf_label_show
+	color htf_label_color
+	string htf_label_size
+	bool htf_timer_show
+	color htf_timer_color
+	string htf_timer_size
+	color dow_color
+	string dow_size
+
+type CandleSet
+	array<Candle> candles
+	array<Imbalance> imbalances
+	CandleSettings csettings
+	label tfNameTop
+	label tfNameBottom
+	label tfTimerTop
+	label tfTimerBottom
+	int prevBarTime = na
+
+HTFSettings htfSettings = HTFSettings.new()
+
+var CandleSettings SettingsHTF1=CandleSettings.new()
+var CandleSettings SettingsHTF2=CandleSettings.new()
+var CandleSettings SettingsHTF3=CandleSettings.new()
+var CandleSettings SettingsHTF4=CandleSettings.new()
+var CandleSettings SettingsHTF5=CandleSettings.new()
+var CandleSettings SettingsHTF6=CandleSettings.new()
+
+var array<Candle> candles_1=array.new<Candle>(0)
+var array<Candle> candles_2=array.new<Candle>(0)
+var array<Candle> candles_3=array.new<Candle>(0)
+var array<Candle> candles_4=array.new<Candle>(0)
+var array<Candle> candles_5=array.new<Candle>(0)
+var array<Candle> candles_6=array.new<Candle>(0)
+
+var array<Imbalance> imbalances_1=array.new<Imbalance>()
+var array<Imbalance> imbalances_2=array.new<Imbalance>()
+var array<Imbalance> imbalances_3=array.new<Imbalance>()
+var array<Imbalance> imbalances_4=array.new<Imbalance>()
+var array<Imbalance> imbalances_5=array.new<Imbalance>()
+var array<Imbalance> imbalances_6=array.new<Imbalance>()
+
+var CandleSet htf1=CandleSet.new()
+htf1.csettings := SettingsHTF1
+htf1.candles := candles_1
+htf1.imbalances := imbalances_1
+
+var CandleSet htf2=CandleSet.new()
+htf2.csettings := SettingsHTF2
+htf2.candles := candles_2
+htf2.imbalances := imbalances_2
+
+var CandleSet htf3=CandleSet.new()
+htf3.csettings := SettingsHTF3
+htf3.candles := candles_3
+htf3.imbalances := imbalances_3
+
+var CandleSet htf4=CandleSet.new()
+htf4.csettings := SettingsHTF4
+htf4.candles := candles_4
+htf4.imbalances := imbalances_4
+
+var CandleSet htf5=CandleSet.new()
+htf5.csettings := SettingsHTF5
+htf5.candles := candles_5
+htf5.imbalances := imbalances_5
+
+var CandleSet htf6=CandleSet.new()
+htf6.csettings := SettingsHTF6
+htf6.candles := candles_6
+htf6.imbalances := imbalances_6
+
+var array<CandleSet> htfSets = array.from(htf1, htf2, htf3, htf4, htf5, htf6)
+
+string group_htfc_style              = "⑬ HTF Candle Styling"
+string group_htfc_label              = "⑭ HTF Candle Labels"
+string group_htfc_imbalance          = "⑮ HTF Candle Imbalance"
+string group_htfc_trace              = "⑯ HTF Candle Trace"
+
+htf1.csettings.show              := input.bool(true, 'HTF 1      ', inline='htf1', group='⑫ HTF Candles')
+htf_1=input.timeframe('5', '', inline='htf1', group='⑫ HTF Candles')
+htf1.csettings.htf := htf_1
+htf1.csettings.max_display       := input.int(10, '', inline='htf1', group='⑫ HTF Candles')
+
+htf2.csettings.show              := input.bool(true, 'HTF 2      ', inline='htf2', group='⑫ HTF Candles')
+htf_2=input.timeframe('15', '', inline='htf2', group='⑫ HTF Candles')
+htf2.csettings.htf := htf_2
+htf2.csettings.max_display       := input.int(10, '', inline='htf2', group='⑫ HTF Candles')
+
+htf3.csettings.show              := input.bool(true, 'HTF 3      ', inline='htf3', group='⑫ HTF Candles')
+htf_3=input.timeframe('60', '', inline='htf3', group='⑫ HTF Candles')
+htf3.csettings.htf := htf_3
+htf3.csettings.max_display       := input.int(10, '', inline='htf3', group='⑫ HTF Candles')
+
+htf4.csettings.show              := input.bool(true, 'HTF 4      ', inline='htf4', group='⑫ HTF Candles')
+htf_4=input.timeframe('240', '', inline='htf4', group='⑫ HTF Candles')
+htf4.csettings.htf := htf_4
+htf4.csettings.max_display       := input.int(10, '', inline='htf4', group='⑫ HTF Candles')
+
+htf5.csettings.show              := input.bool(true, 'HTF 5      ', inline='htf5', group='⑫ HTF Candles')
+htf_5=input.timeframe('1D', '', inline='htf5', group='⑫ HTF Candles')
+htf5.csettings.htf := htf_5
+htf5.csettings.max_display       := input.int(10, '', inline='htf5', group='⑫ HTF Candles')
+
+htf6.csettings.show              := input.bool(true, 'HTF 6      ', inline='htf6', group='⑫ HTF Candles')
+htf_6=input.timeframe('1W', '', inline='htf6', group='⑫ HTF Candles')
+htf6.csettings.htf := htf_6
+htf6.csettings.max_display       := input.int(10, '', inline='htf6', group='⑫ HTF Candles')
+
+htfSettings.max_sets               := input.int(6, 'Limit to next HTFs only', minval=1, maxval=6, group='⑫ HTF Candles')
+htfSettings.use_custom_daily       := input.bool(false, 'Custom daily candle open     ', inline='customdaily', group='⑫ HTF Candles')
+htfSettings.custom_daily           := input.string('Midnight', '', options=['Midnight', '8:30', '9:30'], inline='customdaily', group='⑫ HTF Candles')
+htfSettings.bull_body              := input.color(color.new(color.green, 10), 'Body  ', inline='body', group=group_htfc_style)
+htfSettings.bear_body              := input.color(color.new(color.red, 10), '', inline='body', group=group_htfc_style)
+htfSettings.bull_border            := input.color(color.new(color.black, 10), 'Borders', inline='borders', group=group_htfc_style)
+htfSettings.bear_border            := input.color(color.new(color.black, 10), '', inline='borders', group=group_htfc_style)
+htfSettings.bull_wick              := input.color(color.new(color.black, 10), 'Wick  ', inline='wick', group=group_htfc_style)
+htfSettings.bear_wick              := input.color(color.new(color.black, 10), '', inline='wick', group=group_htfc_style)
+
+htfSettings.offset                 := input.int(10, 'padding from current candles', minval=1, group=group_htfc_style)
+htfSettings.buffer                 := input.int(1, 'space between candles', minval=1, maxval=4, group=group_htfc_style)
+htfSettings.htf_buffer             := input.int(10, 'space between Higher Timeframes', minval=1, maxval=10, group=group_htfc_style)
+htfSettings.width                  := input.int(1, 'Candle Width', minval=1, maxval=4, group=group_htfc_style) * 2
+bool htf_fitLive                   = input.bool(true, 'Fit live candles', inline='htfFit', group=group_htfc_style, tooltip='Keeps projected sets chronological and compact. Retains at least four candles when HTF FVGs are enabled (two for VI), preserving one completed FVG across the next HTF rollover.')
+int htf_fitBars                    = input.int(40, 'Projection bars', minval=40, maxval=300, inline='htfFit', group=group_htfc_style)
+int htfCandleGap                   = htf_fitLive ? 0 : htfSettings.buffer
+int htfSetGap                      = htf_fitLive ? 1 : htfSettings.htf_buffer
+
+htfSettings.htf_label_show         := input.bool(true, 'HTF Label           ', group=group_htfc_label, inline='HTFlabel')
+htfSettings.htf_label_color        := input.color(color.new(color.black, 10), '', group=group_htfc_label, inline='HTFlabel')
+htfSettings.htf_label_size         := input.string(size.large, '', [size.tiny, size.small, size.normal, size.large, size.huge], group=group_htfc_label, inline='HTFlabel')
+
+htfSettings.label_position         := input.string("Both", 'Label Positions', options=['Both', 'Top', 'Bottom'], group=group_htfc_label)
+htfSettings.label_alignment        := input.string("Align", "Label Alignment", options=['Align', 'Follow Candles'], group=group_htfc_label)
+
+htfSettings.htf_timer_show         := input.bool(true, 'Remaining time      ', inline='timer', group=group_htfc_label)
+htfSettings.htf_timer_color        := input.color(color.new(color.black, 10), '', inline='timer', group=group_htfc_label)
+htfSettings.htf_timer_size         := input.string(size.normal, '', [size.tiny, size.small, size.normal, size.large, size.huge], group=group_htfc_label, inline='timer')
+
+htfSettings.daily_name             := input.bool(false, 'Interval Value        ', group=group_htfc_label, inline='dow')
+htfSettings.dow_color              := input.color(color.black , '', group=group_htfc_label, inline='dow')
+htfSettings.dow_size               := input.string(size.small, '', [size.tiny, size.small, size.normal, size.large, size.huge], group=group_htfc_label, inline='dow')
+
+htfSettings.fvg_show               := input.bool(true, 'Fair Value Gap   ', group=group_htfc_imbalance, inline='fvg')
+htfSettings.fvg_color              := input.color(color.new(color.gray, 80), '', inline='fvg', group=group_htfc_imbalance)
+
+htfSettings.vi_show                := input.bool(true, 'Volume Imbalance', group=group_htfc_imbalance, inline='vi')
+htfSettings.vi_color               := input.color(color.new(color.red, 50), '', inline='vi', group=group_htfc_imbalance)
+
+htfSettings.trace_show             := input.bool(false, 'Trace lines', group=group_htfc_trace)
+htfSettings.trace_o_color          := input.color(color.new(color.gray, 50), 'Open    ', inline='1', group=group_htfc_trace)
+htfSettings.trace_o_style          := input.string('····', '', options=['⎯⎯⎯', '----', '····'], inline='1', group=group_htfc_trace)
+htfSettings.trace_o_size           := input.int(1, '', options=[1, 2, 3, 4], inline='1', group=group_htfc_trace)
+htfSettings.trace_c_color          := input.color(color.new(color.gray, 50), 'Close    ', inline='2', group=group_htfc_trace)
+htfSettings.trace_c_style          := input.string('····', '', options=['⎯⎯⎯', '----', '····'], inline='2', group=group_htfc_trace)
+htfSettings.trace_c_size           := input.int(1, '', options=[1, 2, 3, 4], inline='2', group=group_htfc_trace)
+htfSettings.trace_h_color          := input.color(color.new(color.gray, 50), 'High     ', inline='3', group=group_htfc_trace)
+htfSettings.trace_h_style          := input.string('····', '', options=['⎯⎯⎯', '----', '····'], inline='3', group=group_htfc_trace)
+htfSettings.trace_h_size           := input.int(1, '', options=[1, 2, 3, 4], inline='3', group=group_htfc_trace)
+htfSettings.trace_l_color          := input.color(color.new(color.gray, 50), 'Low     ', inline='4', group=group_htfc_trace)
+htfSettings.trace_l_style          := input.string('····', '', options=['⎯⎯⎯', '----', '····'], inline='4', group=group_htfc_trace)
+htfSettings.trace_l_size           := input.int(1, '', options=[1, 2, 3, 4], inline='4', group=group_htfc_trace)
+htfSettings.trace_anchor           := input.string('First Timeframe', 'Anchor to', options=['First Timeframe', 'Last Timeframe'], group=group_htfc_trace)
+
+htfSettings.label_show             := input.bool(false, 'Price Label           ', inline='label', group=group_htfc_trace)
+htfSettings.label_color            := input.color(color.new(color.black, 10), '', inline='label', group=group_htfc_trace)
+htfSettings.label_size             := input.string(size.small, '', [size.tiny, size.small, size.normal, size.large, size.huge], inline='label', group=group_htfc_trace)
+
+var Trace htfTrace=Trace.new()
+color htfc_color_transparent = #ffffff00
+
+_htf_LineStyle(string style) =>
+	out = switch style
+		'----' => line.style_dashed
+		'····' => line.style_dotted
+		=> line.style_solid
+	out
+
+_htf_DayofWeek(int index) =>
+	switch
+		index == 1 => 'M'
+		index == 2 => 'T'
+		index == 3 => 'W'
+		index == 4 => 'T'
+		index == 5 => 'F'
+		index == 6 => 'S'
+		index == 7 => 'S'
+		na(index) => ''
+
+_htf_ValidTimeframe(string HTF) =>
+	if timeframe.in_seconds(HTF) >= timeframe.in_seconds('D') and timeframe.in_seconds(HTF) > timeframe.in_seconds()
+		true
+	else
+		n1 = timeframe.in_seconds()
+		n2 = timeframe.in_seconds(HTF)
+		n1 < n2 and math.round(n2 / n1) == n2 / n1
+
+_htf_RemainingTime(string HTF) =>
+	if barstate.isrealtime
+		timeRemaining = (time_close(HTF) - timenow) / 1000
+		days = math.floor(timeRemaining / 86400)
+		hours = math.floor((timeRemaining - days * 86400) / 3600)
+		minutes = math.floor((timeRemaining - days * 86400 - hours * 3600) / 60)
+		seconds = math.floor(timeRemaining - days * 86400 - hours * 3600 - minutes * 60)
+
+		r = str.tostring(seconds, '00')
+		if minutes > 0 or hours > 0 or days > 0
+			r := str.tostring(minutes, '00') + ':' + r
+			r
+		if hours > 0 or days > 0
+			r := str.tostring(hours, '00') + ':' + r
+			r
+		if days > 0
+			r := str.tostring(days) + 'D ' + r
+			r
+		r
+	else
+		'n/a'
+
+_htf_HTFName(string HTF) =>
+	formatted = HTF
+
+	seconds = timeframe.in_seconds(HTF)
+	if seconds < 60
+		formatted := str.tostring(seconds) + 's'
+		formatted
+	else if seconds / 60 < 60
+		formatted := str.tostring(seconds / 60) + 'm'
+		formatted
+	else if seconds / 60 / 60 < 24
+		formatted := str.tostring(seconds / 60 / 60) + 'H'
+		formatted
+	formatted
+
+_htf_Enabled() =>
+	int enabled = 0
+	for i = 0 to htfSets.size() - 1
+		CandleSet _cs = htfSets.get(i)
+		if _cs.csettings.show and _htf_ValidTimeframe(_cs.csettings.htf)
+			enabled += 1
+	math.min(enabled, htfSettings.max_sets)
+
+_htf_FitLimit(int sets, int setGap) =>
+	int _sets = math.max(1, sets)
+	int _room = htf_fitBars - htfSettings.offset + _sets * htfCandleGap - (_sets - 1) * setGap
+	int _needed = htfSettings.fvg_show ? 4 : htfSettings.vi_show ? 2 : 1
+	math.max(_needed, int(math.floor(_room / (_sets * (htfSettings.width + htfCandleGap)))))
+
+_htf_CandleSetHigh(array<Candle> candles, float h) =>
+	float _h = h
+	if array.size(candles) > 0
+		for i = 0 to array.size(candles) - 1 by 1
+			Candle c = array.get(candles, i)
+			if c.h > _h
+				_h := c.h
+				_h
+	_h
+
+_htf_CandleSetLow(array<Candle> candles, float l) =>
+	float _l = l
+	if array.size(candles) > 0
+		for i = 0 to array.size(candles) - 1 by 1
+			Candle c = array.get(candles, i)
+			if c.l < _l
+				_l := c.l
+				_l
+	_l
+
+_htf_CandlesHigh(array<Candle> candles) =>
+	h = 0.0
+	int cnt = 0
+	int last = _htf_Enabled()
+	for i = 0 to htfSets.size() - 1
+		CandleSet _cs = htfSets.get(i)
+		if _cs.csettings.show and _htf_ValidTimeframe(_cs.csettings.htf) and cnt < last
+			h := _htf_CandleSetHigh(_cs.candles, h)
+			cnt += 1
+	if array.size(candles) > 0
+		for i = 0 to array.size(candles) - 1
+			Candle c = array.get(candles, i)
+			if c.h > h
+				h := c.h
+	h
+
+_htf_CandlesLow(array<Candle> candles, float h) =>
+	l = h
+	int cnt = 0
+	int last = _htf_Enabled()
+	for i = 0 to htfSets.size() - 1
+		CandleSet _cs = htfSets.get(i)
+		if _cs.csettings.show and _htf_ValidTimeframe(_cs.csettings.htf) and cnt < last
+			l := _htf_CandleSetLow(_cs.candles, l)
+			cnt += 1
+	if array.size(candles) > 0
+		for i = 0 to array.size(candles) - 1
+			Candle c = array.get(candles, i)
+			if c.l < l
+				l := c.l
+	l
+
+method Reorder(CandleSet candleSet, int offset) =>
+	size = candleSet.candles.size()
+
+	if size > 0
+		for i = size - 1 to 0 by 1
+			Candle candle = candleSet.candles.get(i)
+			t_buffer = offset + (htfSettings.width + htfCandleGap) * (size - i - 1)
+			box.set_left(candle.body, bar_index + t_buffer)
+			box.set_right(candle.body, bar_index + htfSettings.width + t_buffer)
+			line.set_x1(candle.wick_up, bar_index + htfSettings.width / 2 + t_buffer)
+			line.set_x2(candle.wick_up, bar_index + htfSettings.width / 2 + t_buffer)
+			line.set_x1(candle.wick_down, bar_index + htfSettings.width / 2 + t_buffer)
+			line.set_x2(candle.wick_down, bar_index + htfSettings.width / 2 + t_buffer)
+
+			if htfSettings.daily_name
+				if not na(candle.dow_label)
+					if i == 0 and barstate.isrealtime and not barstate.isconfirmed
+						label.delete(candle.dow_label)
+						candle.dow_label := label.new(bar_index + htfSettings.width / 2 + t_buffer, candle.h, candle.dow, color = htfc_color_transparent, textcolor = htfSettings.dow_color, style = label.style_label_down, size = htfSettings.dow_size)
+					else
+						candle.dow_label.set_y(candle.h)
+						candle.dow_label.set_x(bar_index + htfSettings.width / 2 + t_buffer)
+						candle.dow_label.set_text(candle.dow)
+				else
+					candle.dow_label := label.new(bar_index + htfSettings.width / 2 + t_buffer, candle.h, candle.dow, color = htfc_color_transparent, textcolor = htfSettings.dow_color, style = label.style_label_down, size = htfSettings.dow_size)
+
+	top = 0.0
+	bottom = 0.0
+
+	if htfSettings.label_alignment == 'Align'
+		top := _htf_CandlesHigh(candleSet.candles)
+		bottom := _htf_CandlesLow(candleSet.candles, top)
+	if htfSettings.label_alignment == 'Follow Candles'
+		top := _htf_CandleSetHigh(candleSet.candles, 0)
+		bottom := _htf_CandleSetLow(candleSet.candles, top)
+
+	left = bar_index + offset + (htfSettings.width + htfCandleGap) * (size - 1) / 2
+
+	if htfSettings.htf_label_show
+		string lblt = _htf_HTFName(candleSet.csettings.htf)
+		string lbll = lblt
+		if htfSettings.htf_timer_show
+			lblt := lblt + '\n'
+			lbll := '\n' + lbll
+		if htfSettings.daily_name
+			lblt := lblt + '\n'
+
+		string tmr = '(' + _htf_RemainingTime(candleSet.csettings.htf) + ')' + (htfSettings.daily_name ? '\n' : '')
+		if htfSettings.label_position == 'Both' or htfSettings.label_position == 'Top'
+
+			if not na(candleSet.tfNameTop)
+				if barstate.isrealtime and not barstate.isconfirmed
+					label.delete(candleSet.tfNameTop)
+					candleSet.tfNameTop := label.new(left, top, lblt, color = htfc_color_transparent, textcolor = htfSettings.htf_label_color, style = label.style_label_down, size = htfSettings.htf_label_size)
+				else
+					candleSet.tfNameTop.set_xy(left, top)
+					candleSet.tfNameTop.set_text(lblt)
+			else
+				candleSet.tfNameTop := label.new(left, top, lblt, color = htfc_color_transparent, textcolor = htfSettings.htf_label_color, style = label.style_label_down, size = htfSettings.htf_label_size)
+			if htfSettings.htf_timer_show
+				if not na(candleSet.tfTimerTop)
+					if barstate.isrealtime and not barstate.isconfirmed
+						label.delete(candleSet.tfTimerTop)
+						candleSet.tfTimerTop := label.new(left, top, tmr, color = htfc_color_transparent, textcolor = htfSettings.htf_timer_color, style = label.style_label_down, size = htfSettings.htf_timer_size)
+					else
+						candleSet.tfTimerTop.set_xy(left, top)
+						candleSet.tfTimerTop.set_text(tmr)
+				else
+					candleSet.tfTimerTop := label.new(left, top, tmr, color = htfc_color_transparent, textcolor = htfSettings.htf_timer_color, style = label.style_label_down, size = htfSettings.htf_timer_size)
+
+		if htfSettings.label_position == 'Both' or htfSettings.label_position == 'Bottom'
+			if not na(candleSet.tfNameBottom)
+				if barstate.isrealtime and not barstate.isconfirmed
+					label.delete(candleSet.tfNameBottom)
+					candleSet.tfNameBottom := label.new(left, bottom, lbll, color = htfc_color_transparent, textcolor = htfSettings.htf_label_color, style = label.style_label_up, size = htfSettings.htf_label_size)
+				else
+					candleSet.tfNameBottom.set_xy(left, bottom)
+					candleSet.tfNameBottom.set_text(lbll)
+			else
+				candleSet.tfNameBottom := label.new(left, bottom, lbll, color = htfc_color_transparent, textcolor = htfSettings.htf_label_color, style = label.style_label_up, size = htfSettings.htf_label_size)
+			if htfSettings.htf_timer_show
+				if not na(candleSet.tfTimerBottom)
+					if barstate.isrealtime and not barstate.isconfirmed
+						label.delete(candleSet.tfTimerBottom)
+						candleSet.tfTimerBottom := label.new(left, bottom, tmr, color = htfc_color_transparent, textcolor = htfSettings.htf_timer_color, style = label.style_label_up, size = htfSettings.htf_timer_size)
+					else
+						candleSet.tfTimerBottom.set_xy(left, bottom)
+						candleSet.tfTimerBottom.set_text(tmr)
+				else
+					candleSet.tfTimerBottom := label.new(left, bottom, tmr, color = htfc_color_transparent, textcolor = htfSettings.htf_timer_color, style = label.style_label_up, size = htfSettings.htf_timer_size)
+
+	candleSet
+
+method UpsertImbalance(CandleSet candleSet, int _key, int _left, float _top, int _right, float _bottom, color _fill, bool _commit) =>
+	int _found = -1
+	if candleSet.imbalances.size() > 0
+		for i = 0 to candleSet.imbalances.size() - 1
+			if candleSet.imbalances.get(i).idx == _key
+				_found := i
+	bool _created = false
+	if _found >= 0
+		Imbalance imb = candleSet.imbalances.get(_found)
+		box.set_left(imb.b, _left)
+		box.set_right(imb.b, _right)
+		box.set_top(imb.b, _top)
+		box.set_bottom(imb.b, _bottom)
+		box.set_bgcolor(imb.b, _fill)
+		box.set_border_color(imb.b, htfc_color_transparent)
+		f_gradeSync(imb.grade, imb.b)
+	else if _commit
+		Imbalance imb = Imbalance.new()
+		imb.idx := _key
+		imb.b := box.new(_left, _top, _right, _bottom, bgcolor = _fill, border_color = htfc_color_transparent, xloc = xloc.bar_index)
+		line _ce = cefvg and _key > 0 ? line.new(_left, math.avg(_top, _bottom), _right, math.avg(_top, _bottom), xloc=xloc.bar_index, style=celinetype, color=color.new(_fill, cetransparency)) : na
+		imb.grade := f_gradeNew(_ce, _top, _bottom)
+		candleSet.imbalances.push(imb)
+		_created := true
+	_created
+
+method FindImbalance(CandleSet candleSet) =>
+	if barstate.isrealtime or barstate.islast or barstate.islastconfirmedhistory
+		bool _commit = barstate.islastconfirmedhistory or barstate.isconfirmed
+		array<int> _seen = array.new<int>()
+		array<int> _viSkip = array.new<int>()
+		bool _created = false
+
+		if candleSet.candles.size() > 2 and htfSettings.fvg_show
+			for i = 0 to candleSet.candles.size() - 3
+				Candle candle1 = candleSet.candles.get(i)
+				Candle candle2 = candleSet.candles.get(i + 2)
+				Candle candle3 = candleSet.candles.get(i + 1)
+				int _xLeft = math.min(box.get_left(candle1.body), box.get_left(candle2.body))
+				int _xRight = math.max(box.get_right(candle1.body), box.get_right(candle2.body))
+				int _key = candle1.o_time
+
+				if candle1.l > candle2.h and math.min(candle1.o, candle1.c) > math.max(candle2.o, candle2.c)
+					float _fTop = candle1.l
+					float _fBot = candle2.h
+					if fvgAnchorVI
+						bool _vi01 = math.min(candle1.o, candle1.c) != math.max(candle3.o, candle3.c)
+						bool _vi12 = math.min(candle3.o, candle3.c) != math.max(candle2.o, candle2.c)
+						if _vi01
+							_fTop := math.max(_fTop, math.max(candle1.o, candle3.c))
+							_fBot := math.min(_fBot, math.min(candle1.o, candle3.c))
+							_viSkip.push(i)
+						if _vi12
+							_fTop := math.max(_fTop, math.max(candle3.o, candle2.c))
+							_fBot := math.min(_fBot, math.min(candle3.o, candle2.c))
+							_viSkip.push(i + 1)
+					_seen.push(_key)
+					bool _wasCreated = candleSet.UpsertImbalance(_key, _xLeft, _fTop, _xRight, _fBot, htfSettings.fvg_color, _commit)
+					_created := _created or _wasCreated
+				if candle1.h < candle2.l and math.max(candle1.o, candle1.c) < math.min(candle2.o, candle2.c)
+					float _fTop = candle2.l
+					float _fBot = candle1.h
+					if fvgAnchorVI
+						bool _vi01 = math.max(candle1.o, candle1.c) != math.min(candle3.o, candle3.c)
+						bool _vi12 = math.max(candle3.o, candle3.c) != math.min(candle2.o, candle2.c)
+						if _vi01
+							_fTop := math.max(_fTop, math.max(candle3.c, candle1.o))
+							_fBot := math.min(_fBot, math.min(candle3.c, candle1.o))
+							_viSkip.push(i)
+						if _vi12
+							_fTop := math.max(_fTop, math.max(candle2.c, candle3.o))
+							_fBot := math.min(_fBot, math.min(candle2.c, candle3.o))
+							_viSkip.push(i + 1)
+					_seen.push(_key)
+					bool _wasCreated = candleSet.UpsertImbalance(_key, _xLeft, _fTop, _xRight, _fBot, htfSettings.fvg_color, _commit)
+					_created := _created or _wasCreated
+
+		if candleSet.candles.size() > 1 and htfSettings.vi_show
+			for i = 0 to candleSet.candles.size() - 2
+				if fvgAnchorVI and _viSkip.includes(i)
+					continue
+				Candle candle1 = candleSet.candles.get(i)
+				Candle candle2 = candleSet.candles.get(i + 1)
+				int _xLeft = math.min(box.get_left(candle1.body), box.get_left(candle2.body))
+				int _xRight = math.max(box.get_right(candle1.body), box.get_right(candle2.body))
+				int _key = -candle1.o_time
+				if candle1.l < candle2.h and math.min(candle1.o, candle1.c) > math.max(candle2.o, candle2.c)
+					_seen.push(_key)
+					bool _wasCreated = candleSet.UpsertImbalance(_key, _xLeft, math.min(candle1.o, candle1.c), _xRight, math.max(candle2.o, candle2.c), htfSettings.vi_color, _commit)
+					_created := _created or _wasCreated
+				if candle1.h > candle2.l and math.max(candle1.o, candle1.c) < math.min(candle2.o, candle2.c)
+					_seen.push(_key)
+					bool _wasCreated = candleSet.UpsertImbalance(_key, _xLeft, math.min(candle2.o, candle2.c), _xRight, math.max(candle1.o, candle1.c), htfSettings.vi_color, _commit)
+					_created := _created or _wasCreated
+
+		if _commit and candleSet.imbalances.size() > 0
+			for i = candleSet.imbalances.size() - 1 to 0
+				Imbalance imb = candleSet.imbalances.get(i)
+				if not _seen.includes(imb.idx)
+					f_gradeDelete(imb.grade)
+					box.delete(imb.b)
+					candleSet.imbalances.remove(i)
+
+		if _created and candleSet.candles.size() > 0
+			for i = 0 to candleSet.candles.size() - 1
+				Candle candle = candleSet.candles.get(i)
+				box temp = box.copy(candle.body)
+				box.delete(candle.body)
+				candle.body := temp
+	candleSet
+
+method Monitor(CandleSet candleSet, int displayLimit) =>
+	int HTFBarTime = time(candleSet.csettings.htf)
+	bool isNewHTFCandle = not na(HTFBarTime) and (na(candleSet.prevBarTime) or HTFBarTime != candleSet.prevBarTime)
+	candleSet.prevBarTime := HTFBarTime
+
+	if htfSettings.use_custom_daily
+		int _830 = 0
+		if isNewHTFCandle
+			_830 := timestamp("America/New_York", year(time), month(time), dayofmonth(time), 0, 0) + 30600000
+		if candleSet.csettings.htf == '1D'
+			if htfSettings.custom_daily == 'Midnight'
+				isNewHTFCandle := dayofweek(time, 'America/New_York') != dayofweek(time - (time - time[1]), 'America/New_York')
+			if htfSettings.custom_daily == '8:30'
+				isNewHTFCandle := not na(time(timeframe.period, "0830-0831:123456", 'America/New_York')) and na(time(timeframe.period, "0830-0831:123456", 'America/New_York')[1])
+			if htfSettings.custom_daily == '9:30'
+				isNewHTFCandle := not na(time(timeframe.period, "0930-0931:123456", 'America/New_York')) and na(time(timeframe.period, "0930-0931:123456", 'America/New_York')[1])
+	if isNewHTFCandle
+		Candle candle = Candle.new()
+		candle.o := open
+		candle.c := close
+		candle.h := high
+		candle.l := low
+		candle.o_time := time
+		candle.o_idx := bar_index
+		candle.c_idx := bar_index
+		candle.h_idx := bar_index
+		candle.l_idx := bar_index
+		candle.dow := switch
+			candleSet.csettings.htf == '1D' =>
+				_htf_DayofWeek(dayofweek(time_tradingday, "America/New_York"))
+			str.tonumber(candleSet.csettings.htf) < 60 =>
+				str.format_time(candle.o_time, 'm', 'America/New_York')
+			str.tonumber(candleSet.csettings.htf) >= 60 =>
+				str.format_time(candle.o_time, 'H', 'America/New_York')
+			candleSet.csettings.htf == '1M' =>
+				str.format_time(candle.o_time, 'M', 'America/New_York')
+			=>
+				''
+		bull = candle.c > candle.o
+
+		candle.body := box.new(bar_index, math.max(candle.o, candle.c), bar_index + 2, math.min(candle.o, candle.c), bull ? htfSettings.bull_border : htfSettings.bear_border, 1, bgcolor = bull ? htfSettings.bull_body : htfSettings.bear_body)
+		candle.wick_up := line.new(bar_index + 1, candle.h, bar_index, math.max(candle.o, candle.c), color = bull ? htfSettings.bull_wick : htfSettings.bear_wick)
+		candle.wick_down := line.new(bar_index + 1, math.min(candle.o, candle.c), bar_index, candle.l, color = bull ? htfSettings.bull_wick : htfSettings.bear_wick)
+
+		candleSet.candles.unshift(candle)
+
+		if candleSet.candles.size() > displayLimit
+			Candle delCandle = array.pop(candleSet.candles)
+			box.delete(delCandle.body)
+			line.delete(delCandle.wick_up)
+			line.delete(delCandle.wick_down)
+			delCandle.dow_label.delete()
+
+	candleSet
+
+_htf_traceUpd(_ln, _lb, _srcIdx, _srcVal, _x2, _bRight, _clr, _style, _sz) =>
+	line _oLn = _ln
+	label _oLb = _lb
+	if bar_index - _srcIdx < 5000
+		if na(_oLn)
+			_oLn := line.new(_srcIdx, _srcVal, _x2, _srcVal, xloc=xloc.bar_index, color=_clr, style=_htf_LineStyle(_style), width=_sz)
+		else if barstate.isrealtime and not barstate.isconfirmed
+			line.delete(_oLn)
+			_oLn := line.new(_srcIdx, _srcVal, _x2, _srcVal, xloc=xloc.bar_index, color=_clr, style=_htf_LineStyle(_style), width=_sz)
+		else
+			line.set_xy1(_oLn, _srcIdx, _srcVal)
+			line.set_xy2(_oLn, _x2, _srcVal)
+			_oLn
+		if htfSettings.label_show
+			if na(_oLb)
+				_oLb := label.new(_bRight, _srcVal, str.tostring(_srcVal), textalign=text.align_center, style=label.style_label_left, size=htfSettings.label_size, color=htfc_color_transparent, textcolor=htfSettings.label_color)
+			else if barstate.isrealtime and not barstate.isconfirmed
+				label.delete(_oLb)
+				_oLb := label.new(_bRight, _srcVal, str.tostring(_srcVal), textalign=text.align_center, style=label.style_label_left, size=htfSettings.label_size, color=htfc_color_transparent, textcolor=htfSettings.label_color)
+			else
+				label.set_xy(_oLb, _bRight, _srcVal)
+				label.set_text(_oLb, str.tostring(_srcVal))
+				_oLb
+	[_oLn, _oLb]
+
+method Update(CandleSet candleSet, int offset, bool showTrace) =>
+	if candleSet.candles.size() > 0
+		Candle candle = candleSet.candles.first()
+		candle.h_idx := high > candle.h ? bar_index : candle.h_idx
+		candle.h := high > candle.h ? high : candle.h
+		candle.l_idx := low < candle.l ? bar_index : candle.l_idx
+		candle.l := low < candle.l ? low : candle.l
+		candle.c := close
+		candle.c_idx := bar_index
+
+		bull = candle.c > candle.o
+
+		float _bodyTop = math.max(candle.o, candle.c)
+		float _bodyBottom = math.min(candle.o, candle.c)
+		color _bodyColor = bull ? htfSettings.bull_body : htfSettings.bear_body
+		color _borderColor = bull ? htfSettings.bull_border : htfSettings.bear_border
+		color _wickColor = bull ? htfSettings.bull_wick : htfSettings.bear_wick
+		if barstate.isrealtime and not barstate.isconfirmed
+			int _tBuffer = offset + (htfSettings.width + htfCandleGap) * (candleSet.candles.size() - 1)
+			int _left = bar_index + _tBuffer
+			int _right = _left + htfSettings.width
+			int _wickX = _left + htfSettings.width / 2
+			box.delete(candle.body)
+			line.delete(candle.wick_up)
+			line.delete(candle.wick_down)
+			candle.body := box.new(_left, _bodyTop, _right, _bodyBottom, _borderColor, 1, bgcolor = _bodyColor)
+			candle.wick_up := line.new(_wickX, candle.h, _wickX, _bodyTop, color = _wickColor)
+			candle.wick_down := line.new(_wickX, _bodyBottom, _wickX, candle.l, color = _wickColor)
+		else
+			box.set_top(candle.body, _bodyTop)
+			box.set_bottom(candle.body, _bodyBottom)
+			box.set_bgcolor(candle.body, _bodyColor)
+			box.set_border_color(candle.body, _borderColor)
+			line.set_color(candle.wick_up, _wickColor)
+			line.set_color(candle.wick_down, _wickColor)
+			line.set_y1(candle.wick_up, candle.h)
+			line.set_y2(candle.wick_up, _bodyTop)
+			line.set_y1(candle.wick_down, candle.l)
+			line.set_y2(candle.wick_down, _bodyBottom)
+
+		if barstate.isrealtime or barstate.islast or barstate.islastconfirmedhistory
+			candleSet.Reorder(offset)
+			if htfSettings.trace_show and showTrace
+				int _bR = box.get_right(candle.body)
+				int _bL = box.get_left(candle.body)
+				[_to, _to_l] = _htf_traceUpd(htfTrace.o, htfTrace.o_l, candle.o_idx, candle.o, _bL, _bR, htfSettings.trace_o_color, htfSettings.trace_o_style, htfSettings.trace_o_size)
+				htfTrace.o := _to, htfTrace.o_l := _to_l
+				[_tc, _tc_l] = _htf_traceUpd(htfTrace.c, htfTrace.c_l, candle.c_idx, candle.c, _bL, _bR, htfSettings.trace_c_color, htfSettings.trace_c_style, htfSettings.trace_c_size)
+				htfTrace.c := _tc, htfTrace.c_l := _tc_l
+				[_th, _th_l] = _htf_traceUpd(htfTrace.h, htfTrace.h_l, candle.h_idx, candle.h, line.get_x1(candle.wick_up), _bR, htfSettings.trace_h_color, htfSettings.trace_h_style, htfSettings.trace_h_size)
+				htfTrace.h := _th, htfTrace.h_l := _th_l
+				[_tl, _tl_l] = _htf_traceUpd(htfTrace.l, htfTrace.l_l, candle.l_idx, candle.l, line.get_x1(candle.wick_down), _bR, htfSettings.trace_l_color, htfSettings.trace_l_style, htfSettings.trace_l_size)
+				htfTrace.l := _tl, htfTrace.l_l := _tl_l
+	candleSet
+
+int htfCnt = 0
+int htfLast = _htf_Enabled()
+int htfOffset = htfSettings.offset
+int htfDisplayLimit = htf_fitLive ? _htf_FitLimit(htfLast, htfSetGap) : 100000
+int htfMinDisplay = htfSettings.fvg_show ? 4 : htfSettings.vi_show ? 2 : 1
+if ENABLE_HTF_CANDLES
+	for i = 0 to htfSets.size() - 1
+		CandleSet _cs = htfSets.get(i)
+		if _cs.csettings.show and _htf_ValidTimeframe(_cs.csettings.htf) and htfCnt < htfLast
+			bool showTrace = (htfSettings.trace_anchor == 'First Timeframe' and htfCnt == 0) or (htfSettings.trace_anchor == 'Last Timeframe' and htfCnt == htfLast - 1)
+			_cs.Monitor(math.max(htfMinDisplay, math.min(_cs.csettings.max_display, htfDisplayLimit))).Update(htfOffset, showTrace).FindImbalance()
+			htfCnt += 1
+			htfOffset += _cs.candles.size() * htfSettings.width + (_cs.candles.size() > 0 ? (_cs.candles.size() - 1) * htfCandleGap : 0) + htfSetGap
+
+// ===== ㉙ HTF FVG Overlay (adapted from MTF FVG x2 [MK] by @malk1903, MPL-2.0) =====
+string group_mtf_fvg = "㉙ HTF FVG Overlay"
+string mtf_fvgTf=input.timeframe("60", "Timeframe", group=group_mtf_fvg, inline="mf1", tooltip="Must be higher than the chart timeframe. Uses only fully closed HTF candles.")
+string mtf_fvgFill=input.string("Full Fill", "Fill", options=["Touch", "Half Fill", "Full Fill"], group=group_mtf_fvg, inline="mf1", tooltip="Wick retirement for normal/implied zones. With ⑥ Inverse + Engulf, normal zones instead flip after a confirmed chart close through; inverse zones invalidate on the opposite close.")
+int mtf_fvgMax=input.int(12, "Max Zones", minval=1, maxval=20, group=group_mtf_fvg, inline="mf2", tooltip="Combined normal + implied + inverse cap. Each zone uses one box and one 50% line when ⑥ CE is enabled.")
+
+color mtf_fvgBullColor=input.color(color.new(color.green, 90), 'Normal Colours', group=group_mtf_fvg, inline='mf3', tooltip='Bullish and bearish colours for normal FVGs from the selected higher timeframe. Implied and inverse zones keep their existing colours.')
+color mtf_fvgBearColor=input.color(color.new(color.red, 90), '', group=group_mtf_fvg, inline='mf3')
+
+type MtfFvgZone
+	box bx
+	GradeLines grade
+	bool bull
+	int kind
+
+var array<MtfFvgZone> mtfFvgZones=array.new<MtfFvgZone>()
+
+f_mtfFvgDelete(MtfFvgZone _z) =>
+	box.delete(_z.bx)
+	f_gradeDelete(_z.grade)
+
+f_mtfFvgAdd(array<MtfFvgZone> _zones, bool _bull, int _kind, float _top, float _bottom, int _left, int _right, string _tf) =>
+	while _zones.size() >= mtf_fvgMax
+		MtfFvgZone _old = _zones.shift()
+		f_mtfFvgDelete(_old)
+	color _clr = _kind == 1 ? (_bull ? ifvgBullColor : ifvgBearColor) : (_bull ? mtf_fvgBullColor : mtf_fvgBearColor)
+	string _tag = _kind == 1 ? " Imp.FVG" : " FVG"
+	string _txt = plotBoxLabel ? _htf_HTFName(_tf) + _tag + (_bull ? "+" : "-") : na
+	box _bx = box.new(left=_left, top=_top, right=_right, bottom=_bottom, xloc=xloc.bar_time, bgcolor=_clr, border_color=color.new(_clr, BorderTransparency), border_style=BoxBorder, border_width=1, text=_txt, text_halign=labelhalign, text_valign=labelvalign, text_size=BoxLabelSize, text_color=BoxLabelColor)
+	line _ce = cefvg ? line.new(_left, math.avg(_top, _bottom), _right, math.avg(_top, _bottom), xloc=xloc.bar_time, style=celinetype, color=color.new(_clr, cetransparency)) : na
+	GradeLines _grade = f_gradePinnedNew(_ce, _top, _bottom)
+	_zones.push(MtfFvgZone.new(_bx, _grade, _bull, _kind))
+
+f_mtfFvgSnapshot() =>
+	int _dir = isFvgUp(1) ? 1 : isFvgDown(1) ? -1 : 0
+	float _top = _dir == 1 ? low[1] : _dir == -1 ? low[3] : na
+	float _bottom = _dir == 1 ? high[3] : _dir == -1 ? high[1] : na
+	if _dir != 0 and fvgAnchorVI
+		if _anyVI(1)
+			_top := math.max(_top, math.max(open[1], close[2]))
+			_bottom := math.min(_bottom, math.min(open[1], close[2]))
+		if _anyVI(2)
+			_top := math.max(_top, math.max(open[2], close[3]))
+			_bottom := math.min(_bottom, math.min(open[2], close[3]))
+	int _impDir = showifvg and isBuIFvg(1) ? 1 : showifvg and isBeIFvg(1) ? -1 : 0
+	float _impTop = _impDir == 1 ? (math.min(open[1], close[1]) + low[1]) / 2 : _impDir == -1 ? (math.min(open[3], close[3]) + low[3]) / 2 : na
+	float _impBottom = _impDir == 1 ? (high[3] + math.max(open[3], close[3])) / 2 : _impDir == -1 ? (math.max(open[1], close[1]) + high[1]) / 2 : na
+	[time[3], _dir, _top, _bottom, _impDir, _impTop, _impBottom]
+
+if ENABLE_MTF_FVG and timeframe.in_seconds(mtf_fvgTf) > timeframe.in_seconds()
+	[_t3, _dir, _topNew, _bottomNew, _impDir, _impTop, _impBottom] = request.security(syminfo.tickerid, mtf_fvgTf, f_mtfFvgSnapshot(), lookahead=barmerge.lookahead_on)
+	int _rightTime = nz(time_close, time)
+	if timeframe.change(mtf_fvgTf) and not na(_t3)
+		if _dir != 0
+			f_mtfFvgAdd(mtfFvgZones, _dir == 1, 0, _topNew, _bottomNew, _t3, _rightTime, mtf_fvgTf)
+		if _impDir != 0
+			f_mtfFvgAdd(mtfFvgZones, _impDir == 1, 1, _impTop, _impBottom, _t3, _rightTime, mtf_fvgTf)
+	if mtfFvgZones.size() > 0
+		for i = mtfFvgZones.size() - 1 to 0 by 1
+			MtfFvgZone _z = mtfFvgZones.get(i)
+			float _top = box.get_top(_z.bx)
+			float _bottom = box.get_bottom(_z.bx)
+			float _fillLevel = switch mtf_fvgFill
+				"Touch" => _z.bull ? _top : _bottom
+				"Half Fill" => math.avg(_top, _bottom)
+				=> _z.bull ? _bottom : _top
+			bool _filled = _z.bull ? low <= _fillLevel : high >= _fillLevel
+			bool _remove = false
+			if barstate.isconfirmed
+				if _z.kind == 2
+					_remove := _z.bull ? close < _bottom : close > _top
+				else if _z.kind == 0 and Inversefvgmode and fvgmitigationtype == "Engulf"
+					bool _broken = _z.bull ? close < _bottom : close > _top
+					if _broken
+						_z.bull := not _z.bull
+						_z.kind := 2
+						color _invClr = _z.bull ? buinvfvgcolor : beinvfvgcolor
+						box.set_bgcolor(_z.bx, _invClr)
+						box.set_border_color(_z.bx, color.new(_invClr, BorderTransparency))
+						box.set_text(_z.bx, plotBoxLabel ? _htf_HTFName(mtf_fvgTf) + " Inv.FVG" + (_z.bull ? "+" : "-") : '')
+						f_gradePromote(_z.grade, _top, _bottom)
+						f_gradeColor(_z.grade, color.new(_invClr, cetransparency))
+				else
+					_remove := _filled
+			if _remove
+				f_mtfFvgDelete(_z)
+				mtfFvgZones.remove(i)
+				continue
+			box.set_right(_z.bx, _rightTime)
+			f_gradeX2(_z.grade, _rightTime)
+			_top := box.get_top(_z.bx)
+			_bottom := box.get_bottom(_z.bx)
+			bool _entered = _z.bull ? low <= _top : high >= _bottom
+			if HighlightBox and _entered
+				color _touchClr = _z.kind == 1 ? (_z.bull ? ifvgBullColor : ifvgBearColor) : _z.kind == 2 ? (_z.bull ? buinvfvgcolor : beinvfvgcolor) : (_z.bull ? mtf_fvgBullColor : mtf_fvgBearColor)
+				_applyHighlight(_z.bx, _touchClr)
+			if fvgQuality and barstate.isconfirmed and _z.kind == 0
+				f_fvgQualityTick(_z.grade, _z.bx, plotBoxLabel ? _htf_HTFName(mtf_fvgTf) + ' FVG' + (_z.bull ? '+' : '-') : '')

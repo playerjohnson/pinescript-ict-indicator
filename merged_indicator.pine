@@ -1,9 +1,12 @@
+// LEGACY REFERENCE ONLY: this combined script exceeds TradingView compiled-token limits.
+// Install ict_price_delivery.pine and ict_liquidity_context.pine together instead.
 // MERGED SCRIPT : Hourly Open + ICT Imbalances + NWOG/NDOG + HTF Candles
 // Combines:
 //    1. "Hourly Open & Separator"                (original author unknown)
 //    2. "ICT – GAPS, Volume & Price Imbalances"  © Vulnerable_human_x
 //    3. "ICT NWOG/NDOG (fadi)"                   © fadizeidan
 //    4. "ICT HTF Candles (fadi)"                 © fadizeidan
+//    5. "MTF FVG x2 [MK]" overlay concept        © @malk1903
 // Licence: Mozilla Public License 2.0
 
 //@version=6
@@ -33,6 +36,7 @@ var bool ENABLE_STRUCTURE=input.bool(false, "Enable Market Structure (BOS/CHoCH)
 var bool ENABLE_DASHBOARD=input.bool(false, "Enable Dashboard", group="⓪ Section Toggles")
 var bool ENABLE_SMT=input.bool(false, "Enable SMT Divergences", group="⓪ Section Toggles")
 var bool ENABLE_SETUP=input.bool(false, "Enable Setup Score", group="⓪ Section Toggles", tooltip="Adds a read-only 'Setup' row to the ㉖ Dashboard scoring the confluence stack per side (killzone + bias + fresh sweep + fresh SMT + structure, 1 pt each). No alerts, markers, or signals — the trade decision stays yours. Needs Sweeps ON for the sweep point; Structure/SMT add their points when enabled.")
+var bool ENABLE_MTF_FVG=input.bool(false, "Enable HTF FVG Overlay", group="⓪ Section Toggles", tooltip="Draws confirmed normal and enabled ⑥ Implied FVGs from one selected higher timeframe. ⑥ Inverse and VI Anchor also apply; styling comes from ⑥/⑦.")
 
 var bool wh_enable=input.bool(false, "Enable Webhook Alerts", group="㉑ Webhook Alerts", tooltip="JSON alerts via alert(). In TV alert dialog, select 'Any alert() function call'.")
 var bool wh_formations=input.bool(true, "Formation Alerts", group="㉑ Webhook Alerts", inline="wh1", tooltip="OB/FVG/VI/GAP formations")
@@ -245,6 +249,8 @@ labelvalign=input.string(text.align_center, '', options=[text.align_top, text.al
 filterMitBOX=input.bool(true, title='Mitigated Color   ', group='⑦ Box Style', inline='bx4')
 mitBOXColor=input.color(color.new(color.gray, 92), group='⑦ Box Style', inline='bx4')
 MitBoxLabelColor=input.color(color.rgb(161, 163, 171, 88), title='Lbl', group='⑦ Box Style', inline='bx4')
+gradeQuartiles=input.bool(false, '25/75% Grades', group='⑦ Box Style', inline='bx5', tooltip='Adds 25% and 75% lines to CE-enabled GAP, FVG/LV/inverse, NWOG/NDOG, and selected-HTF FVG zones. Uses two extra line IDs per graded zone.')
+gradeMaxZones=input.int(30, 'Max Graded', minval=1, maxval=100, group='⑦ Box Style', inline='bx5', tooltip='Combined 25/75% drawing budget across all supported gap families. C.E. lines do not count toward this limit.')
 
 var bool kz_showAsian=input.bool(true, "Asian", group="⑱ Killzones", inline="kz1")
 var color kz_asianColor=input.color(color.new(#2962ff, 90), "", group="⑱ Killzones", inline="kz1")
@@ -356,6 +362,73 @@ bool isbeinversefvg = false
 var int _fvg=2
 var int _vi=3
 
+type GradeLines
+	line q25 = na
+	line ce = na
+	line q75 = na
+
+var array<GradeLines> gradeQueue=array.new<GradeLines>()
+
+f_gradeDrop(GradeLines _g) =>
+	if not na(_g)
+		line.delete(_g.q25)
+		line.delete(_g.q75)
+		_g.q25 := na
+		_g.q75 := na
+
+f_gradeY(GradeLines _g, float _top, float _bottom) =>
+	if not na(_g) and not na(_g.ce)
+		float _span = _top - _bottom
+		float _mid = math.avg(_top, _bottom)
+		line.set_y1(_g.ce, _mid)
+		line.set_y2(_g.ce, _mid)
+		if not na(_g.q25)
+			float _q25 = _bottom + _span * 0.25
+			float _q75 = _bottom + _span * 0.75
+			line.set_y1(_g.q25, _q25)
+			line.set_y2(_g.q25, _q25)
+			line.set_y1(_g.q75, _q75)
+			line.set_y2(_g.q75, _q75)
+
+f_gradeNew(line _ce, float _top, float _bottom) =>
+	GradeLines _g = GradeLines.new(na, _ce, na)
+	if gradeQuartiles and not na(_ce)
+		while gradeQueue.size() >= gradeMaxZones
+			f_gradeDrop(gradeQueue.shift())
+		if line.all.size() <= 498
+			_g.q25 := line.copy(_ce)
+			_g.q75 := line.copy(_ce)
+			gradeQueue.push(_g)
+	f_gradeY(_g, _top, _bottom)
+	_g
+
+f_gradeDelete(GradeLines _g) =>
+	if not na(_g)
+		f_gradeDrop(_g)
+		line.delete(_g.ce)
+		_g.ce := na
+
+f_gradeX2(GradeLines _g, int _x) =>
+	if not na(_g) and not na(_g.ce)
+		line.set_x2(_g.ce, _x)
+		if not na(_g.q25)
+			line.set_x2(_g.q25, _x)
+			line.set_x2(_g.q75, _x)
+
+f_gradeColor(GradeLines _g, color _color) =>
+	if not na(_g) and not na(_g.ce)
+		line.set_color(_g.ce, _color)
+		if not na(_g.q25)
+			line.set_color(_g.q25, _color)
+			line.set_color(_g.q75, _color)
+
+f_gradeSync(GradeLines _g, box _bx) =>
+	if not na(_g) and not na(_g.ce) and not na(_bx)
+		f_gradeX2(_g, box.get_right(_bx))
+		f_gradeY(_g, box.get_top(_bx), box.get_bottom(_bx))
+
+var GradeLines noGrades=GradeLines.new()
+
 var array<box> _bearBoxesFVG=array.new_box()
 var array<box> _bullBoxesFVG=array.new_box()
 var array<box> _gapsboxesbu=array.new_box()
@@ -364,14 +437,14 @@ var array<box> _bullishvi=array.new_box()
 var array<box> _bearishvi=array.new_box()
 var array<box> _bullishifvg=array.new_box()
 var array<box> _bearishifvg=array.new_box()
-var array<line> _bufvgce=array.new_line()
-var array<line> _befvgce=array.new_line()
+var array<GradeLines> _bufvgce=array.new<GradeLines>()
+var array<GradeLines> _befvgce=array.new<GradeLines>()
 var array<box> bearInvFVG=array.new_box()
 var array<box> bullInvFVG=array.new_box()
-var array<line> buinvfvgce=array.new_line()
-var array<line> beinvfvgce=array.new_line()
-var array<line> bugapce=array.new_line()
-var array<line> begapce=array.new_line()
+var array<GradeLines> buinvfvgce=array.new<GradeLines>()
+var array<GradeLines> beinvfvgce=array.new<GradeLines>()
+var array<GradeLines> bugapce=array.new<GradeLines>()
+var array<GradeLines> begapce=array.new<GradeLines>()
 
 _controlBox2(_boxes) =>
 	if array.size(_boxes) > 0
@@ -396,11 +469,11 @@ isBuVItype3(index) =>
 isBeVItype3(index) =>
 	open[index] != close[index + 1] and close[index] < open[index] and close[index + 1] > open[index + 1] and low[index] <= high[index + 1] and high[index] >= low[index + 1]
 
-_anyVI0() =>
-	isBuVItype1(0) or isBeVItype1(0) or isBuVItype2(0) or isBeVItype2(0) or isBuVItype3(0) or isBeVItype3(0)
+_anyVI(index) =>
+	isBuVItype1(index) or isBeVItype1(index) or isBuVItype2(index) or isBeVItype2(index) or isBuVItype3(index) or isBeVItype3(index)
 
-_anyVI1() =>
-	isBuVItype1(1) or isBeVItype1(1) or isBuVItype2(1) or isBeVItype2(1) or isBuVItype3(1) or isBeVItype3(1)
+_anyVI0() => _anyVI(0)
+_anyVI1() => _anyVI(1)
 
 isFvgUp(index) =>
 	low[index] > high[index + 2] and low[index + 1] <= high[index + 2] and high[index + 1] >= low[index]
@@ -412,7 +485,7 @@ bool _viSuppressed = fvgAnchorVI and (isFvgUp(0) or isFvgDown(0))
 
 if isBuVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES and not _viSuppressed
 	box _bullboxVI = box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	if array.size(_bullishvi) > viMaxBoxSet
+	if array.size(_bullishvi) >= viMaxBoxSet
 		box.delete(array.shift(_bullishvi))
 	array.push(_bullishvi, _bullboxVI)
 	if wh_enable and wh_formations and barstate.isconfirmed
@@ -420,7 +493,7 @@ if isBuVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES and not _v
 
 if isBeVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES and not _viSuppressed
 	box _bearboxVI = box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	if array.size(_bearishvi) > viMaxBoxSet
+	if array.size(_bearishvi) >= viMaxBoxSet
 		box.delete(array.shift(_bearishvi))
 	array.push(_bearishvi, _bearboxVI)
 	if wh_enable and wh_formations and barstate.isconfirmed
@@ -428,7 +501,7 @@ if isBeVItype1(0) and (classicvi or advancedvi) and ENABLE_IMBALANCES and not _v
 
 if isBuVItype2(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
 	box _bullboxVI = box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	if array.size(_bullishvi) > viMaxBoxSet
+	if array.size(_bullishvi) >= viMaxBoxSet
 		box.delete(array.shift(_bullishvi))
 	array.push(_bullishvi, _bullboxVI)
 	if wh_enable and wh_formations and barstate.isconfirmed
@@ -436,7 +509,7 @@ if isBuVItype2(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
 
 if isBeVItype2(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
 	box _bearboxVI = box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	if array.size(_bearishvi) > viMaxBoxSet
+	if array.size(_bearishvi) >= viMaxBoxSet
 		box.delete(array.shift(_bearishvi))
 	array.push(_bearishvi, _bearboxVI)
 	if wh_enable and wh_formations and barstate.isconfirmed
@@ -444,7 +517,7 @@ if isBeVItype2(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
 
 if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
 	box _bullboxVI = box.new(left = bar_index - 1, top = math.max(open, close[1]), right = bar_index + 1, bottom = math.min(open, close[1]), bgcolor = bullimbalance, border_style = BoxBorder, border_color = color.new(bullimbalance, BorderTransparency), text = plotBoxLabel ? 'VI+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	if array.size(_bullishvi) > viMaxBoxSet
+	if array.size(_bullishvi) >= viMaxBoxSet
 		box.delete(array.shift(_bullishvi))
 	array.push(_bullishvi, _bullboxVI)
 	if wh_enable and wh_formations and barstate.isconfirmed
@@ -452,7 +525,7 @@ if isBuVItype3(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
 
 if isBeVItype3(0) and advancedvi and ENABLE_IMBALANCES and not _viSuppressed
 	box _bearboxVI = box.new(left = bar_index - 1, top = math.min(open, close[1]), right = bar_index + 1, bottom = math.max(open, close[1]), bgcolor = bearimbalance, border_style = BoxBorder, border_color = color.new(bearimbalance, BorderTransparency), text = plotBoxLabel ? 'VI-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	if array.size(_bearishvi) > viMaxBoxSet
+	if array.size(_bearishvi) >= viMaxBoxSet
 		box.delete(array.shift(_bearishvi))
 	array.push(_bearishvi, _bearboxVI)
 	if wh_enable and wh_formations and barstate.isconfirmed
@@ -469,26 +542,26 @@ if (high[1] < low or low[1] > high) and truegap and ENABLE_IMBALANCES
 	line begapceline = na
 	if high[1] < low
 		_gapsbu := box.new(left = bar_index - 1, top = low, right = bar_index + 1, bottom = high[1], bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-		bugapceline := cegap ? line.new(bar_index - 1, math.avg(low, high[1]), bar_index, math.avg(low, high[1]), style = celinetype, color = color.new(gapcolor, cetransparency)) : na
+		bugapceline := cegap ? line.new(bar_index - 1, math.avg(low, high[1]), bar_index, math.avg(low, high[1]), style = cegaplinetype, color = color.new(gapcolor, cetransparency)) : na
 		if wh_enable and wh_formations and barstate.isconfirmed
 			alert(_wh_json("GAP+", low, high[1]), alert.freq_once_per_bar_close)
 		bugapceline
 	else if low[1] > high
 		_gapsbe := box.new(left = bar_index - 1, top = low[1], right = bar_index + 1, bottom = high, bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-		begapceline := cegap ? line.new(bar_index - 1, math.avg(low[1], high), bar_index, math.avg(low[1], high), style = celinetype, color = color.new(gapcolor, cetransparency)) : na
+		begapceline := cegap ? line.new(bar_index - 1, math.avg(low[1], high), bar_index, math.avg(low[1], high), style = cegaplinetype, color = color.new(gapcolor, cetransparency)) : na
 		if wh_enable and wh_formations and barstate.isconfirmed
 			alert(_wh_json("GAP-", low[1], high), alert.freq_once_per_bar_close)
 		begapceline
-	if array.size(_gapsboxesbu) > gapsMaxBoxSet and array.size(bugapce) > gapsMaxBoxSet
+	if array.size(_gapsboxesbu) >= gapsMaxBoxSet and array.size(bugapce) >= gapsMaxBoxSet
 		box.delete(array.shift(_gapsboxesbu))
-		line.delete(array.shift(bugapce))
+		f_gradeDelete(array.shift(bugapce))
 	array.push(_gapsboxesbu, _gapsbu)
-	array.push(bugapce, bugapceline)
-	if array.size(_gapsboxesbe) > gapsMaxBoxSet and array.size(begapce) > gapsMaxBoxSet
+	array.push(bugapce, f_gradeNew(bugapceline, box.get_top(_gapsbu), box.get_bottom(_gapsbu)))
+	if array.size(_gapsboxesbe) >= gapsMaxBoxSet and array.size(begapce) >= gapsMaxBoxSet
 		box.delete(array.shift(_gapsboxesbe))
-		line.delete(array.shift(begapce))
+		f_gradeDelete(array.shift(begapce))
 	array.push(_gapsboxesbe, _gapsbe)
-	array.push(begapce, begapceline)
+	array.push(begapce, f_gradeNew(begapceline, box.get_top(_gapsbe), box.get_bottom(_gapsbe)))
 else if (high[1] < low or low[1] > high) and gapwithimb and ENABLE_IMBALANCES
 	box _gapsbu = na
 	box _gapsbe = na
@@ -496,22 +569,22 @@ else if (high[1] < low or low[1] > high) and gapwithimb and ENABLE_IMBALANCES
 	line begapceline = na
 	if high[1] < low
 		_gapsbu := box.new(left = bar_index - 1, top = open, right = bar_index + 1, bottom = close[1], bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-		bugapceline := cegap ? line.new(bar_index - 1, math.avg(open, close[1]), bar_index, math.avg(open, close[1]), style = celinetype, color = color.new(gapcolor, cetransparency)) : na
+		bugapceline := cegap ? line.new(bar_index - 1, math.avg(open, close[1]), bar_index, math.avg(open, close[1]), style = cegaplinetype, color = color.new(gapcolor, cetransparency)) : na
 		bugapceline
 	else if low[1] > high
 		_gapsbe := box.new(left = bar_index - 1, top = close[1], right = bar_index + 1, bottom = open, bgcolor = gapcolor, border_color = color.new(gapcolor, BorderTransparency), text = plotBoxLabel ? 'GAP-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-		begapceline := cegap ? line.new(bar_index - 1, math.avg(close[1], open), bar_index, math.avg(close[1], open), style = celinetype, color = color.new(gapcolor, cetransparency)) : na
+		begapceline := cegap ? line.new(bar_index - 1, math.avg(close[1], open), bar_index, math.avg(close[1], open), style = cegaplinetype, color = color.new(gapcolor, cetransparency)) : na
 		begapceline
-	if array.size(_gapsboxesbu) > gapsMaxBoxSet and array.size(bugapce) > gapsMaxBoxSet
+	if array.size(_gapsboxesbu) >= gapsMaxBoxSet and array.size(bugapce) >= gapsMaxBoxSet
 		box.delete(array.shift(_gapsboxesbu))
-		line.delete(array.shift(bugapce))
+		f_gradeDelete(array.shift(bugapce))
 	array.push(_gapsboxesbu, _gapsbu)
-	array.push(bugapce, bugapceline)
-	if array.size(_gapsboxesbe) > gapsMaxBoxSet and array.size(begapce) > gapsMaxBoxSet
+	array.push(bugapce, f_gradeNew(bugapceline, box.get_top(_gapsbu), box.get_bottom(_gapsbu)))
+	if array.size(_gapsboxesbe) >= gapsMaxBoxSet and array.size(begapce) >= gapsMaxBoxSet
 		box.delete(array.shift(_gapsboxesbe))
-		line.delete(array.shift(begapce))
+		f_gradeDelete(array.shift(begapce))
 	array.push(_gapsboxesbe, _gapsbe)
-	array.push(begapce, begapceline)
+	array.push(begapce, f_gradeNew(begapceline, box.get_top(_gapsbe), box.get_bottom(_gapsbe)))
 
 if isFvgUp(0) and not liquidityvoidmode and ENABLE_IMBALANCES
 	float _fTop = low[0]
@@ -532,11 +605,11 @@ if isFvgUp(0) and not liquidityvoidmode and ENABLE_IMBALANCES
 		_bullboxFVG := box.new(left = bar_index - 2, top = _fTop, right = bar_index, bottom = _fBot, bgcolor = _fvgBg, border_color = _fvgBdr, border_style = BoxBorder, border_width = 1, text = plotBoxLabel ? 'FVG+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = _fvgTxt)
 		_buline := cefvg ? line.new(bar_index - 2, math.avg(_fTop, _fBot), bar_index, math.avg(_fTop, _fBot), style = celinetype, color = _fvgCe) : na
 		_buline
-	if array.size(_bullBoxesFVG) > fvgMaxBoxSet and array.size(_bufvgce) > fvgMaxBoxSet
+	if array.size(_bullBoxesFVG) >= fvgMaxBoxSet and array.size(_bufvgce) >= fvgMaxBoxSet
 		box.delete(array.shift(_bullBoxesFVG))
-		line.delete(array.shift(_bufvgce))
+		f_gradeDelete(array.shift(_bufvgce))
 	array.push(_bullBoxesFVG, _bullboxFVG)
-	array.push(_bufvgce, _buline)
+	array.push(_bufvgce, f_gradeNew(_buline, box.get_top(_bullboxFVG), box.get_bottom(_bullboxFVG)))
 	if wh_enable and wh_formations and barstate.isconfirmed
 		alert(_wh_json("FVG+", _fTop, _fBot), alert.freq_once_per_bar_close)
 
@@ -559,11 +632,11 @@ if isFvgDown(0) and not liquidityvoidmode and ENABLE_IMBALANCES
 		_bearboxFVG := box.new(left = bar_index - 2, top = _fTop, right = bar_index, bottom = _fBot, bgcolor = _fvgBeBg, border_color = _fvgBeBdr, border_style = BoxBorder, border_width = 1, text = plotBoxLabel ? 'FVG-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = _fvgBeTxt)
 		_beline := cefvg ? line.new(bar_index - 2, math.avg(_fTop, _fBot), bar_index, math.avg(_fTop, _fBot), style = celinetype, color = _fvgBeCe) : na
 		_beline
-	if array.size(_bearBoxesFVG) > fvgMaxBoxSet and array.size(_befvgce) > fvgMaxBoxSet
+	if array.size(_bearBoxesFVG) >= fvgMaxBoxSet and array.size(_befvgce) >= fvgMaxBoxSet
 		box.delete(array.shift(_bearBoxesFVG))
-		line.delete(array.shift(_befvgce))
+		f_gradeDelete(array.shift(_befvgce))
 	array.push(_bearBoxesFVG, _bearboxFVG)
-	array.push(_befvgce, _beline)
+	array.push(_befvgce, f_gradeNew(_beline, box.get_top(_bearboxFVG), box.get_bottom(_bearboxFVG)))
 	if wh_enable and wh_formations and barstate.isconfirmed
 		alert(_wh_json("FVG-", _fTop, _fBot), alert.freq_once_per_bar_close)
 
@@ -577,14 +650,14 @@ if isFvgUp(0) and isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and array
 	tempboxlow = box.get_bottom(_box)
 	tempboxleft = box.get_left(_box)
 	box.delete(array.pop(_bullBoxesFVG))
-	line.delete(array.pop(_bufvgce))
+	f_gradeDelete(array.pop(_bufvgce))
 	box _bullboxFVG = box.new(left = tempboxleft, top = low[0], right = bar_index, bottom = tempboxlow, bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	line _buline = cefvg ? line.new(tempboxleft, math.avg(low, tempboxlow), bar_index, math.avg(low, tempboxlow), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
-	if array.size(_bullBoxesFVG) > fvgMaxBoxSet and array.size(_bufvgce) > fvgMaxBoxSet
+	if array.size(_bullBoxesFVG) >= fvgMaxBoxSet and array.size(_bufvgce) >= fvgMaxBoxSet
 		box.delete(array.shift(_bullBoxesFVG))
-		line.delete(array.shift(_bufvgce))
+		f_gradeDelete(array.shift(_bufvgce))
 	array.push(_bullBoxesFVG, _bullboxFVG)
-	array.push(_bufvgce, _buline)
+	array.push(_bufvgce, f_gradeNew(_buline, box.get_top(_bullboxFVG), box.get_bottom(_bullboxFVG)))
 	if wh_enable and wh_formations and barstate.isconfirmed
 		alert(_wh_json("LV+", low, tempboxlow), alert.freq_once_per_bar_close)
 else if isFvgUp(0) and not isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
@@ -598,11 +671,11 @@ else if isFvgUp(0) and not isFvgUp(1) and (liquidityvoidmode or Inversefvgmode) 
 		_fBot := math.min(_fBot, math.min(open[1], close[2]))
 	box _bullboxFVG = box.new(left = bar_index - 2, top = _fTop, right = bar_index, bottom = _fBot, bgcolor = fvgBullColor, border_color = color.new(fvgBullColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG+' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	line _buline = cefvg ? line.new(bar_index - 2, math.avg(_fTop, _fBot), bar_index, math.avg(_fTop, _fBot), style = celinetype, color = color.new(fvgBullColor, cetransparency)) : na
-	if array.size(_bullBoxesFVG) > fvgMaxBoxSet and array.size(_bufvgce) > fvgMaxBoxSet
+	if array.size(_bullBoxesFVG) >= fvgMaxBoxSet and array.size(_bufvgce) >= fvgMaxBoxSet
 		box.delete(array.shift(_bullBoxesFVG))
-		line.delete(array.shift(_bufvgce))
+		f_gradeDelete(array.shift(_bufvgce))
 	array.push(_bullBoxesFVG, _bullboxFVG)
-	array.push(_bufvgce, _buline)
+	array.push(_bufvgce, f_gradeNew(_buline, box.get_top(_bullboxFVG), box.get_bottom(_bullboxFVG)))
 
 if isFvgDown(0) and isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and array.size(_bearBoxesFVG) > 0 and not plotFVG
 	belv := true
@@ -611,14 +684,14 @@ if isFvgDown(0) and isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and a
 	tempboxhigh = box.get_top(_box)
 	tempboxleft = box.get_left(_box)
 	box.delete(array.pop(_bearBoxesFVG))
-	line.delete(array.pop(_befvgce))
+	f_gradeDelete(array.pop(_befvgce))
 	box _bearboxFVG = box.new(left = tempboxleft, top = tempboxhigh, right = bar_index, bottom = high[0], bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'LV-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	line _beline = cefvg ? line.new(tempboxleft, math.avg(tempboxhigh, high), bar_index, math.avg(tempboxhigh, high), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
-	if array.size(_bearBoxesFVG) > fvgMaxBoxSet and array.size(_befvgce) > fvgMaxBoxSet
+	if array.size(_bearBoxesFVG) >= fvgMaxBoxSet and array.size(_befvgce) >= fvgMaxBoxSet
 		box.delete(array.shift(_bearBoxesFVG))
-		line.delete(array.shift(_befvgce))
+		f_gradeDelete(array.shift(_befvgce))
 	array.push(_bearBoxesFVG, _bearboxFVG)
-	array.push(_befvgce, _beline)
+	array.push(_befvgce, f_gradeNew(_beline, box.get_top(_bearboxFVG), box.get_bottom(_bearboxFVG)))
 	if wh_enable and wh_formations and barstate.isconfirmed
 		alert(_wh_json("LV-", tempboxhigh, high), alert.freq_once_per_bar_close)
 else if isFvgDown(0) and not isFvgDown(1) and (liquidityvoidmode or Inversefvgmode) and not plotFVG
@@ -632,11 +705,11 @@ else if isFvgDown(0) and not isFvgDown(1) and (liquidityvoidmode or Inversefvgmo
 		_fBot := math.min(_fBot, math.min(open[1], close[2]))
 	box _bearboxFVG = box.new(left = bar_index - 2, top = _fTop, right = bar_index, bottom = _fBot, bgcolor = fvgBearColor, border_color = color.new(fvgBearColor, BorderTransparency), border_width = 1, text = plotBoxLabel ? 'FVG-' : na, border_style = BoxBorder, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
 	line _beline = cefvg ? line.new(bar_index - 2, math.avg(_fTop, _fBot), bar_index, math.avg(_fTop, _fBot), style = celinetype, color = color.new(fvgBearColor, cetransparency)) : na
-	if array.size(_bearBoxesFVG) > fvgMaxBoxSet and array.size(_befvgce) > fvgMaxBoxSet
+	if array.size(_bearBoxesFVG) >= fvgMaxBoxSet and array.size(_befvgce) >= fvgMaxBoxSet
 		box.delete(array.shift(_bearBoxesFVG))
-		line.delete(array.shift(_befvgce))
+		f_gradeDelete(array.shift(_befvgce))
 	array.push(_bearBoxesFVG, _bearboxFVG)
-	array.push(_befvgce, _beline)
+	array.push(_befvgce, f_gradeNew(_beline, box.get_top(_bearboxFVG), box.get_bottom(_bearboxFVG)))
 
 if fvgAnchorVI and (isFvgUp(0) or isFvgDown(0)) and _anyVI1()
 	if _bullishvi.size() > 0
@@ -656,7 +729,7 @@ isBeIFvg(index) =>
 
 if isBuIFvg(0) and showifvg and ENABLE_IMBALANCES
 	box _bullboxifvg = box.new(left = bar_index - 2, top = (math.min(open, close) + low) / 2, right = bar_index + 1, bottom = (high[2] + math.max(open[2], close[2])) / 2, bgcolor = ifvgBullColor, border_style = BoxBorder, border_color = color.new(ifvgBullColor, BorderTransparency), text = plotBoxLabel ? 'Imp.FVG+' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	if array.size(_bullishifvg) > fvgMaxBoxSet
+	if array.size(_bullishifvg) >= fvgMaxBoxSet
 		box.delete(array.shift(_bullishifvg))
 	array.push(_bullishifvg, _bullboxifvg)
 	if wh_enable and wh_formations and barstate.isconfirmed
@@ -664,18 +737,17 @@ if isBuIFvg(0) and showifvg and ENABLE_IMBALANCES
 
 if isBeIFvg(0) and showifvg and ENABLE_IMBALANCES
 	box _bearboxifvg = box.new(left = bar_index - 2, top = (math.min(open[2], close[2]) + low[2]) / 2, right = bar_index + 1, bottom = (math.max(open, close) + high) / 2, bgcolor = ifvgBearColor, border_style = BoxBorder, border_color = color.new(ifvgBearColor, BorderTransparency), text = plotBoxLabel ? 'Imp.FVG-' : na, text_halign = labelhalign, text_valign = labelvalign, text_size = BoxLabelSize, text_color = BoxLabelColor)
-	if array.size(_bearishifvg) > fvgMaxBoxSet
+	if array.size(_bearishifvg) >= fvgMaxBoxSet
 		box.delete(array.shift(_bearishifvg))
 	array.push(_bearishifvg, _bearboxifvg)
 	if wh_enable and wh_formations and barstate.isconfirmed
 		alert(_wh_json("I.FVG-", (math.min(open[2], close[2]) + low[2]) / 2, (math.max(open, close) + high) / 2), alert.freq_once_per_bar_close)
 
-_applyMitStyle(_bx, _ln, bool _hasLine) =>
+_applyMitStyle(_bx, GradeLines _grade) =>
 	box.set_bgcolor(_bx, mitBOXColor)
 	box.set_border_color(_bx, mitBOXColor)
 	box.set_text_color(_bx, MitBoxLabelColor)
-	if _hasLine
-		line.set_color(_ln, mitBOXColor)
+	f_gradeColor(_grade, mitBOXColor)
 
 _applyHighlight(_bx, color _baseColor) =>
 	box.set_bgcolor(_bx, color.new(_baseColor, Highlightboxtransparency))
@@ -693,12 +765,12 @@ if ENABLE_IMBALANCES and array.size(_bullishifvg) > 0 and extendfvgbox
 					if close >= _boxLow and open >= _boxLow
 						box.set_right(_box, bar_index + 1)
 					else if (close < _boxLow or open < _boxLow) and filterMitBOX
-						_applyMitStyle(_box, line(na), false)
+						_applyMitStyle(_box, noGrades)
 				else if ifvgmitigationtype == 'Mitigate'
 					if low >= _boxHigh
 						box.set_right(_box, bar_index + 1)
 					else if low < _boxHigh and filterMitBOX
-						_applyMitStyle(_box, line(na), false)
+						_applyMitStyle(_box, noGrades)
 			_boxRight := box.get_right(_box)
 			if (bar_index == _boxRight or bar_index == _boxRight - 1) and ifvgmitigationtype == 'Engulf' and HighlightBox
 				if close >= _boxLow and low < _boxHigh
@@ -720,12 +792,12 @@ if ENABLE_IMBALANCES and array.size(_bearishifvg) > 0 and extendfvgbox
 					if close <= _boxHigh and open <= _boxHigh
 						box.set_right(_box, bar_index + 1)
 					else if (close > _boxHigh or open > _boxHigh) and filterMitBOX
-						_applyMitStyle(_box, line(na), false)
+						_applyMitStyle(_box, noGrades)
 				else if ifvgmitigationtype == 'Mitigate'
 					if high <= _boxLow
 						box.set_right(_box, bar_index + 1)
 					else if high > _boxLow and filterMitBOX
-						_applyMitStyle(_box, line(na), false)
+						_applyMitStyle(_box, noGrades)
 			_boxRight := box.get_right(_box)
 			if (bar_index == _boxRight or bar_index == _boxRight - 1) and ifvgmitigationtype == 'Engulf' and HighlightBox
 				if close <= _boxHigh and high > _boxLow
@@ -738,7 +810,7 @@ if ENABLE_IMBALANCES and array.size(_bearishifvg) > 0 and extendfvgbox
 if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) > 0
 	for i = array.size(_bullBoxesFVG) - 1 to 0 by 1
 		_box = array.get(_bullBoxesFVG, i)
-		_line = array.get(_bufvgce, i)
+		GradeLines _grade = array.get(_bufvgce, i)
 		_boxLow = box.get_bottom(_box)
 		_boxHigh = box.get_top(_box)
 		_boxRight = box.get_right(_box)
@@ -747,14 +819,11 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
 				if fvgmitigationtype == 'Engulf'
 					if close >= _boxLow
 						box.set_right(_box, bar_index + 1)
-						line.set_x2(_line, bar_index + 1)
 					else if close < _boxLow and Inversefvgmode
 						box beifvgbox = box.copy(_box)
 						array.push(bearInvFVG, beifvgbox)
-						line beifvgceline = line.copy(_line)
-						array.push(beinvfvgce, beifvgceline)
+						array.push(beinvfvgce, _grade)
 						box.delete(_box)
-						line.delete(_line)
 						array.remove(_bullBoxesFVG, i)
 						array.remove(_bufvgce, i)
 						isbeinversefvg := true
@@ -763,25 +832,21 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
 						isbeinversefvg
 						continue
 					else if close < _boxLow and filterMitBOX
-						_applyMitStyle(_box, _line, true)
+						_applyMitStyle(_box, _grade)
 				else if fvgmitigationtype == 'Mitigate'
 					if low >= _boxHigh
 						box.set_right(_box, bar_index + 1)
-						line.set_x2(_line, bar_index + 1)
 					else if low < _boxHigh and filterMitBOX
-						_applyMitStyle(_box, _line, true)
+						_applyMitStyle(_box, _grade)
 				else if fvgmitigationtype == 'Rebalance'
 					if low >= _boxHigh
 						box.set_right(_box, bar_index + 1)
-						line.set_x2(_line, bar_index + 1)
 					else if low < _boxHigh and low > _boxLow
 						box.set_top(_box, low)
 						box.set_right(_box, bar_index + 1)
-						line.set_y1(_line, (low + _boxLow) / 2)
-						line.set_y2(_line, (low + _boxLow) / 2)
-						line.set_x2(_line, bar_index + 1)
 					else if low <= _boxLow and filterMitBOX
-						_applyMitStyle(_box, _line, true)
+						_applyMitStyle(_box, _grade)
+			f_gradeSync(_grade, _box)
 			_boxLow := box.get_bottom(_box)
 			_boxHigh := box.get_top(_box)
 			_boxRight := box.get_right(_box)
@@ -804,7 +869,7 @@ if ENABLE_IMBALANCES and array.size(_bullBoxesFVG) > 0 and array.size(_bufvgce) 
 if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) > 0
 	for i = array.size(_bearBoxesFVG) - 1 to 0 by 1
 		_box = array.get(_bearBoxesFVG, i)
-		_line = array.get(_befvgce, i)
+		GradeLines _grade = array.get(_befvgce, i)
 		_boxLow = box.get_bottom(_box)
 		_boxHigh = box.get_top(_box)
 		_boxRight = box.get_right(_box)
@@ -813,14 +878,11 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
 				if fvgmitigationtype == 'Engulf'
 					if close <= _boxHigh
 						box.set_right(_box, bar_index + 1)
-						line.set_x2(_line, bar_index + 1)
 					else if close > _boxHigh and Inversefvgmode
 						box buifvgbox = box.copy(_box)
 						array.push(bullInvFVG, buifvgbox)
-						line buifvgceline = line.copy(_line)
-						array.push(buinvfvgce, buifvgceline)
+						array.push(buinvfvgce, _grade)
 						box.delete(_box)
-						line.delete(_line)
 						array.remove(_bearBoxesFVG, i)
 						array.remove(_befvgce, i)
 						isbuinversefvg := true
@@ -829,25 +891,21 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
 						isbuinversefvg
 						continue
 					else if close > _boxHigh and filterMitBOX
-						_applyMitStyle(_box, _line, true)
+						_applyMitStyle(_box, _grade)
 				else if fvgmitigationtype == 'Mitigate'
 					if high <= _boxLow
 						box.set_right(_box, bar_index + 1)
-						line.set_x2(_line, bar_index + 1)
 					else if high > _boxLow and filterMitBOX
-						_applyMitStyle(_box, _line, true)
+						_applyMitStyle(_box, _grade)
 				else if fvgmitigationtype == 'Rebalance'
 					if high <= _boxLow
 						box.set_right(_box, bar_index + 1)
-						line.set_x2(_line, bar_index + 1)
 					else if high > _boxLow and high < _boxHigh
 						box.set_bottom(_box, high)
 						box.set_right(_box, bar_index + 1)
-						line.set_y1(_line, (high + _boxHigh) / 2)
-						line.set_y2(_line, (high + _boxHigh) / 2)
-						line.set_x2(_line, bar_index + 1)
 					else if high >= _boxHigh and filterMitBOX
-						_applyMitStyle(_box, _line, true)
+						_applyMitStyle(_box, _grade)
+			f_gradeSync(_grade, _box)
 			_boxLow := box.get_bottom(_box)
 			_boxHigh := box.get_top(_box)
 			_boxRight := box.get_right(_box)
@@ -870,7 +928,7 @@ if ENABLE_IMBALANCES and array.size(_bearBoxesFVG) > 0 and array.size(_befvgce) 
 if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'Engulf' and Inversefvgmode
 	for i = array.size(bullInvFVG) - 1 to 0 by 1
 		_box = array.get(bullInvFVG, i)
-		_line = array.get(buinvfvgce, i)
+		GradeLines _grade = array.get(buinvfvgce, i)
 		_boxLow = box.get_bottom(_box)
 		_boxHigh = box.get_top(_box)
 		_boxRight = box.get_right(_box)
@@ -883,17 +941,16 @@ if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'En
 				box.set_text_size(_box, BoxLabelSize)
 				box.set_text_color(_box, BoxLabelColor)
 			box.set_border_color(_box, color.new(buinvfvgcolor, BorderTransparency))
-			line.set_color(_line, color.new(buinvfvgcolor, cetransparency))
-			line.set_style(_line, celinetype)
+			f_gradeColor(_grade, color.new(buinvfvgcolor, cetransparency))
 			if close >= _boxLow and bar_index == _boxRight
 				box.set_right(_box, bar_index + 1)
-				line.set_x2(_line, bar_index + 1)
 			else if close < _boxLow
 				box.delete(_box)
-				line.delete(_line)
+				f_gradeDelete(_grade)
 				array.remove(bullInvFVG, i)
 				array.remove(buinvfvgce, i)
 				continue
+		f_gradeSync(_grade, _box)
 		_boxRight := box.get_right(_box)
 		if extendfvgbox and HighlightBox and (bar_index == _boxRight or bar_index == _boxRight - 1)
 			if close >= _boxLow and low < _boxHigh
@@ -906,7 +963,7 @@ if ENABLE_IMBALANCES and array.size(bullInvFVG) > 0 and fvgmitigationtype == 'En
 if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'Engulf' and Inversefvgmode
 	for i = array.size(bearInvFVG) - 1 to 0 by 1
 		_box = array.get(bearInvFVG, i)
-		_line = array.get(beinvfvgce, i)
+		GradeLines _grade = array.get(beinvfvgce, i)
 		_boxLow = box.get_bottom(_box)
 		_boxHigh = box.get_top(_box)
 		_boxRight = box.get_right(_box)
@@ -919,17 +976,16 @@ if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'En
 				box.set_text_size(_box, BoxLabelSize)
 				box.set_text_color(_box, BoxLabelColor)
 			box.set_border_color(_box, color.new(beinvfvgcolor, BorderTransparency))
-			line.set_color(_line, color.new(beinvfvgcolor, cetransparency))
-			line.set_style(_line, celinetype)
+			f_gradeColor(_grade, color.new(beinvfvgcolor, cetransparency))
 			if close <= _boxHigh and bar_index == _boxRight
 				box.set_right(_box, bar_index + 1)
-				line.set_x2(_line, bar_index + 1)
 			else if close > _boxHigh
 				box.delete(_box)
-				line.delete(_line)
+				f_gradeDelete(_grade)
 				array.remove(bearInvFVG, i)
 				array.remove(beinvfvgce, i)
 				continue
+		f_gradeSync(_grade, _box)
 		_boxRight := box.get_right(_box)
 		if extendfvgbox and HighlightBox and (bar_index == _boxRight or bar_index == _boxRight - 1)
 			if close <= _boxHigh and high > _boxLow
@@ -941,10 +997,10 @@ if ENABLE_IMBALANCES and array.size(bearInvFVG) > 0 and fvgmitigationtype == 'En
 
 while array.size(bullInvFVG) > invfvgMaxBoxSet
 	box.delete(array.shift(bullInvFVG))
-	line.delete(array.shift(buinvfvgce))
+	f_gradeDelete(array.shift(buinvfvgce))
 while array.size(bearInvFVG) > invfvgMaxBoxSet
 	box.delete(array.shift(bearInvFVG))
-	line.delete(array.shift(beinvfvgce))
+	f_gradeDelete(array.shift(beinvfvgce))
 
 if ENABLE_IMBALANCES and array.size(_bullishvi) > 0 and extendvibox
 	for i = array.size(_bullishvi) - 1 to 0 by 1
@@ -958,12 +1014,12 @@ if ENABLE_IMBALANCES and array.size(_bullishvi) > 0 and extendvibox
 					if close >= _boxLow
 						box.set_right(_box, bar_index + 1)
 					else if close < _boxLow and filterMitBOX
-						_applyMitStyle(_box, line(na), false)
+						_applyMitStyle(_box, noGrades)
 				else if vimitigationtype == 'Mitigate'
 					if low > _boxHigh
 						box.set_right(_box, bar_index + 1)
 					else if low <= _boxHigh and filterMitBOX
-						_applyMitStyle(_box, line(na), false)
+						_applyMitStyle(_box, noGrades)
 						buvitouch := true
 						if wh_enable and wh_mitigations
 							alert(_wh_json("VI+ Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
@@ -989,12 +1045,12 @@ if ENABLE_IMBALANCES and array.size(_bearishvi) > 0 and extendvibox
 					if close <= _boxHigh
 						box.set_right(_box, bar_index + 1)
 					else if close > _boxHigh and filterMitBOX
-						_applyMitStyle(_box, line(na), false)
+						_applyMitStyle(_box, noGrades)
 				else if vimitigationtype == 'Mitigate'
 					if high < _boxHigh
 						box.set_right(_box, bar_index + 1)
 					else if high >= _boxHigh and filterMitBOX
-						_applyMitStyle(_box, line(na), false)
+						_applyMitStyle(_box, noGrades)
 						bevitouch := true
 						if wh_enable and wh_mitigations
 							alert(_wh_json("VI- Mitigated", _boxHigh, _boxLow), alert.freq_once_per_bar)
@@ -1011,7 +1067,7 @@ if ENABLE_IMBALANCES and array.size(_bearishvi) > 0 and extendvibox
 if ENABLE_IMBALANCES and array.size(_gapsboxesbu) > 0 and array.size(bugapce) > 0 and extendgapbox
 	for i = array.size(_gapsboxesbu) - 1 to 0 by 1
 		_box = array.get(_gapsboxesbu, i)
-		_line = array.get(bugapce, i)
+		GradeLines _grade = array.get(bugapce, i)
 		_boxLow = box.get_bottom(_box)
 		_boxHigh = box.get_top(_box)
 		_boxRight = box.get_right(_box)
@@ -1020,21 +1076,17 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbu) > 0 and array.size(bugapce) > 
 				if gapmitigationtype == 'Engulf'
 					if close >= _boxLow and open >= _boxLow
 						box.set_right(_box, bar_index + 1)
-						line.set_x2(_line, bar_index + 1)
 					else if (close < _boxLow or open < _boxLow) and filterMitBOX
-						_applyMitStyle(_box, _line, true)
+						_applyMitStyle(_box, _grade)
 				else if gapmitigationtype == 'Rebalance'
 					if low >= _boxHigh
 						box.set_right(_box, bar_index + 1)
-						line.set_x2(_line, bar_index + 1)
 					else if low < _boxHigh and low > _boxLow
 						box.set_top(_box, low)
 						box.set_right(_box, bar_index + 1)
-						line.set_x2(_line, bar_index + 1)
-						line.set_y1(_line, (low + _boxLow) / 2)
-						line.set_y2(_line, (low + _boxLow) / 2)
 					else if low <= _boxLow and filterMitBOX
-						_applyMitStyle(_box, _line, true)
+						_applyMitStyle(_box, _grade)
+			f_gradeSync(_grade, _box)
 			_boxLow := box.get_bottom(_box)
 			_boxHigh := box.get_top(_box)
 			_boxRight := box.get_right(_box)
@@ -1057,7 +1109,7 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbu) > 0 and array.size(bugapce) > 
 if ENABLE_IMBALANCES and array.size(_gapsboxesbe) > 0 and array.size(begapce) > 0 and extendgapbox
 	for i = array.size(_gapsboxesbe) - 1 to 0 by 1
 		_box = array.get(_gapsboxesbe, i)
-		_line = array.get(begapce, i)
+		GradeLines _grade = array.get(begapce, i)
 		_boxLow = box.get_bottom(_box)
 		_boxHigh = box.get_top(_box)
 		_boxRight = box.get_right(_box)
@@ -1066,21 +1118,17 @@ if ENABLE_IMBALANCES and array.size(_gapsboxesbe) > 0 and array.size(begapce) > 
 				if gapmitigationtype == 'Engulf'
 					if close <= _boxHigh and open <= _boxHigh
 						box.set_right(_box, bar_index + 1)
-						line.set_x2(_line, bar_index + 1)
 					else if (close > _boxHigh or open > _boxHigh) and filterMitBOX
-						_applyMitStyle(_box, _line, true)
+						_applyMitStyle(_box, _grade)
 				else if gapmitigationtype == 'Rebalance'
 					if high <= _boxLow
 						box.set_right(_box, bar_index + 1)
-						line.set_x2(_line, bar_index + 1)
 					else if high > _boxLow and high < _boxHigh
 						box.set_bottom(_box, high)
 						box.set_right(_box, bar_index + 1)
-						line.set_y1(_line, (high + _boxHigh) / 2)
-						line.set_y2(_line, (high + _boxHigh) / 2)
-						line.set_x2(_line, bar_index + 1)
 					else if high >= _boxHigh and filterMitBOX
-						_applyMitStyle(_box, _line, true)
+						_applyMitStyle(_box, _grade)
+			f_gradeSync(_grade, _box)
 			_boxLow := box.get_bottom(_box)
 			_boxHigh := box.get_top(_box)
 			_boxRight := box.get_right(_box)
@@ -2122,6 +2170,103 @@ if ENABLE_HTF_CANDLES
 			_cs.Monitor().Update(htfOffset, showTrace).FindImbalance()
 			htfCnt += 1
 			htfOffset += _cs.candles.size() * htfSettings.width + (_cs.candles.size() > 0 ? (_cs.candles.size() - 1) * htfSettings.buffer : 0) + htfSettings.htf_buffer
+
+// ===== ㉙ HTF FVG Overlay (adapted from MTF FVG x2 [MK] by @malk1903, MPL-2.0) =====
+string group_mtf_fvg = "㉙ HTF FVG Overlay"
+string mtf_fvgTf=input.timeframe("60", "Timeframe", group=group_mtf_fvg, inline="mf1", tooltip="Must be higher than the chart timeframe. Uses only fully closed HTF candles.")
+string mtf_fvgFill=input.string("Full Fill", "Fill", options=["Touch", "Half Fill", "Full Fill"], group=group_mtf_fvg, inline="mf1", tooltip="Wick retirement for normal/implied zones. With ⑥ Inverse + Engulf, normal zones instead flip after a confirmed chart close through; inverse zones invalidate on the opposite close.")
+int mtf_fvgMax=input.int(12, "Max Zones", minval=1, maxval=20, group=group_mtf_fvg, inline="mf2", tooltip="Combined normal + implied + inverse cap. Each zone uses one box; normal/inverse zones also use one line when ⑥ CE is enabled.")
+
+type MtfFvgZone
+	box bx
+	line ce
+	bool bull
+	int kind
+
+var array<MtfFvgZone> mtfFvgZones=array.new<MtfFvgZone>()
+
+f_mtfFvgDelete(MtfFvgZone _z) =>
+	box.delete(_z.bx)
+	if not na(_z.ce)
+		line.delete(_z.ce)
+
+f_mtfFvgAdd(array<MtfFvgZone> _zones, bool _bull, int _kind, float _top, float _bottom, int _left, int _right, string _tf) =>
+	while _zones.size() >= mtf_fvgMax
+		MtfFvgZone _old = _zones.shift()
+		f_mtfFvgDelete(_old)
+	color _clr = _kind == 1 ? (_bull ? ifvgBullColor : ifvgBearColor) : (_bull ? fvgBullColor : fvgBearColor)
+	string _tag = _kind == 1 ? " Imp.FVG" : " FVG"
+	string _txt = plotBoxLabel ? _htf_HTFName(_tf) + _tag + (_bull ? "+" : "-") : na
+	box _bx = box.new(left=_left, top=_top, right=_right, bottom=_bottom, xloc=xloc.bar_time, bgcolor=_clr, border_color=color.new(_clr, BorderTransparency), border_style=BoxBorder, border_width=1, text=_txt, text_halign=labelhalign, text_valign=labelvalign, text_size=BoxLabelSize, text_color=BoxLabelColor)
+	line _ce = cefvg and _kind == 0 ? line.new(_left, math.avg(_top, _bottom), _right, math.avg(_top, _bottom), xloc=xloc.bar_time, style=celinetype, color=color.new(_clr, cetransparency)) : na
+	_zones.push(MtfFvgZone.new(_bx, _ce, _bull, _kind))
+
+f_mtfFvgSnapshot() =>
+	int _dir = isFvgUp(1) ? 1 : isFvgDown(1) ? -1 : 0
+	float _top = _dir == 1 ? low[1] : _dir == -1 ? low[3] : na
+	float _bottom = _dir == 1 ? high[3] : _dir == -1 ? high[1] : na
+	if _dir != 0 and fvgAnchorVI
+		if _anyVI(1)
+			_top := math.max(_top, math.max(open[1], close[2]))
+			_bottom := math.min(_bottom, math.min(open[1], close[2]))
+		if _anyVI(2)
+			_top := math.max(_top, math.max(open[2], close[3]))
+			_bottom := math.min(_bottom, math.min(open[2], close[3]))
+	int _impDir = showifvg and isBuIFvg(1) ? 1 : showifvg and isBeIFvg(1) ? -1 : 0
+	float _impTop = _impDir == 1 ? (math.min(open[1], close[1]) + low[1]) / 2 : _impDir == -1 ? (math.min(open[3], close[3]) + low[3]) / 2 : na
+	float _impBottom = _impDir == 1 ? (high[3] + math.max(open[3], close[3])) / 2 : _impDir == -1 ? (math.max(open[1], close[1]) + high[1]) / 2 : na
+	[time[3], _dir, _top, _bottom, _impDir, _impTop, _impBottom]
+
+if ENABLE_MTF_FVG and timeframe.in_seconds(mtf_fvgTf) > timeframe.in_seconds()
+	[_t3, _dir, _topNew, _bottomNew, _impDir, _impTop, _impBottom] = request.security(syminfo.tickerid, mtf_fvgTf, f_mtfFvgSnapshot(), lookahead=barmerge.lookahead_on)
+	int _rightTime = nz(time_close, time)
+	if timeframe.change(mtf_fvgTf) and not na(_t3)
+		if _dir != 0
+			f_mtfFvgAdd(mtfFvgZones, _dir == 1, 0, _topNew, _bottomNew, _t3, _rightTime, mtf_fvgTf)
+		if _impDir != 0
+			f_mtfFvgAdd(mtfFvgZones, _impDir == 1, 1, _impTop, _impBottom, _t3, _rightTime, mtf_fvgTf)
+	if mtfFvgZones.size() > 0
+		for i = mtfFvgZones.size() - 1 to 0 by 1
+			MtfFvgZone _z = mtfFvgZones.get(i)
+			float _top = box.get_top(_z.bx)
+			float _bottom = box.get_bottom(_z.bx)
+			float _fillLevel = switch mtf_fvgFill
+				"Touch" => _z.bull ? _top : _bottom
+				"Half Fill" => math.avg(_top, _bottom)
+				=> _z.bull ? _bottom : _top
+			bool _filled = _z.bull ? low <= _fillLevel : high >= _fillLevel
+			bool _remove = false
+			if barstate.isconfirmed
+				if _z.kind == 2
+					_remove := _z.bull ? close < _bottom : close > _top
+				else if _z.kind == 0 and Inversefvgmode and fvgmitigationtype == "Engulf"
+					bool _broken = _z.bull ? close < _bottom : close > _top
+					if _broken
+						_z.bull := not _z.bull
+						_z.kind := 2
+						color _invClr = _z.bull ? buinvfvgcolor : beinvfvgcolor
+						box.set_bgcolor(_z.bx, _invClr)
+						box.set_border_color(_z.bx, color.new(_invClr, BorderTransparency))
+						if plotBoxLabel
+							box.set_text(_z.bx, _htf_HTFName(mtf_fvgTf) + " Inv.FVG" + (_z.bull ? "+" : "-"))
+						if not na(_z.ce)
+							line.set_color(_z.ce, color.new(_invClr, cetransparency))
+							line.set_style(_z.ce, celinetype)
+				else
+					_remove := _filled
+			if _remove
+				f_mtfFvgDelete(_z)
+				mtfFvgZones.remove(i)
+				continue
+			box.set_right(_z.bx, _rightTime)
+			if not na(_z.ce)
+				line.set_x2(_z.ce, _rightTime)
+			_top := box.get_top(_z.bx)
+			_bottom := box.get_bottom(_z.bx)
+			bool _entered = _z.bull ? low <= _top : high >= _bottom
+			if HighlightBox and _entered
+				color _touchClr = _z.kind == 1 ? (_z.bull ? ifvgBullColor : ifvgBearColor) : _z.kind == 2 ? (_z.bull ? buinvfvgcolor : beinvfvgcolor) : (_z.bull ? fvgBullColor : fvgBearColor)
+				_applyHighlight(_z.bx, _touchClr)
 
 f_inSession(_h, _m, _startH, _startM, _endH, _endM) =>
 	int _startTotal = _startH * 60 + _startM
