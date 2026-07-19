@@ -7,7 +7,7 @@ The indicator is delivered as two Pine Script v6 overlays. The original combined
 | File | Purpose |
 |---|---|
 | `ict_price_delivery.pine` | Chart and selected-HTF FVGs, optional FVG residency, implied/inverse FVGs, VI anchoring, liquidity voids, GAPs, NWOG/NDOG and settlement gaps, HTF candles, and optional 25/50/75 gap grading |
-| `ict_liquidity_context.pine` | Hourly/Midnight and weekly opens, Weekly Power 3, Playbook Guard, killzones, session and higher-period liquidity, sweeps, EQH/EQL, Wick Reversal, BOS/CHoCH, SMT, Economic Calendar, PDA Scanner, Setup Score, and Dashboard |
+| `ict_liquidity_context.pine` | Hourly/Midnight and weekly opens, Weekly Power 3, Playbook Guard, killzones, session and higher-period liquidity, sweeps, EQH/EQL, Wick Reversal, BOS/CHoCH, SMT, Market Maker Model Tracker and Candidate Map, Economic Calendar, PDA Scanner, Setup Score, and Dashboard |
 
 `merged_indicator.pine` remains a legacy comparison/reference file. It is not the installation target because its compiled form is over TradingView's token limit.
 
@@ -65,12 +65,26 @@ The Delivery indicator keeps the former 16:14-to-18:00 gap as `Settlement → ET
 
 `FVG Residency` is also default off. For normal chart FVGs and selected-HTF normal FVGs it annotates consecutive confirmed candle-body overlaps as 1 Conviction, 2–3 Normal, 4–5 Hesitation, and above 5 Failed/Stale. The counter resets when the body leaves the zone and creates no additional drawing objects or alerts.
 
+## Market Maker Model Tracker and Candidate Map
+
+`Enable Market Maker Model Tracker` lives in the Context indicator and defaults off. It requires Liquidity Sweeps, Market Structure, and at least one external-liquidity source: Session Highs/Lows, Liquidity Levels, or EQH/EQL. Selecting `SMT = Required` also requires SMT; selecting `Require Killzone` requires an enabled intraday killzone.
+
+The mirrored MMBM/MMSM trackers progress on confirmed bars through Raid → Shift → FVG → Retrace Ready → Expansion → Target, with invalid and expired terminal states. Inputs control Touch/CE/Full FVG retrace, SMT Off/Optional/Required, real in-range premium/discount location, final-raid-extreme killzone membership, and timeout. The opposing-liquidity target is selected beyond the full confirmed raid path and frozen when the candidate arms.
+
+The Phase 1 tracker reuses existing sweep, structure, SMT, killzone, and liquidity state and applies Delivery's exact normal-FVG predicate locally; it adds no drawings or `request.security()` calls. The Dashboard gains one `MM Model` row. MMBM and MMSM each expose Shift, Retrace Ready, Target, and Invalid native alerts plus optional Model webhooks. Playbook Guard suppresses only Retrace Ready notifications, and the context heartbeat includes both model phases and frozen targets.
+
+`Enable Market Maker Model Map` is the separate, default-off Phase 2 overlay and requires the Phase 1 tracker. The user manually anchors an original consolidation (start, end, high, and low), selects MMBM or MMSM and labels the view Primary or Nested. It follows only that direction's latest/live model: Stage 1 is the exact tracked displacement FVG, while Stage 2 is one of up to three bounded opposing-candle candidates found before expansion. Stage 2 supports wick/body geometry and Touch/CE/Full retrace criteria.
+
+The map is deliberately non-authoritative: every stage is labelled `CANDIDATE`, Primary/Nested is a manual label, and it does not classify order blocks or choose a fractal model. It owns at most three boxes (OC, Stage 1, and Stage 2), adds no `request.security()` calls, alerts, webhooks, or Setup Score points, and keeps terminal drawings frozen. OC traversal can complete only after the confirmed shift; model history is not retained.
+
+This is a context classifier, not an automatic trade signal. Setup Score remains the existing five-point `L x/5 · S y/5` checklist; MM state does not add a sixth point or change its denominator.
+
 ## Alerts
 
 Alerts are divided by ownership:
 
 - Delivery: FVG/VI/GAP formation and mitigation events.
-- Context: sweep, BOS/CHoCH, SMT, and context-heartbeat events.
+- Context: sweep, BOS/CHoCH, SMT, MMBM/MMSM Shift, Retrace Ready, Target and Invalid, and context-heartbeat events.
 
 For webhook coverage, create one TradingView `Any alert() function call` alert for each indicator. Existing alerts created from the monolith must be recreated.
 

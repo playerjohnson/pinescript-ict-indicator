@@ -20,6 +20,8 @@ indicator(
 	 max_bars_back = 5000,
 	 behind_chart = true,
 	 dynamic_requests = true)
+var bool ENABLE_MM_MODEL=input.bool(false, "Enable Market Maker Model Tracker", group="⓪ Section Toggles", tooltip="Dashboard-first confirmed-leg tracker: external liquidity raid → matching CHoCH → displacement FVG → later retrace → expansion/target. Requires Liquidity Sweeps and Market Structure. It classifies evidence; it is not an automatic trade signal.")
+var bool ENABLE_MM_MAP=input.bool(false, "Enable Market Maker Model Map", group="⓪ Section Toggles", tooltip="Optional Phase 2 visual map: manually anchored original consolidation plus Stage 1/Stage 2 candidate overlays. Requires the Market Maker Model Tracker. Candidate labels are evidence maps, not trade signals or automatic order-block classification.")
 
 var bool ENABLE_HOURLY_OPEN=input.bool(true, "Enable Hourly Open & Separator", group="⓪ Section Toggles")
 var bool ENABLE_KILLZONES=input.bool(true, "Enable Killzones", group="⓪ Section Toggles")
@@ -38,6 +40,7 @@ var bool wh_enable=input.bool(false, "Enable Webhook Alerts", group="㉑ Webhook
 var bool wh_sweeps=input.bool(true, "Sweep Alerts", group="㉑ Webhook Alerts", tooltip="Liquidity sweep / Turtle Soup events")
 var bool wh_structure=input.bool(true, "Structure Alerts", group="㉑ Webhook Alerts", tooltip="BOS / CHoCH break events.")
 var bool wh_smt=input.bool(true, "SMT Alerts", group="㉑ Webhook Alerts", tooltip="SMT divergence events.")
+var bool wh_mm=input.bool(true, "Model Alerts", group="㉑ Webhook Alerts", tooltip="Market Maker Buy/Sell Model Shift, Retrace Ready, Target, and Invalid events.")
 var bool wh_heartbeat=input.bool(false, "Context Heartbeat", group="㉑ Webhook Alerts", tooltip="One webhook per bar close: close price + ㉘ bias/scores + killzone flag. Feeds the tv_events outcome logger (supabase/README.md); enable Setup Score for meaningful bias/scores.")
 
 var bool ENABLE_WEEKLY_POWER3=input.bool(false, 'Enable Weekly Power 3', group='⓪ Section Toggles', tooltip='Current and historical weekly opens, live weekly range, weekday labels, and the Tuesday London to Wednesday New York best-odds window.')
@@ -523,11 +526,26 @@ type SweepState
 	float confirmLevel = na
 	int   sweepTime    = na
 	label marker       = na
+	float sweepExtreme  = na
+	int   extremeBar    = na
+	float pathHigh      = na
+	float pathLow       = na
+	bool  sweepInKz     = false
 	float bodyEdge         // ㉙ Wick Reversal only: Bar A's body edge (near side of its wick zone)
 
 // Per-bar flags bridging sweep/structure confirms (which happen inside functions) to native
 // alertconditions. Non-var: a fresh object each execution, so flags reset per tick; sweeps and
 // breaks only confirm on barstate.isconfirmed, so these are only ever true at bar close.
+type SweepEvent
+	int extremeBar = na
+	float level = na
+	float extreme = na
+	float pathHigh = na
+	float pathLow = na
+	string name = ""
+	bool inKz = false
+
+
 type AlertFlags
 	bool swpBsl  = false
 	bool swpSsl  = false
@@ -535,6 +553,10 @@ type AlertFlags
 	bool bosBear = false
 	bool chBull  = false
 	bool chBear  = false
+	SweepEvent mmBsl = na
+	SweepEvent mmSsl = na
+	int mmLong = 0
+	int mmShort = 0
 AlertFlags alertFlags = AlertFlags.new()
 
 // Persistent recency stamps for the ㉘ Setup score (freshness of the last sweep/SMT confirm per side).
@@ -543,7 +565,55 @@ type SetupState
 	int swpSslBar
 	int smtBullBar
 	int smtBearBar
+	int smtBullOriginBar
+	int smtBearOriginBar
 var SetupState setupState = SetupState.new()
+
+// One compact state per direction. Phases: 0 idle, 1 raid, 2 shift/wait FVG,
+// 3 FVG/wait retrace, 4 retrace ready, 5 expansion, 6 target, 7 invalid/expired.
+type MMState
+	int phase = 0
+	int armBar = na
+	int raidExtremeBar = na
+	float raidExtreme = na
+	bool raidInKz = false
+	string raidName = ""
+	int shiftBar = na
+	int shiftBreakBar = na
+	int fvgBar = na
+	float fvgTop = na
+	float fvgBottom = na
+	int retraceBar = na
+	float target = na
+	string targetName = ""
+	int endReason = 0
+	int smtBar = na
+	int smtOriginBar = na
+	int lastChochBar = na
+	int lastChochBreakBar = na
+	int lastBosBar = na
+	int lastBosBreakBar = na
+var MMState mmBuy = MMState.new()
+var MMState mmSell = MMState.new()
+
+// Phase 2 is a separate read-only visual map. It binds one manually selected live model
+// and never changes the confirmed Phase-1 state machine or its alerts.
+type MMMapState
+	int boundArmBar = na
+	int boundExtremeBar = na
+	bool boundValid = false
+	int s1Bar = na
+	int s2Bar = na
+	float s2Top = na
+	float s2Bottom = na
+	int s2CaptureBar = na
+	bool s2Touched = false
+	bool ocDelivered = false
+	int terminalBar = na
+	box s1Box = na
+	box s2Box = na
+var MMMapState mmMap = MMMapState.new()
+var box mmOcBox = na
 
 // Advances the sweep state machine for one level on one bar. Returns true on the
 // bar a Turtle Soup confirms. Mutates st in place (Pine objects are by-reference).
@@ -556,8 +626,22 @@ f_sweepTick(SweepState st, float lvl, bool isHigh, int confirmBars) =>
 			st.phase := 0
 			st.levelPrice := lvl
 			st.sweepBar := na
+			if ENABLE_MM_MODEL
+				st.sweepExtreme := na
+				st.extremeBar := na
+				st.pathHigh := na
+				st.pathLow := na
+				st.sweepInKz := false
 		if barstate.isconfirmed
 			if st.phase == 1
+				if ENABLE_MM_MODEL
+					st.pathHigh := math.max(nz(st.pathHigh, high), high)
+					st.pathLow := math.min(nz(st.pathLow, low), low)
+					bool _atExtreme = isHigh ? (na(st.sweepExtreme) or high >= st.sweepExtreme) : (na(st.sweepExtreme) or low <= st.sweepExtreme)
+					if _atExtreme
+						st.sweepExtreme := isHigh ? high : low
+						st.extremeBar := bar_index
+						st.sweepInKz := not na(kz_bg)
 				bool _confirmed = isHigh ? (close < st.confirmLevel) : (close > st.confirmLevel)
 				if _confirmed
 					st.phase := 2
@@ -571,17 +655,34 @@ f_sweepTick(SweepState st, float lvl, bool isHigh, int confirmBars) =>
 					st.sweepBar := bar_index
 					st.sweepTime := time
 					st.confirmLevel := isHigh ? low : high
+					if ENABLE_MM_MODEL
+						st.sweepExtreme := isHigh ? high : low
+						st.extremeBar := bar_index
+						st.pathHigh := high
+						st.pathLow := low
+						st.sweepInKz := not na(kz_bg)
 	_justConfirmed
 
 // Sets the alert flags, fires the webhook, and (when draw is true) draws/updates the one marker
 // label. Does NOT recolor the level line — each host module owns that.
-f_sweepMark(SweepState st, string name, bool isHigh, bool draw) =>
+f_sweepMark(SweepState st, string name, bool isHigh, bool draw, bool mmEligible) =>
 	if isHigh
 		alertFlags.swpBsl := true
 		setupState.swpBslBar := bar_index
 	else
 		alertFlags.swpSsl := true
 		setupState.swpSslBar := bar_index
+	if ENABLE_MM_MODEL and mmEligible and not na(st.sweepExtreme) and not na(st.extremeBar)
+		SweepEvent _old = isHigh ? alertFlags.mmBsl : alertFlags.mmSsl
+		bool _take = na(_old)
+		if not _take
+			_take := st.extremeBar > _old.extremeBar or (st.extremeBar == _old.extremeBar and (isHigh ? (st.sweepExtreme > _old.extreme or (st.sweepExtreme == _old.extreme and st.levelPrice > _old.level)) : (st.sweepExtreme < _old.extreme or (st.sweepExtreme == _old.extreme and st.levelPrice < _old.level))))
+		if _take
+			SweepEvent _event = SweepEvent.new(st.extremeBar, st.levelPrice, st.sweepExtreme, st.pathHigh, st.pathLow, name, st.sweepInKz)
+			if isHigh
+				alertFlags.mmBsl := _event
+			else
+				alertFlags.mmSsl := _event
 	if draw and sweep_showMarker
 		string _tag = isHigh ? "TS↓" : "TS↑"
 		if na(st.marker)
@@ -679,7 +780,7 @@ f_eqhlProcess(array<LiqPool> pools, bool isHigh) =>
 					if na(_p.sweep)
 						_p.sweep := SweepState.new()
 					if f_sweepTick(_p.sweep, _p.price, isHigh, sweep_confirmBars)
-						f_sweepMark(_p.sweep, isHigh ? "EQH" : "EQL", isHigh, true)
+						f_sweepMark(_p.sweep, isHigh ? "EQH" : "EQL", isHigh, true, true)
 					line.set_color(_p.ln, _p.sweep.phase == 2 ? sweep_lineColor : eqhl_color)
 
 // ===== ㉔ Market Structure (BOS / CHoCH) =====
@@ -801,7 +902,7 @@ _sh_processHist(_show, _hist, _isHigh, _color, _style, _name) =>
 				if na(_lvl.sweep)
 					_lvl.sweep := SweepState.new()
 				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
-					f_sweepMark(_lvl.sweep, _name, _isHigh, _show)
+					f_sweepMark(_lvl.sweep, _name, _isHigh, _show, not _lvl.mitigated)
 			if not _show
 				continue
 			if _lvl.mitigated and not sh_showMit
@@ -1049,7 +1150,7 @@ _lq_processHist(_show, array<SHLevel> _hist, _isHigh, _color, _style, _name) =>
 				if na(_lvl.sweep)
 					_lvl.sweep := SweepState.new()
 				if f_sweepTick(_lvl.sweep, _lvl.price, _isHigh, sweep_confirmBars)
-					f_sweepMark(_lvl.sweep, _name, _isHigh, _show)
+					f_sweepMark(_lvl.sweep, _name, _isHigh, _show, not _lvl.mitigated)
 			if not _show
 				continue
 			if _lvl.mitigated and not lq_showMit
@@ -1108,7 +1209,7 @@ var float _prevMidDayLo=na
 var bool _wasMidnight=false
 
 bool _isMidNY = hour(time, "America/New_York") == 0 and minute(time, "America/New_York") == 0
-if timeframe.isintraday and (ENABLE_LIQUIDITY or ENABLE_PDA_SCANNER or ENABLE_SETUP or ENABLE_DASHBOARD)
+if timeframe.isintraday and (ENABLE_LIQUIDITY or ENABLE_PDA_SCANNER or ENABLE_SETUP or ENABLE_MM_MODEL or ENABLE_DASHBOARD)
 	if _isMidNY and not _wasMidnight
 		_prevMidDayHi := _midDayHi
 		_prevMidDayLo := _midDayLo
@@ -1174,9 +1275,9 @@ var SweepState wickRevH = SweepState.new()
 var SweepState wickRevL = SweepState.new()
 if ENABLE_WICK_REV
 	if f_wickTick(wickRevH, _eqhlPh, math.max(close[eqhl_pivotLen], open[eqhl_pivotLen]), low[eqhl_pivotLen], true, sweep_confirmBars)
-		f_sweepMark(wickRevH, "WR", true, true)
+		f_sweepMark(wickRevH, "WR", true, true, false)
 	if f_wickTick(wickRevL, _eqhlPl, math.min(close[eqhl_pivotLen], open[eqhl_pivotLen]), high[eqhl_pivotLen], false, sweep_confirmBars)
-		f_sweepMark(wickRevL, "WR", false, true)
+		f_sweepMark(wickRevL, "WR", false, true, false)
 
 // ㉔ Market Structure driver — pivots computed unconditionally (ta.* consistency); gated logic below
 float _structPh = ta.pivothigh(struct_pivotLen, struct_pivotLen)
@@ -1188,6 +1289,13 @@ if ENABLE_STRUCTURE
 		if _rH == 2
 			bool _isCh = struct_trend == -1
 			f_structDrawBreak(structLastHigh, structHighBar, _isCh, true)
+			if ENABLE_MM_MODEL
+				if _isCh
+					mmBuy.lastChochBar := bar_index
+					mmBuy.lastChochBreakBar := bosH.breakBar
+				else
+					mmBuy.lastBosBar := bar_index
+					mmBuy.lastBosBreakBar := bosH.breakBar
 			struct_lastBreak := _isCh ? "CHoCH" : "BOS"
 			struct_trend := 1
 			structHighResolved := true
@@ -1198,6 +1306,13 @@ if ENABLE_STRUCTURE
 		if _rL == 2
 			bool _isCh = struct_trend == 1
 			f_structDrawBreak(structLastLow, structLowBar, _isCh, false)
+			if ENABLE_MM_MODEL
+				if _isCh
+					mmSell.lastChochBar := bar_index
+					mmSell.lastChochBreakBar := bosL.breakBar
+				else
+					mmSell.lastBosBar := bar_index
+					mmSell.lastBosBreakBar := bosL.breakBar
 			struct_lastBreak := _isCh ? "CHoCH" : "BOS"
 			struct_trend := -1
 			structLowResolved := true
@@ -1253,6 +1368,7 @@ type SmtPair
 	float cmPrev  = na
 	int   count   = 0
 	int   lastT   = na
+	int   lastOriginB = na
 
 var array<line>  smt_lines  = array.new<line>()
 var array<label> smt_labels = array.new<label>()
@@ -1278,6 +1394,7 @@ type SmtBreak
 	bool  resolved    = false
 	int   count    = 0
 	int   lastT    = na
+	int   lastOriginB = na
 
 var SmtBreak brk1H = SmtBreak.new()
 var SmtBreak brk1L = SmtBreak.new()
@@ -1304,6 +1421,8 @@ f_smtPair(SmtPair st, array<line> _lns, array<label> _lbs, bool _chP, float _chV
 				_lbs.unshift(label.new(st.chB, st.chV, _name, style = _isHigh ? label.style_label_down : label.style_label_up, color = color.new(color.white, 100), textcolor = _clr, size = _ho_getSize(smt_labelSize)))
 				st.count := st.count + 1
 				st.lastT := time
+				if ENABLE_MM_MODEL
+					st.lastOriginB := st.chB
 				_fired := true
 				if wh_enable and wh_smt
 					alert(_wh_json(_isHigh ? "SMT BEAR " + _name : "SMT BULL " + _name, st.chV, st.chV), alert.freq_once_per_bar_close)
@@ -1353,6 +1472,8 @@ f_smtBreak(SmtBreak st, array<line> _lns, array<label> _lbs, bool _isHigh, bool 
 				_lbs.unshift(label.new(bar_index, _isHigh ? high : low, "SMT " + _breaker + (_isHigh ? " HH" : " LL"), style = _isHigh ? label.style_label_down : label.style_label_up, color = color.new(_clr, 30), textcolor = color.white, size = _ho_getSize(smt_labelSize)))
 				st.count := st.count + 1
 				st.lastT := time
+				if ENABLE_MM_MODEL
+					st.lastOriginB := st.firstBrkBar
 				st.resolved := true
 				_fired := true
 				if wh_enable and wh_smt
@@ -1407,8 +1528,14 @@ if ENABLE_SMT
 
 if smtBullFired
 	setupState.smtBullBar := bar_index
+	if ENABLE_MM_MODEL
+		int _origin = math.max(smtS1L.lastT == time ? nz(smtS1L.lastOriginB, 0) : 0, smtL1L.lastT == time ? nz(smtL1L.lastOriginB, 0) : 0, brk1L.lastT == time ? nz(brk1L.lastOriginB, 0) : 0, smtS2L.lastT == time ? nz(smtS2L.lastOriginB, 0) : 0, smtL2L.lastT == time ? nz(smtL2L.lastOriginB, 0) : 0, brk2L.lastT == time ? nz(brk2L.lastOriginB, 0) : 0)
+		setupState.smtBullOriginBar := _origin > 0 ? _origin : bar_index
 if smtBearFired
 	setupState.smtBearBar := bar_index
+	if ENABLE_MM_MODEL
+		int _origin = math.max(smtS1H.lastT == time ? nz(smtS1H.lastOriginB, 0) : 0, smtL1H.lastT == time ? nz(smtL1H.lastOriginB, 0) : 0, brk1H.lastT == time ? nz(brk1H.lastOriginB, 0) : 0, smtS2H.lastT == time ? nz(smtS2H.lastOriginB, 0) : 0, smtL2H.lastT == time ? nz(smtL2H.lastOriginB, 0) : 0, brk2H.lastT == time ? nz(brk2H.lastOriginB, 0) : 0)
+		setupState.smtBearOriginBar := _origin > 0 ? _origin : bar_index
 
 alertcondition(smtBullFired, title="SMT Bull", message="SMT Bull {{ticker}} {{interval}}")
 alertcondition(smtBearFired, title="SMT Bear", message="SMT Bear {{ticker}} {{interval}}")
@@ -1554,7 +1681,7 @@ var int setup_lookback = input.int(20, "Freshness (bars)", minval=1, maxval=200,
 // Shared bias read (also feeds the ㉖ Bias row): +1 discount, -1 premium, 0 unknown; pct is na in gap/unknown states.
 int biasDir = 0
 float biasPct = na
-if (ENABLE_SETUP or (ENABLE_DASHBOARD and barstate.islast)) and not na(_pdaHi) and _pdaHi > _pdaLo
+if (ENABLE_SETUP or ENABLE_MM_MODEL or (ENABLE_DASHBOARD and barstate.islast)) and not na(_pdaHi) and _pdaHi > _pdaLo
 	float _p = (close - _pdaLo) / (_pdaHi - _pdaLo) * 100
 	if _p >= 0 and _p <= 100
 		biasDir := _p >= 50 ? -1 : 1
@@ -1575,10 +1702,6 @@ if ENABLE_SETUP
 	setupLongScore := f_setupScore(true)
 	setupShortScore := f_setupScore(false)
 
-// ㉑ CTX heartbeat — one bar-close webhook with price + confluence context; the tv_events
-// outcome logger joins every other event against these bars (see supabase/README.md)
-if wh_enable and wh_heartbeat and barstate.isconfirmed
-	alert('{"event":"CTX","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '","bias_dir":' + str.tostring(biasDir) + ',"score_l":' + str.tostring(setupLongScore) + ',"score_s":' + str.tostring(setupShortScore) + ',"in_kz":' + (na(kz_bg) ? 'false' : 'true') + '}', alert.freq_once_per_bar_close)
 
 // ===== ㉛ Economic Calendar =====
 // Calendar data and rendering use the MPL-2.0 toodegrees Forex Factory utility/decoder libraries pinned above.
@@ -1924,28 +2047,468 @@ type DashAcc
 	float bP = na
 	string bN = ""
 
-// Update the accumulator with one candidate level (mutates _acc in place).
-f_dashNear(DashAcc _acc, float _p, string _nm) =>
+// Update the accumulator with one candidate level relative to independent above/below references.
+f_liqNear(DashAcc _acc, float _p, string _nm, float _above, float _below) =>
 	if not na(_p)
-		if _p > close and (na(_acc.aP) or _p < _acc.aP)
+		if _p > _above and (na(_acc.aP) or _p < _acc.aP)
 			_acc.aP := _p
 			_acc.aN := _nm
-		if _p < close and (na(_acc.bP) or _p > _acc.bP)
+		if _p < _below and (na(_acc.bP) or _p > _acc.bP)
 			_acc.bP := _p
 			_acc.bN := _nm
 
-// Consider every un-tapped (neither close-through mitigated nor sweep-confirmed) level of an SHLevel history array.
-f_dashShArr(DashAcc _acc, array<SHLevel> _arr, string _nm) =>
+// Scan one archived level array. Strict mode excludes pending sweeps as model targets.
+f_liqShArr(DashAcc _acc, array<SHLevel> _arr, string _nm, bool _strict, float _above, float _below) =>
 	for _l in _arr
-		if not _l.mitigated and (na(_l.sweep) or _l.sweep.phase != 2)
-			f_dashNear(_acc, _l.price, _nm)
+		bool _sweepOk = na(_l.sweep) or (_strict ? na(_l.sweep.sweepBar) : _l.sweep.phase != 2)
+		if not _l.mitigated and _sweepOk
+			f_liqNear(_acc, _l.price, _nm, _above, _below)
 
+// Shared nearest-liquidity scan: live Dashboard uses close; MM arm uses the full raid path.
+f_liqScan(DashAcc _acc, bool _strict, float _above, float _below) =>
+	if ENABLE_LIQUIDITY
+		f_liqShArr(_acc, lq_histDayH, "PDH", _strict, _above, _below)
+		f_liqShArr(_acc, lq_histDayL, "PDL", _strict, _above, _below)
+		f_liqShArr(_acc, lq_histWeekH, "PWH", _strict, _above, _below)
+		f_liqShArr(_acc, lq_histWeekL, "PWL", _strict, _above, _below)
+		f_liqShArr(_acc, lq_histMonthH, "PMH", _strict, _above, _below)
+		f_liqShArr(_acc, lq_histMonthL, "PML", _strict, _above, _below)
+	if ENABLE_SESSION_HL
+		f_liqShArr(_acc, sh_histAsiaH, "Asia H", _strict, _above, _below)
+		f_liqShArr(_acc, sh_histAsiaL, "Asia L", _strict, _above, _below)
+		f_liqShArr(_acc, sh_histLonH, "London H", _strict, _above, _below)
+		f_liqShArr(_acc, sh_histLonL, "London L", _strict, _above, _below)
+		f_liqShArr(_acc, sh_histNyamH, "NY AM H", _strict, _above, _below)
+		f_liqShArr(_acc, sh_histNyamL, "NY AM L", _strict, _above, _below)
+		f_liqShArr(_acc, sh_histNypreH, "Pre-AM H", _strict, _above, _below)
+		f_liqShArr(_acc, sh_histNypreL, "Pre-AM L", _strict, _above, _below)
+		f_liqShArr(_acc, sh_histNylH, "Lunch H", _strict, _above, _below)
+		f_liqShArr(_acc, sh_histNylL, "Lunch L", _strict, _above, _below)
+		f_liqShArr(_acc, sh_histNypmH, "NY PM H", _strict, _above, _below)
+		f_liqShArr(_acc, sh_histNypmL, "NY PM L", _strict, _above, _below)
+	if ENABLE_EQHL
+		for _p in eqhPools
+			bool _sweepOk = na(_p.sweep) or (_strict ? na(_p.sweep.sweepBar) : _p.sweep.phase != 2)
+			if not _p.mitigated and _sweepOk
+				f_liqNear(_acc, _p.price, "EQH", _above, _below)
+		for _p in eqlPools
+			bool _sweepOk = na(_p.sweep) or (_strict ? na(_p.sweep.sweepBar) : _p.sweep.phase != 2)
+			if not _p.mitigated and _sweepOk
+				f_liqNear(_acc, _p.price, "EQL", _above, _below)
+
+
+// ===== ㉝ Market Maker Model Tracker (confirmed right-side leg; no drawings) =====
+const string MM_GROUP = "㉝ Market Maker Model"
+var int mm_timeout = input.int(100, "Timeout (bars)", minval=5, maxval=500, group=MM_GROUP, inline="mm1", tooltip="Expires an unfinished candidate only after this many bars from sweep confirmation.")
+var string mm_retraceMode = input.string("CE", "FVG retrace", options=["Touch", "CE", "Full"], group=MM_GROUP, inline="mm1")
+var string mm_smtMode = input.string("Optional", "SMT", options=["Off", "Optional", "Required"], group=MM_GROUP, inline="mm2", tooltip="Required waits for matching post-raid SMT before declaring Retrace Ready. Optional annotates but never gates.")
+var bool mm_requireLocation = input.bool(false, "Require P/D", group=MM_GROUP, inline="mm2", tooltip="MMBM must arm in real dealing-range discount and MMSM in premium. Midnight-gap fallback never satisfies this filter.")
+var bool mm_requireKz = input.bool(false, "Require Killzone", group=MM_GROUP, inline="mm3", tooltip="Requires the final raid extreme to occur during an enabled killzone.")
+
+const string MM_MAP_GROUP = "㉞ Market Maker Model Map"
+var string mm2_direction = input.string("MMBM", "Model", options=["MMBM", "MMSM"], group=MM_MAP_GROUP, inline="map1", tooltip="Selects the one latest/live Phase-1 model this visual map follows.")
+var string mm2_layer = input.string("Primary", "Layer", options=["Primary", "Nested"], group=MM_MAP_GROUP, inline="map1", tooltip="Manual classification only. The script does not decide which fractal/nested model is authoritative.")
+var int mm2_ocStart = input.time(0, "OC start", group=MM_MAP_GROUP, inline="map2", tooltip="Start/end and high/low manually anchor the original consolidation. Zero or invalid values keep the map unset; no chart-point prompt is forced when the indicator loads.")
+var int mm2_ocEnd = input.time(0, "end", group=MM_MAP_GROUP, inline="map2")
+var float mm2_ocHigh = input.price(0.0, "OC high", group=MM_MAP_GROUP, inline="map3")
+var float mm2_ocLow = input.price(0.0, "low", group=MM_MAP_GROUP, inline="map3")
+var bool mm2_projectOc = input.bool(true, "Project OC", group=MM_MAP_GROUP, inline="map4", tooltip="Projects the manually anchored consolidation range to the latest bar without changing its binding end time.")
+var color mm2_ocColor = input.color(color.new(#7e57c2, 88), "OC", group=MM_MAP_GROUP, inline="map4")
+var string mm2_s2Basis = input.string("Wicks", "S2 geometry", options=["Wicks", "Body"], group=MM_MAP_GROUP, inline="map5", tooltip="Candidate only: uses the full range or body of an opposing candle before the expansion break. This is not automatic order-block classification.")
+var int mm2_s2Pick = input.int(1, "candidate #", minval=1, maxval=3, group=MM_MAP_GROUP, inline="map5", tooltip="Manually selects the 1st, 2nd, or 3rd opposing candle counted backward from the expansion break.")
+var int mm2_s2Scan = input.int(30, "S2 scan", minval=3, maxval=50, group=MM_MAP_GROUP, inline="map6", tooltip="Maximum bars scanned between the Stage-1 retrace and expansion break.")
+var string mm2_s2Test = input.string("CE", "retrace", options=["Touch", "CE", "Full"], group=MM_MAP_GROUP, inline="map6")
+var color mm2_s2Color = input.color(color.new(#ff9800, 84), "S2 candidate", group=MM_MAP_GROUP, inline="map7")
+var color mm2_s1Color = input.color(color.new(#26a69a, 84), "S1 candidate", group=MM_MAP_GROUP, inline="map7")
+
+f_mmIsFvg(bool _isLong, int _i) =>
+	_isLong ? (low[_i] > high[_i + 2] and low[_i + 1] <= high[_i + 2] and high[_i + 1] >= low[_i]) : (high[_i] < low[_i + 2] and high[_i] >= low[_i + 1] and high[_i + 1] >= low[_i + 2])
+
+f_mmThreshold(bool _isLong, float _top, float _bottom) =>
+	mm_retraceMode == "CE" ? (_top + _bottom) / 2 : mm_retraceMode == "Full" ? (_isLong ? _bottom : _top) : (_isLong ? _top : _bottom)
+
+f_mmRetested(bool _isLong, float _top, float _bottom, int _i) =>
+	float _threshold = f_mmThreshold(_isLong, _top, _bottom)
+	_isLong ? low[_i] <= _threshold : high[_i] >= _threshold
+
+f_mmClearFvg(MMState _st) =>
+	_st.fvgBar := na
+	_st.fvgTop := na
+	_st.fvgBottom := na
+	_st.retraceBar := na
+
+// At a delayed CHoCH confirmation, recover the earliest still-clean FVG formed after both
+// the final raid extreme and the original close-break. The bounded window is at most ten bars.
+f_mmBackfillFvg(MMState _st, bool _isLong, int _fromBar) =>
+	bool _found = false
+	int _back = na(_fromBar) ? -1 : math.min(bar_index - _fromBar - 1, sweep_confirmBars + struct_holdBars)
+	if _back >= 0
+		for _n = 0 to _back
+			int _i = _back - _n
+			if not _found and f_mmIsFvg(_isLong, _i)
+				float _top = _isLong ? low[_i] : low[_i + 2]
+				float _bottom = _isLong ? high[_i + 2] : high[_i]
+				float _threshold = f_mmThreshold(_isLong, _top, _bottom)
+				bool _clean = true
+				if _i > 0
+					for _k = 0 to _i - 1
+						if _isLong ? low[_k] <= _threshold : high[_k] >= _threshold
+							_clean := false
+				if _clean
+					_st.fvgBar := bar_index - _i
+					_st.fvgTop := _top
+					_st.fvgBottom := _bottom
+					_found := true
+	_found
+
+f_mmArm(MMState _st, SweepEvent _raid, bool _isLong) =>
+	_st.phase := 1
+	_st.armBar := bar_index
+	_st.raidExtremeBar := _raid.extremeBar
+	_st.raidExtreme := _raid.extreme
+	_st.raidInKz := _raid.inKz
+	_st.raidName := _raid.name
+	_st.shiftBar := na
+	_st.shiftBreakBar := na
+	f_mmClearFvg(_st)
+	_st.endReason := 0
+	_st.smtBar := na
+	_st.smtOriginBar := na
+	DashAcc _target = DashAcc.new()
+	f_liqScan(_target, true, nz(_raid.pathHigh, high), nz(_raid.pathLow, low))
+	_st.target := _isLong ? _target.aP : _target.bP
+	_st.targetName := _isLong ? _target.aN : _target.bN
+
+f_mmCaptureSmt(MMState _st, bool _isLong) =>
+	int _confirmBar = _isLong ? setupState.smtBullBar : setupState.smtBearBar
+	int _originBar = _isLong ? setupState.smtBullOriginBar : setupState.smtBearOriginBar
+	if mm_smtMode != "Off" and ENABLE_SMT and not na(_confirmBar) and not na(_originBar) and _originBar >= _st.raidExtremeBar
+		if na(_st.smtBar) or _confirmBar > _st.smtBar
+			_st.smtBar := _confirmBar
+			_st.smtOriginBar := _originBar
+
+f_mmSmtOk(MMState _st) =>
+	mm_smtMode != "Required" or not na(_st.smtBar)
+
+f_mmTick(MMState _st, bool _isLong) =>
+	int _event = 0
+	SweepEvent _raid = na
+	if _isLong
+		_raid := alertFlags.mmSsl
+	else
+		_raid := alertFlags.mmBsl
+	bool _locationOk = not mm_requireLocation or (not na(biasPct) and biasDir == (_isLong ? 1 : -1))
+	bool _raidOk = not na(_raid) and (not mm_requireKz or _raid.inKz) and _locationOk
+	if _raidOk
+		f_mmArm(_st, _raid, _isLong)
+
+	int _phase = _st.phase
+	if _phase >= 1 and _phase <= 5
+		float _priorExtreme = _st.raidExtreme
+		bool _closeInvalid = _isLong ? close < _priorExtreme : close > _priorExtreme
+		if _phase == 1
+			bool _atExtreme = _isLong ? low <= _priorExtreme : high >= _priorExtreme
+			if _atExtreme and not _closeInvalid and bar_index > _st.raidExtremeBar
+				_st.raidExtreme := _isLong ? low : high
+				_st.raidExtremeBar := bar_index
+				_st.raidInKz := not na(kz_bg)
+				if not na(_st.smtOriginBar) and _st.smtOriginBar < _st.raidExtremeBar
+					_st.smtBar := na
+					_st.smtOriginBar := na
+		f_mmCaptureSmt(_st, _isLong)
+		int _oppChochBar = _isLong ? mmSell.lastChochBar : mmBuy.lastChochBar
+		int _oppBreakBar = _isLong ? mmSell.lastChochBreakBar : mmBuy.lastChochBreakBar
+		bool _matchOk = (not mm_requireKz or _st.raidInKz) and not na(_st.lastChochBar) and not na(_st.lastChochBreakBar) and _st.lastChochBreakBar >= _st.raidExtremeBar
+		bool _oppOk = not na(_oppChochBar) and not na(_oppBreakBar) and _oppBreakBar >= _st.raidExtremeBar
+		bool _oppInvalid = _phase == 1 ? (_oppOk and (not _matchOk or _oppChochBar >= _st.lastChochBar)) : (_oppOk and _oppChochBar > _st.shiftBar)
+		bool _expired = bar_index - _st.armBar > mm_timeout
+		bool _targetHit = not na(_st.target) and (_isLong ? high >= _st.target : low <= _st.target)
+		if _closeInvalid
+			_st.phase := 7
+			_st.endReason := 1
+			_event := 4
+		else if _expired
+			_st.phase := 7
+			_st.endReason := 2
+			_event := 4
+		else if _oppInvalid
+			_st.phase := 7
+			_st.endReason := 4
+			_event := 4
+		else
+			switch _phase
+				1 =>
+					if _targetHit
+						_st.phase := 7
+						_st.endReason := 3
+						_event := 4
+					else if _matchOk
+						_st.shiftBar := _st.lastChochBar
+						_st.shiftBreakBar := _st.lastChochBreakBar
+						_st.phase := 2
+						_event := 1
+						if f_mmBackfillFvg(_st, _isLong, math.max(_st.raidExtremeBar, _st.shiftBreakBar))
+							_st.phase := 3
+				2 =>
+					if _targetHit
+						_st.phase := 7
+						_st.endReason := 3
+						_event := 4
+					else if f_mmIsFvg(_isLong, 0)
+						_st.fvgBar := bar_index
+						_st.fvgTop := _isLong ? low : low[2]
+						_st.fvgBottom := _isLong ? high[2] : high
+						_st.phase := 3
+				3 =>
+					if _targetHit
+						_st.phase := 7
+						_st.endReason := 3
+						_event := 4
+					else
+						bool _gapFailed = _isLong ? close < _st.fvgBottom : close > _st.fvgTop
+						if _gapFailed
+							f_mmClearFvg(_st)
+							_st.phase := 2
+						else if bar_index > math.max(_st.fvgBar, _st.shiftBar) and f_mmRetested(_isLong, _st.fvgTop, _st.fvgBottom, 0)
+							if f_mmSmtOk(_st)
+								_st.retraceBar := bar_index
+								_st.phase := 4
+								_event := 2
+							else
+								f_mmClearFvg(_st)
+								_st.phase := 2
+				4 =>
+					// A target touched before a later confirmed BOS is ambiguous, including
+					// a same-bar BOS/target collision where intrabar ordering is unknowable.
+					if _targetHit
+						_st.phase := 7
+						_st.endReason := 3
+						_event := 4
+					else
+						int _bosBar = _st.lastBosBar
+						int _bosBreakBar = _st.lastBosBreakBar
+						if not na(_bosBar) and not na(_bosBreakBar) and _bosBar > _st.retraceBar and _bosBreakBar > _st.retraceBar
+							_st.phase := 5
+				5 =>
+					if _targetHit
+						_st.phase := 6
+						_event := 3
+	_event
+
+bool mm_hasSource = ENABLE_LIQUIDITY or ENABLE_EQHL or (ENABLE_SESSION_HL and timeframe.isintraday)
+bool mm_kzReady = not mm_requireKz or (ENABLE_KILLZONES and timeframe.isintraday and (kz_showAsian or kz_showLondon or kz_showNYAM or kz_showNYPM or kz_showSBAM or kz_showSBPM))
+bool mm_smtReady = mm_smtMode != "Required" or (ENABLE_SMT and (smt_useSym1 or smt_useSym2) and (smt_showPivot or smt_showBreak))
+bool mm_dependencies = ENABLE_MM_MODEL and ENABLE_SWEEPS and ENABLE_STRUCTURE and mm_hasSource and mm_kzReady and mm_smtReady
+if mm_dependencies and barstate.isconfirmed
+	alertFlags.mmLong := f_mmTick(mmBuy, true)
+	alertFlags.mmShort := f_mmTick(mmSell, false)
+
+alertcondition(alertFlags.mmLong == 1, title="MMBM Shift", message="MMBM SHIFT {{ticker}} {{interval}}")
+alertcondition(alertFlags.mmLong == 2 and not pb_guardLockout, title="MMBM Retrace Ready", message="MMBM RETRACE READY {{ticker}} {{interval}}")
+alertcondition(alertFlags.mmLong == 3, title="MMBM Target", message="MMBM TARGET {{ticker}} {{interval}}")
+alertcondition(alertFlags.mmLong == 4, title="MMBM Invalid", message="MMBM INVALID {{ticker}} {{interval}}")
+alertcondition(alertFlags.mmShort == 1, title="MMSM Shift", message="MMSM SHIFT {{ticker}} {{interval}}")
+alertcondition(alertFlags.mmShort == 2 and not pb_guardLockout, title="MMSM Retrace Ready", message="MMSM RETRACE READY {{ticker}} {{interval}}")
+alertcondition(alertFlags.mmShort == 3, title="MMSM Target", message="MMSM TARGET {{ticker}} {{interval}}")
+alertcondition(alertFlags.mmShort == 4, title="MMSM Invalid", message="MMSM INVALID {{ticker}} {{interval}}")
+
+// Two distinct top-level call sites plus freq_all preserve simultaneous opposite-direction events.
+if wh_enable and wh_mm and alertFlags.mmLong > 0 and (alertFlags.mmLong != 2 or not pb_guardLockout)
+	string _event = switch alertFlags.mmLong
+		1 => "MMBM SHIFT"
+		2 => "MMBM READY"
+		3 => "MMBM TARGET"
+		=> "MMBM INVALID"
+	float _other = nz(mmBuy.target, mmBuy.raidExtreme)
+	alert(_wh_json(_event, math.max(mmBuy.raidExtreme, _other), math.min(mmBuy.raidExtreme, _other)), alert.freq_all)
+if wh_enable and wh_mm and alertFlags.mmShort > 0 and (alertFlags.mmShort != 2 or not pb_guardLockout)
+	string _event = switch alertFlags.mmShort
+		1 => "MMSM SHIFT"
+		2 => "MMSM READY"
+		3 => "MMSM TARGET"
+		=> "MMSM INVALID"
+	float _other = nz(mmSell.target, mmSell.raidExtreme)
+	alert(_wh_json(_event, math.max(mmSell.raidExtreme, _other), math.min(mmSell.raidExtreme, _other)), alert.freq_all)
+
+
+// ===== ㉞ Market Maker Model Map (manual OC + bounded candidate overlays) =====
+bool mm2_ocValid = ENABLE_MM_MAP and mm2_ocStart > 0 and mm2_ocEnd > mm2_ocStart and mm2_ocHigh > mm2_ocLow
+
+f_mmMapReset(MMMapState _map, int _armBar, int _extremeBar, bool _valid) =>
+	if not na(_map.s1Box)
+		box.delete(_map.s1Box)
+	if not na(_map.s2Box)
+		box.delete(_map.s2Box)
+	_map.boundArmBar := _armBar
+	_map.boundExtremeBar := _extremeBar
+	_map.boundValid := _valid
+	_map.s1Bar := na
+	_map.s2Bar := na
+	_map.s2Top := na
+	_map.s2Bottom := na
+	_map.s2CaptureBar := na
+	_map.s2Touched := false
+	_map.ocDelivered := false
+	_map.terminalBar := na
+	_map.s1Box := na
+	_map.s2Box := na
+
+// Stage 2 is deliberately heuristic and bounded: count opposing candles backward from
+// the expansion break, then let the user select candidate 1..3 and body/wick geometry.
+f_mmMapFindS2(bool _isLong, int _retraceBar, int _breakBar) =>
+	int _candidateBar = na
+	float _candidateTop = na
+	float _candidateBottom = na
+	int _near = na(_breakBar) ? -1 : bar_index - _breakBar + 1
+	int _far = na(_retraceBar) or na(_breakBar) ? -1 : math.min(bar_index - _retraceBar - 1, bar_index - _breakBar + mm2_s2Scan)
+	if _near >= 1 and _far >= _near
+		int _seen = 0
+		for _i = _near to _far
+			bool _opposing = _isLong ? close[_i] < open[_i] : close[_i] > open[_i]
+			if _opposing
+				_seen += 1
+				if _seen == mm2_s2Pick
+					_candidateBar := bar_index - _i
+					_candidateTop := mm2_s2Basis == "Body" ? math.max(open[_i], close[_i]) : high[_i]
+					_candidateBottom := mm2_s2Basis == "Body" ? math.min(open[_i], close[_i]) : low[_i]
+					break
+	[_candidateBar, _candidateTop, _candidateBottom]
+
+f_mmMapTick(MMMapState _map, MMState _st, bool _isLong) =>
+	bool _newExtreme = not na(_st.armBar) and (na(_map.boundArmBar) or _st.armBar != _map.boundArmBar or na(_map.boundExtremeBar) or _st.raidExtremeBar != _map.boundExtremeBar)
+	if _newExtreme
+		int _extremeOffset = bar_index - _st.raidExtremeBar
+		int _extremeTime = na
+		if _extremeOffset >= 0 and _extremeOffset <= 5000
+			_extremeTime := time[_extremeOffset]
+		bool _timeOk = not na(_extremeTime) and _extremeTime >= mm2_ocEnd
+		bool _sideOk = _isLong ? _st.raidExtreme < mm2_ocLow : _st.raidExtreme > mm2_ocHigh
+		f_mmMapReset(_map, _st.armBar, _st.raidExtremeBar, _timeOk and _sideOk)
+	if _map.boundValid and _map.boundArmBar == _st.armBar
+		if na(_map.terminalBar) and (_st.phase == 6 or _st.phase == 7)
+			_map.terminalBar := bar_index
+		bool _s1Changed = na(_map.s1Bar) ? not na(_st.fvgBar) : na(_st.fvgBar) or _map.s1Bar != _st.fvgBar
+		if _s1Changed
+			if not na(_map.s1Box)
+				box.delete(_map.s1Box)
+			_map.s1Box := na
+			_map.s1Bar := _st.fvgBar
+		if not na(_st.fvgBar) and (na(_map.terminalBar) or bar_index == _map.terminalBar)
+			int _left = math.max(_st.fvgBar - 2, 0)
+			int _right = nz(_map.terminalBar, bar_index) + 1
+			string _terminal = _st.phase == 6 ? " · TARGET" : _st.phase == 7 ? (_st.endReason == 2 ? " · EXPIRED" : " · INVALID") : ""
+			string _s1Text = "S1 " + (_isLong ? "A1" : "D1") + " CANDIDATE · FVG" + (not na(_st.retraceBar) ? " · RETRACED" : "") + _terminal
+			if na(_map.s1Box)
+				_map.s1Box := box.new(_left, _st.fvgTop, _right, _st.fvgBottom, border_color=color.new(mm2_s1Color, 0), bgcolor=mm2_s1Color, text=_s1Text, text_color=color.new(color.white, 0), text_size=size.tiny)
+			else
+				box.set_lefttop(_map.s1Box, _left, _st.fvgTop)
+				box.set_rightbottom(_map.s1Box, _right, _st.fvgBottom)
+				box.set_text(_map.s1Box, _s1Text)
+		if _st.phase == 5 and na(_map.s2CaptureBar)
+			_map.s2CaptureBar := bar_index
+			[_s2Bar, _s2Top, _s2Bottom] = f_mmMapFindS2(_isLong, _st.retraceBar, _st.lastBosBreakBar)
+			_map.s2Bar := _s2Bar
+			_map.s2Top := _s2Top
+			_map.s2Bottom := _s2Bottom
+		if not na(_map.s2Bar) and (na(_map.terminalBar) or bar_index == _map.terminalBar)
+			if not _map.s2Touched and _st.phase == 5 and bar_index > _map.s2CaptureBar
+				float _s2Threshold = mm2_s2Test == "CE" ? (_map.s2Top + _map.s2Bottom) / 2 : mm2_s2Test == "Full" ? (_isLong ? _map.s2Bottom : _map.s2Top) : (_isLong ? _map.s2Top : _map.s2Bottom)
+				bool _overlaps = high >= _map.s2Bottom and low <= _map.s2Top
+				_map.s2Touched := _overlaps and (_isLong ? low <= _s2Threshold : high >= _s2Threshold)
+			int _right = nz(_map.terminalBar, bar_index) + 1
+			string _terminal = _st.phase == 6 ? " · TARGET" : _st.phase == 7 ? (_st.endReason == 2 ? " · EXPIRED" : " · INVALID") : ""
+			string _s2Text = "S2 " + (_isLong ? "A2" : "D2") + " CANDIDATE #" + str.tostring(mm2_s2Pick) + " · OPP CANDLE" + (_map.s2Touched ? " · RETRACED" : "") + _terminal
+			if na(_map.s2Box)
+				_map.s2Box := box.new(_map.s2Bar, _map.s2Top, _right, _map.s2Bottom, border_color=color.new(mm2_s2Color, 0), bgcolor=mm2_s2Color, text=_s2Text, text_color=color.new(color.white, 0), text_size=size.tiny)
+			else
+				box.set_lefttop(_map.s2Box, _map.s2Bar, _map.s2Top)
+				box.set_rightbottom(_map.s2Box, _right, _map.s2Bottom)
+				box.set_text(_map.s2Box, _s2Text)
+		if not _map.ocDelivered and _st.phase >= 2 and _st.phase <= 6 and not na(_st.shiftBar) and bar_index > _st.shiftBar and (na(_map.terminalBar) or bar_index == _map.terminalBar)
+			_map.ocDelivered := _isLong ? high >= mm2_ocHigh : low <= mm2_ocLow
+
+f_mmMapText(MMMapState _map, MMState _st, bool _isLong) =>
+	string _prefix = (_isLong ? "MMBM " : "MMSM ") + mm2_layer
+	string _txt = _prefix + " · WAIT MODEL"
+	if not na(_map.boundArmBar)
+		if not _map.boundValid
+			_txt := _prefix + " · OC MISMATCH"
+		else if _st.phase == 7
+			_txt := _prefix + (_st.endReason == 2 ? " · EXPIRED" : " · INVALID")
+		else if _st.phase == 6
+			_txt := _prefix + " · MODEL TARGET" + (_map.ocDelivered ? " · OC TRAVERSED" : "")
+		else if _map.s2Touched
+			_txt := _prefix + " · S2 " + (_isLong ? "A2" : "D2") + " CANDIDATE · RETRACED"
+		else if not na(_map.s2Bar)
+			_txt := _prefix + " · S2 " + (_isLong ? "A2" : "D2") + " CANDIDATE ACTIVE"
+		else if not na(_map.s2CaptureBar)
+			_txt := _prefix + " · S2 CANDIDATE #" + str.tostring(mm2_s2Pick) + " —"
+		else if not na(_st.retraceBar)
+			_txt := _prefix + " · S1 " + (_isLong ? "A1" : "D1") + " CANDIDATE RETRACED"
+		else if not na(_map.s1Bar)
+			_txt := _prefix + " · S1 " + (_isLong ? "A1" : "D1") + " CANDIDATE ACTIVE"
+		else
+			_txt := _prefix + " · BOUND · WAIT FVG"
+		if _map.ocDelivered and _st.phase < 6
+			_txt += " · OC TRAVERSED"
+	_txt
+
+if ENABLE_MM_MAP and ENABLE_MM_MODEL and mm2_ocValid and barstate.isconfirmed
+	if mm2_direction == "MMBM"
+		f_mmMapTick(mmMap, mmBuy, true)
+	else
+		f_mmMapTick(mmMap, mmSell, false)
+
+if barstate.islast
+	if ENABLE_MM_MAP and ENABLE_MM_MODEL and mm2_ocValid
+		int _ocRight = mm2_projectOc ? math.max(mm2_ocEnd, nz(time_close, time)) : mm2_ocEnd
+		string _ocText = mm2_direction + " · " + mm2_layer + " · MANUAL ORIGINAL CONSOLIDATION"
+		if na(mmOcBox)
+			mmOcBox := box.new(mm2_ocStart, mm2_ocHigh, _ocRight, mm2_ocLow, xloc=xloc.bar_time, border_color=color.new(mm2_ocColor, 0), bgcolor=mm2_ocColor, text=_ocText, text_color=color.new(color.white, 0), text_size=size.tiny)
+		else
+			box.set_lefttop(mmOcBox, mm2_ocStart, mm2_ocHigh)
+			box.set_rightbottom(mmOcBox, _ocRight, mm2_ocLow)
+			box.set_border_color(mmOcBox, color.new(mm2_ocColor, 0))
+			box.set_bgcolor(mmOcBox, mm2_ocColor)
+			box.set_text(mmOcBox, _ocText)
+	else if not na(mmOcBox)
+		box.delete(mmOcBox)
+		mmOcBox := na
+
+// CTX journaling retains existing fields and adds the model direction, phases, and frozen targets.
+if wh_enable and wh_heartbeat and barstate.isconfirmed
+	bool _mmBuyActive = mmBuy.phase >= 1 and mmBuy.phase <= 5
+	bool _mmSellActive = mmSell.phase >= 1 and mmSell.phase <= 5
+	string _mmDir = _mmBuyActive and _mmSellActive ? "BOTH" : _mmBuyActive ? "MMBM" : _mmSellActive ? "MMSM" : "NONE"
+	string _mmBuyTarget = na(mmBuy.target) ? "null" : str.tostring(mmBuy.target, format.mintick)
+	string _mmSellTarget = na(mmSell.target) ? "null" : str.tostring(mmSell.target, format.mintick)
+	alert('{"event":"CTX","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","close":' + str.tostring(close, format.mintick) + ',"time":"' + str.format_time(time, "yyyy-MM-dd HH:mm:ss", "America/New_York") + '","bias_dir":' + str.tostring(biasDir) + ',"score_l":' + str.tostring(setupLongScore) + ',"score_s":' + str.tostring(setupShortScore) + ',"in_kz":' + (na(kz_bg) ? 'false' : 'true') + ',"mm_dir":"' + _mmDir + '","mm_buy_phase":' + str.tostring(mmBuy.phase) + ',"mm_sell_phase":' + str.tostring(mmSell.phase) + ',"mm_buy_target":' + _mmBuyTarget + ',"mm_sell_target":' + _mmSellTarget + '}', alert.freq_once_per_bar_close)
+
+f_mmPhaseText(MMState _st) =>
+	switch _st.phase
+		0 => "Idle"
+		1 => "RAID " + _st.raidName + " · wait shift"
+		2 => "SHIFT · wait FVG"
+		3 => "FVG · wait " + mm_retraceMode
+		4 => "RETRACE READY"
+		5 => "EXPANSION"
+		6 => "TARGET " + _st.targetName
+		=> _st.endReason == 2 ? "EXPIRED" : _st.endReason == 3 ? "INVALID · target before expansion" : _st.endReason == 4 ? "INVALID · opposite shift" : "INVALID · raid extreme"
+
+f_mmStateText(MMState _st, bool _isLong) =>
+	string _txt = (_isLong ? "MMBM " : "MMSM ") + f_mmPhaseText(_st)
+	if _st.phase >= 1 and _st.phase <= 5
+		_txt += na(_st.target) ? " · target —" : " · " + (_isLong ? "↑ " : "↓ ") + _st.targetName + " " + str.tostring(_st.target, format.mintick)
+		_txt += " · X " + str.tostring(_st.raidExtreme, format.mintick)
+	if mm_smtMode != "Off" and not na(_st.smtBar)
+		_txt += " · SMT"
+	(pb_guardLockout and _st.phase == 4 ? "BLOCKED · " : "") + _txt
 _dashPosCnst = switch dash_pos
 	"Top Left"     => position.top_left
 	"Bottom Right" => position.bottom_right
 	"Bottom Left"  => position.bottom_left
 	=> position.top_right
-var table dashTbl = table.new(_dashPosCnst, 2, 6 + (ENABLE_PLAYBOOK_GUARD ? 2 : 0) + (smt_useSym1 ? 1 : 0) + (smt_useSym2 ? 1 : 0), border_width=1)
+var table dashTbl = table.new(_dashPosCnst, 2, 6 + (ENABLE_MM_MODEL ? 1 : 0) + (ENABLE_MM_MAP ? 1 : 0) + (ENABLE_PLAYBOOK_GUARD ? 2 : 0) + (smt_useSym1 ? 1 : 0) + (smt_useSym2 ? 1 : 0), border_width=1)
 
 if ENABLE_DASHBOARD and barstate.islast
 	string _biasTxt = biasDir == 0 ? "—" : (biasDir == -1 ? "Premium" : "Discount") + (na(biasPct) ? " (gap)" : " " + str.tostring(biasPct, "#") + "%")
@@ -1956,37 +2519,7 @@ if ENABLE_DASHBOARD and barstate.islast
 		_structTxt := (struct_trend == 1 ? "Bull" : "Bear") + (na(struct_lastBreak) ? "" : " · " + struct_lastBreak)
 		_structCol := struct_trend == 1 ? color.new(color.green, 40) : color.new(color.red, 40)
 	DashAcc _acc = DashAcc.new()
-	if ENABLE_LIQUIDITY
-		f_dashShArr(_acc, lq_histDayH,   "PDH")
-		f_dashShArr(_acc, lq_histDayL,   "PDL")
-		f_dashShArr(_acc, lq_histWeekH,  "PWH")
-		f_dashShArr(_acc, lq_histWeekL,  "PWL")
-		f_dashShArr(_acc, lq_histMonthH, "PMH")
-		f_dashShArr(_acc, lq_histMonthL, "PML")
-	if ENABLE_SESSION_HL
-		f_dashShArr(_acc, sh_histAsiaH, "Asia H")
-		f_dashShArr(_acc, sh_histAsiaL, "Asia L")
-		f_dashShArr(_acc, sh_histLonH, "London H")
-		f_dashShArr(_acc, sh_histLonL, "London L")
-		f_dashShArr(_acc, sh_histNyamH, "NY AM H")
-		f_dashShArr(_acc, sh_histNyamL, "NY AM L")
-		f_dashShArr(_acc, sh_histNypreH, "Pre-AM H")
-		f_dashShArr(_acc, sh_histNypreL, "Pre-AM L")
-		f_dashShArr(_acc, sh_histNylH, "Lunch H")
-		f_dashShArr(_acc, sh_histNylL, "Lunch L")
-		f_dashShArr(_acc, sh_histNypmH, "NY PM H")
-		f_dashShArr(_acc, sh_histNypmL, "NY PM L")
-	if ENABLE_EQHL
-		if eqhPools.size() > 0
-			for i = 0 to eqhPools.size() - 1
-				LiqPool _p = eqhPools.get(i)
-				if not _p.mitigated and (na(_p.sweep) or _p.sweep.phase != 2)
-					f_dashNear(_acc, _p.price, "EQH")
-		if eqlPools.size() > 0
-			for i = 0 to eqlPools.size() - 1
-				LiqPool _p = eqlPools.get(i)
-				if not _p.mitigated and (na(_p.sweep) or _p.sweep.phase != 2)
-					f_dashNear(_acc, _p.price, "EQL")
+	f_liqScan(_acc, false, close, close)
 	string _upTxt = na(_acc.aP) ? "—" : "↑ " + _acc.aN + " " + str.tostring(_acc.aP, format.mintick)
 	string _dnTxt = na(_acc.bP) ? "—" : "↓ " + _acc.bN + " " + str.tostring(_acc.bP, format.mintick)
 	string _kzTxt = kz_name
@@ -2005,17 +2538,71 @@ if ENABLE_DASHBOARD and barstate.islast
 	color _suBg = pb_guardLockout ? color.new(color.red, 15) : dash_bg
 	table.cell(dashTbl, 0, 5, "Setup",     text_color=dash_txt,     text_size=dash_size, bgcolor=dash_bg)
 	table.cell(dashTbl, 1, 5, _suTxt,      text_color=dash_txt,     text_size=dash_size, bgcolor=_suBg)
+	int _nextRow = 6
+	if ENABLE_MM_MODEL
+		string _mmTxt = "Idle"
+		color _mmBg = dash_bg
+		if not ENABLE_SWEEPS or not ENABLE_STRUCTURE
+			_mmTxt := "Needs SWP + MS"
+		else if not mm_hasSource
+			_mmTxt := "Needs LIQ/EQ/intraday SH"
+		else if not mm_smtReady
+			_mmTxt := "Needs SMT"
+		else if not mm_kzReady
+			_mmTxt := "Needs KZ"
+		else
+			bool _buyActive = mmBuy.phase >= 1 and mmBuy.phase <= 5
+			bool _sellActive = mmSell.phase >= 1 and mmSell.phase <= 5
+			if _buyActive and _sellActive
+				bool _blockedReady = pb_guardLockout and (mmBuy.phase == 4 or mmSell.phase == 4)
+				_mmTxt := (_blockedReady ? "BLOCKED · " : "") + "B " + f_mmPhaseText(mmBuy) + " · S " + f_mmPhaseText(mmSell)
+				_mmBg := color.new(color.orange, 35)
+			else if _buyActive
+				_mmTxt := f_mmStateText(mmBuy, true)
+				_mmBg := pb_guardLockout and mmBuy.phase == 4 ? color.new(color.red, 15) : color.new(color.green, 45)
+			else if _sellActive
+				_mmTxt := f_mmStateText(mmSell, false)
+				_mmBg := pb_guardLockout and mmSell.phase == 4 ? color.new(color.red, 15) : color.new(color.red, 45)
+			else if mmBuy.phase > 0 or mmSell.phase > 0
+				bool _showBuy = mmSell.phase == 0 or (mmBuy.phase > 0 and nz(mmBuy.armBar, 0) >= nz(mmSell.armBar, 0))
+				if _showBuy
+					_mmTxt := f_mmStateText(mmBuy, true)
+					_mmBg := mmBuy.phase == 6 ? color.new(color.green, 35) : color.new(color.red, 30)
+				else
+					_mmTxt := f_mmStateText(mmSell, false)
+					_mmBg := mmSell.phase == 6 ? color.new(color.green, 35) : color.new(color.red, 30)
+		table.cell(dashTbl, 0, _nextRow, "MM Model", text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		table.cell(dashTbl, 1, _nextRow, _mmTxt, text_color=color.white, text_size=dash_size, bgcolor=_mmBg)
+		_nextRow += 1
+	if ENABLE_MM_MAP
+		string _mapTxt = "Set OC anchors"
+		color _mapBg = dash_bg
+		if not ENABLE_MM_MODEL
+			_mapTxt := "Needs MM Model"
+			_mapBg := color.new(color.red, 30)
+		else if not mm2_ocValid
+			_mapBg := color.new(color.orange, 40)
+		else if mm2_direction == "MMBM"
+			_mapTxt := f_mmMapText(mmMap, mmBuy, true)
+			_mapBg := not na(mmMap.boundArmBar) and not mmMap.boundValid or mmBuy.phase == 7 ? color.new(color.red, 30) : mmBuy.phase == 6 or mmMap.ocDelivered or mmMap.s2Touched ? color.new(color.green, 40) : color.new(color.orange, 45)
+		else
+			_mapTxt := f_mmMapText(mmMap, mmSell, false)
+			_mapBg := not na(mmMap.boundArmBar) and not mmMap.boundValid or mmSell.phase == 7 ? color.new(color.red, 30) : mmSell.phase == 6 or mmMap.ocDelivered or mmMap.s2Touched ? color.new(color.green, 40) : color.new(color.orange, 45)
+		table.cell(dashTbl, 0, _nextRow, "MM Map", text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		table.cell(dashTbl, 1, _nextRow, _mapTxt, text_color=color.white, text_size=dash_size, bgcolor=_mapBg)
+		_nextRow += 1
 	if ENABLE_PLAYBOOK_GUARD
 		color _pbStateBg=pb_guardLockout ? color.new(color.red, 15) : pb_postNews ? color.new(color.orange, 35) : pb_monday ? color.new(color.yellow, 55) : pb_tgif ? color.new(pb_tgifColor, 35) : dash_bg
 		string _pbStateTxt=pb_guardState + (pb_tgifMade ? " · 20–30%" : "")
 		string _pbSide=pb_thesis == "Bullish" ? "Bull ↑ " : "Bear ↓ "
 		string _pbThesisTxt=not pb_manualThesis ? "—" : pb_drawPrice <= 0 ? _pbSide + "Set draw" : _pbSide + str.tostring(pb_drawPrice, format.mintick) + (pb_drawTouched ? " · Touched" : " · Δ " + str.tostring(math.abs(pb_drawPrice - close), format.mintick))
 		color _pbThesisBg=not pb_manualThesis or pb_drawPrice <= 0 ? dash_bg : pb_drawTouched ? color.new(color.green, 40) : color.new(color.orange, 45)
-		table.cell(dashTbl, 0, 6, "Guard", text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
-		table.cell(dashTbl, 1, 6, _pbStateTxt, text_color=dash_txt, text_size=dash_size, bgcolor=_pbStateBg)
-		table.cell(dashTbl, 0, 7, "Thesis", text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
-		table.cell(dashTbl, 1, 7, _pbThesisTxt, text_color=dash_txt, text_size=dash_size, bgcolor=_pbThesisBg)
-	int _smtRow = 6 + (ENABLE_PLAYBOOK_GUARD ? 2 : 0)
+		table.cell(dashTbl, 0, _nextRow, "Guard", text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		table.cell(dashTbl, 1, _nextRow, _pbStateTxt, text_color=dash_txt, text_size=dash_size, bgcolor=_pbStateBg)
+		table.cell(dashTbl, 0, _nextRow + 1, "Thesis", text_color=dash_txt, text_size=dash_size, bgcolor=dash_bg)
+		table.cell(dashTbl, 1, _nextRow + 1, _pbThesisTxt, text_color=dash_txt, text_size=dash_size, bgcolor=_pbThesisBg)
+		_nextRow += 2
+	int _smtRow = _nextRow
 	if smt_useSym1
 		string _smtV1 = "—"
 		if ENABLE_SMT

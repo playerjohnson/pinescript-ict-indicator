@@ -7,7 +7,7 @@ This file provides development guidance for the Pine Script indicators in this r
 The product is a two-overlay Pine Script v6 suite for TradingView:
 
 - `ict_price_delivery.pine` - imbalances, opening/settlement gaps, FVG residency, HTF candles, selected-HTF FVGs, and gap grading.
-- `ict_liquidity_context.pine` - sessions, liquidity, sweeps, structure, SMT, Weekly Power 3, Economic Calendar, Playbook Guard, PDA, Setup Score, and Dashboard.
+- `ict_liquidity_context.pine` - sessions, liquidity, sweeps, structure, SMT, Market Maker Model Tracker and Candidate Map, Weekly Power 3, Economic Calendar, Playbook Guard, PDA, Setup Score, and Dashboard.
 
 `merged_indicator.pine` is a legacy comparison source. Its compiled form exceeded TradingView's token ceiling and it is no longer the shipping installation target. Do not add new product functionality only to the monolith.
 
@@ -53,8 +53,10 @@ Keep these together in `ict_liquidity_context.pine`:
 - Sweep engine, EQH/EQL, Wick Reversal, and BOS/CHoCH.
 - PDH/PDL, PWH/PWL, and PMH/PML history.
 - SMT, PDA Scanner, Setup Score, heartbeat, and Dashboard.
+- The default-off Market Maker Model Tracker and its mirrored MMBM/MMSM state machines, dashboard row, heartbeat fields, webhooks, and alertconditions.
+- The separate default-off Market Maker Model Map, its manual original-consolidation anchor, and its bounded OC/Stage 1/Stage 2 candidate boxes.
 - Weekly Power 3, Economic Calendar, and the calendar-backed Playbook Guard/manual weekly thesis.
-- Sweep/structure/SMT/context webhooks and alertconditions.
+- Sweep/structure/SMT/MM-model/context webhooks and alertconditions.
 
 Do not move only part of the Hourly Open engine to Delivery. Dashboard gap-bias fallback reads `ho_midPrices`. Setup and Dashboard otherwise have no dependency on Delivery's FVG/NWOG/HTF arrays.
 
@@ -88,7 +90,13 @@ Supported graded families are GAP, FVG/LV, implied/inverse/VI-anchored FVG, NWOG
 - `AlertFlags` are per-bar values; do not make them `var`.
 - Mitigation touch flags in Delivery are also per-bar values; adding `var` latches alerts forever.
 - Resolve pending BOS/CHoCH breaks before ingesting fresh pivots.
-- Daily dealing-range tracking must run when any of Liquidity, PDA Scanner, Setup, or Dashboard needs it.
+- Daily dealing-range tracking must run when any of Liquidity, PDA Scanner, Setup, Dashboard, or Market Maker Model needs it.
+- `ENABLE_MM_MODEL` defaults off. Progression requires Sweeps, Market Structure, and at least one of Session Highs/Lows, Liquidity Levels, or EQH/EQL; `SMT = Required` additionally requires SMT, and `Require Killzone` requires an enabled intraday killzone.
+- The mirrored model states progress only on confirmed bars: eligible external sweep and ultimate raid extreme → matching post-extreme CHoCH → strictly later normal FVG → later selected retrace → later BOS expansion → frozen opposing-liquidity target. Preserve equal/farther phase-1 extreme retests, SMT origin chronology, timeout, opposite-CHoCH, raid-extreme, and out-of-sequence-target invalidation checks.
+- MM targets use a strict no-prior-sweep scan beyond the full confirmed raid path and freeze at arm time. The Phase 1 tracker remains dashboard/alert-only: do not add lines, boxes, labels, or `request.security()` calls.
+- `ENABLE_MM_MAP` defaults off and requires `ENABLE_MM_MODEL`. It may own only three boxes (manual OC, exact tracked-FVG Stage 1 candidate, and one bounded opposing-candle Stage 2 candidate); do not add `request.security()` calls, alerts, webhooks, history arrays, or Setup Score writes. Keep MMBM/MMSM selection and Primary/Nested classification manual, every stage labelled `CANDIDATE`, OC traversal post-shift only, and terminal geometry frozen.
+- MM filters are Touch/CE/Full retrace, SMT Off/Optional/Required, real in-range premium/discount, final-extreme killzone, and timeout. Playbook Guard suppresses only Retrace Ready notifications.
+- Setup Score remains five independent points. MM state must not modify its inputs or `/5` denominator.
 - Dashboard remains read-only and does not draw or signal trades.
 - Playbook Guard safety reads a raw calendar copy before display currency/impact/timezone filtering; missing feed data must remain fail-closed as `CALENDAR UNAVAILABLE`.
 - The manual weekly thesis is informational. Its TGIF projection owns at most one box, resets weekly, and updates rather than recreates that box through Friday.
@@ -103,7 +111,7 @@ Supported graded families are GAP, FVG/LV, implied/inverse/VI-anchored FVG, NWOG
 
 ## Alerts
 
-Delivery owns formation and mitigation alerts. Context owns sweep, structure, SMT, and heartbeat alerts. A complete webhook setup requires one TradingView `Any alert() function call` alert per indicator. Do not recreate the same detector in both scripts, or duplicate events will be emitted.
+Delivery owns formation and mitigation alerts. Context owns sweep, structure, SMT, MMBM/MMSM Shift/Retrace Ready/Target/Invalid, and heartbeat alerts. A complete webhook setup requires one TradingView `Any alert() function call` alert per indicator. Do not recreate the same detector in both scripts, or duplicate events will be emitted.
 
 ## Pine conventions
 
